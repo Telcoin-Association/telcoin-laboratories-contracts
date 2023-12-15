@@ -1,0 +1,33 @@
+{
+  "name": "telcoin-laboratories-contracts",
+  "version": "0.1.0",
+  "description": "Smart contracts regarding Telcoin governance and the Telcoin Association",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx hardhat clean && npx hardhat coverage"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Telcoin-Association/telcoin-laboratories-contracts.git"
+  },
+  "keywords": [
+    "telcoin",
+    "telcoin",
+    "governance",
+    "telcoin",
+    "association",
+    "ethereum",
+    "polygon",
+    "telcoin",
+    "network"
+  ],
+  "author": "Amir M. Shirif",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Telcoin-Association/telcoin-laboratories-contracts/issues"
+  },
+  "homepage": "https://github.com/Telcoin-Association/telcoin-laboratories-contracts#readme",
+  "devDependencies": {
+    "hardhat": "^2.19.2"
+  }
+}
