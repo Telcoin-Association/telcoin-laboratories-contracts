@@ -1,8 +1,8 @@
 # telcoin-laboratories-contracts
 
-![hardhat](https://img.shields.io/badge/hardhat-2.19.2-blue)
+![hardhat](https://img.shields.io/badge/hardhat-2.19.4-blue)
 ![node](https://img.shields.io/badge/node-v18.10.0-brightgreen.svg)
-![solidity](https://img.shields.io/badge/solidity-0.8.22-red)
+![solidity](https://img.shields.io/badge/solidity-0.8.23-red)
 ![OpenZeppelin](https://img.shields.io/badge/OpenZeppelin-^5.0.0-brightgreen.svg)
 ![coverage](https://img.shields.io/badge/coverage->80%25-yellowgreen)
 ![comments](https://img.shields.io/badge/comments->80%25-yellowgreen)

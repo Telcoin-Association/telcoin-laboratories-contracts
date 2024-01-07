@@ -1,6 +1,6 @@
 {
   "name": "telcoin-laboratories-contracts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Smart contracts regarding Telcoin governance and the Telcoin Association",
   "main": "index.js",
   "scripts": {
@@ -28,20 +28,11 @@
   },
   "homepage": "https://github.com/Telcoin-Association/telcoin-laboratories-contracts#readme",
   "devDependencies": {
-    "@nomicfoundation/hardhat-chai-matchers": "^2.0.2",
-    "@nomicfoundation/hardhat-ethers": "^3.0.5",
-    "@nomicfoundation/hardhat-network-helpers": "^1.0.10",
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
-    "@typechain/ethers-v6": "^0.5.1",
-    "@typechain/hardhat": "^9.1.0",
-    "@types/chai": "^4.3.11",
-    "@types/mocha": "^10.0.6",
-    "@types/node": "^20.10.4",
-    "chai": "^4.3.10",
-    "ethers": "^6.9.0",
-    "hardhat": "^2.19.2",
-    "solidity-coverage": "^0.8.5",
-    "typechain": "^8.3.2"
+    "@types/node": "^20.10.5",
+    "dotenv": "^16.3.1",
+    "hardhat": "^2.19.4",
+    "solidity-coverage": "^0.8.5"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.0.1",
