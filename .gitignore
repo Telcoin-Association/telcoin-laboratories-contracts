@@ -350,7 +350,7 @@ MigrationBackup/
 .ionide/
 
 # Node
-package-lock.json
+# package-lock.json
 
 # Visual Stuio Code
 .vscode
