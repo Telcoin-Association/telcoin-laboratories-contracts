@@ -1,8 +1,8 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "../core/BaseGuard.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {BaseGuard, IReality, Enum} from "../core/BaseGuard.sol";
 
 /**
  * @title SafeGuard
@@ -11,8 +11,6 @@ import "../core/BaseGuard.sol";
  * @notice Designed to protect against non-compliant votes
  */
 contract SafeGuard is BaseGuard, Ownable {
-    error PreviouslyVetoed(bytes32 hash);
-
     // Mapping of transaction hash to its veto status
     mapping(bytes32 => bool) public transactionHashes;
     uint256[] public nonces;
@@ -29,9 +27,6 @@ contract SafeGuard is BaseGuard, Ownable {
         bytes32 transactionHash,
         uint256 nonce
     ) public onlyOwner {
-        // Revert if the transaction has already been vetoed
-        if (transactionHashes[transactionHash])
-            revert PreviouslyVetoed(transactionHash);
         // Mark the transaction as vetoed
         transactionHashes[transactionHash] = true;
         // Add the nonce of the transaction to the nonces array
@@ -76,4 +71,6 @@ contract SafeGuard is BaseGuard, Ownable {
 
     // not used
     function checkAfterExecution(bytes32, bool) external view override {}
+
+    fallback() external {}
 }

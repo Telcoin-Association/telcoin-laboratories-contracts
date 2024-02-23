@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-// import "../interfaces/IStakingRewardsFactory.sol";
-import "./StakingRewards.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {StakingRewards} from "./StakingRewards.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title StakingRewardsFactory

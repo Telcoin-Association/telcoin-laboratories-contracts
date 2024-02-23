@@ -349,17 +349,8 @@ MigrationBackup/
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
 
-# Env
-.env
-
-# Hardhat
-node_modules
-coverage
-coverage.json
-typechain
-typechain-types
-cache
-artifacts
+# Node
+package-lock.json
 
 # Visual Stuio Code
 .vscode
@@ -380,3 +371,6 @@ artifacts
 
 # Open-Zeppelin
 .openzeppelin
+
+# Local
+.DS_Store

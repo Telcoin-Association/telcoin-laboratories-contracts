@@ -1,11 +1,11 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.24;
 
 // imports
-import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
-import "../interfaces/IBalancerVault.sol";
-import "../interfaces/IBalancerPool.sol";
-import "../interfaces/ISource.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IBalancerVault, IERC20} from "../interfaces/IBalancerVault.sol";
+import {IBalancerPool} from "../interfaces/IBalancerPool.sol";
+import {ISource} from "../interfaces/ISource.sol";
 
 /**
  * @title BalancerAdaptor

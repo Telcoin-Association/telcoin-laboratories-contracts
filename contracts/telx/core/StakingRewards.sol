@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "../abstract/RewardsDistributionRecipient.sol";
+import {SafeERC20, IERC20, Address} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {RewardsDistributionRecipient, Ownable} from "../abstract/RewardsDistributionRecipient.sol";
 
 /**
  * @title Staking Rewards
@@ -31,7 +31,7 @@ contract StakingRewards is
     // Variables for reward calculations
     uint256 public periodFinish = 0;
     uint256 public rewardRate = 0;
-    uint256 public rewardsDuration = 7 days;
+    uint256 public rewardsDuration = 30 days;
     uint256 public lastUpdateTime;
     uint256 public rewardPerTokenStored;
 
@@ -45,6 +45,8 @@ contract StakingRewards is
     // Balances of the staked tokens
     mapping(address => uint256) private _balances;
 
+    uint256 public constant EQUALIZING_FACTOR = 1e18;
+
     /* ========== CONSTRUCTOR ========== */
 
     /**
@@ -57,11 +59,10 @@ contract StakingRewards is
         address rewardsDistribution_,
         IERC20 rewardsToken_,
         IERC20 stakingToken_
-    ) Ownable(_msgSender()) {
+    ) Ownable(rewardsDistribution_) {
         rewardsToken = rewardsToken_;
         stakingToken = stakingToken_;
         rewardsDistribution = rewardsDistribution_;
-        _transferOwnership(rewardsDistribution_);
     }
 
     /* ========== VIEWS ========== */
@@ -99,6 +100,7 @@ contract StakingRewards is
         if (_totalSupply == 0) {
             return rewardPerTokenStored;
         }
+
         return
             rewardPerTokenStored +
             ((lastTimeRewardApplicable() - lastUpdateTime) *
@@ -117,7 +119,8 @@ contract StakingRewards is
         // Then divide by 1e18 to adjust for decimals and finally add the rewards already allocated to the account
         return
             ((_balances[account] *
-                (rewardPerToken() - userRewardPerTokenPaid[account])) / 1e18) +
+                (rewardPerToken() - userRewardPerTokenPaid[account])) / 1e18) /
+            EQUALIZING_FACTOR +
             rewards[account];
     }
 
@@ -126,7 +129,7 @@ contract StakingRewards is
      * @return The rewards for the reward duration.
      */
     function getRewardForDuration() external view returns (uint256) {
-        return rewardRate * rewardsDuration;
+        return (rewardRate * rewardsDuration) / EQUALIZING_FACTOR;
     }
 
     /* ========== MUTATIVE ========== */
@@ -142,9 +145,9 @@ contract StakingRewards is
         // Check if the staking amount is greater than 0
         require(amount > 0, "Cannot stake 0");
         // Increase the total supply of the staking token by the staked amount
-        _totalSupply += amount;
+        _totalSupply = _totalSupply + amount;
         // Increase the balance of the staker by the staked amount
-        _balances[_msgSender()] += amount;
+        _balances[_msgSender()] = _balances[_msgSender()] + amount;
         // Transfer the staked tokens from the staker to this contract
         stakingToken.safeTransferFrom(_msgSender(), address(this), amount);
         // Emit a Staked event with staker's address and staked amount
@@ -162,9 +165,9 @@ contract StakingRewards is
         // Check if the withdrawal amount is greater than 0
         require(amount > 0, "Cannot withdraw 0");
         // Decrease the total supply of the staking token by the withdrawn amount
-        _totalSupply -= amount;
+        _totalSupply = _totalSupply - amount;
         // Decrease the balance of the withdrawer by the withdrawn amount
-        _balances[_msgSender()] -= amount;
+        _balances[_msgSender()] = _balances[_msgSender()] - amount;
         // Transfer the withdrawn tokens from this contract to the withdrawer
         stakingToken.safeTransfer(_msgSender(), amount);
         // Emit a Withdrawn event with withdrawer's address and withdrawn amount
@@ -201,7 +204,7 @@ contract StakingRewards is
 
     /**
      * @notice Notify the contract about the reward amount for the next period
-     * @dev can only be called by the reward distribution address
+     * @dev It's an overridden function, which can only be called by the reward distribution address
      * @param reward The amount of reward for the next period
      */
     function notifyRewardAmount(
@@ -209,18 +212,20 @@ contract StakingRewards is
     ) external override onlyRewardsDistribution updateReward(address(0)) {
         // If the current block timestamp is after the finish of the rewards period, set the new reward rate
         if (block.timestamp >= periodFinish) {
-            rewardRate = reward / rewardsDuration;
+            rewardRate = (reward * EQUALIZING_FACTOR) / rewardsDuration;
         } else {
             // If we're still within the rewards period, add the leftover rewards to the new reward
             uint256 remaining = periodFinish - block.timestamp;
             uint256 leftover = remaining * rewardRate;
-            rewardRate = (reward + leftover) / rewardsDuration;
+            rewardRate =
+                ((reward * EQUALIZING_FACTOR) + leftover) /
+                rewardsDuration;
         }
         // Check the balance of the rewards token in this contract
         uint balance = rewardsToken.balanceOf(address(this));
         // Make sure that the new reward rate isn't higher than what the contract can currently pay out
         require(
-            rewardRate <= balance / rewardsDuration,
+            rewardRate <= (balance * EQUALIZING_FACTOR) / rewardsDuration,
             "Provided reward too high"
         );
         // Update the last update time and the end of the rewards period

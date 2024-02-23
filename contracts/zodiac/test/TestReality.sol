@@ -1,8 +1,8 @@
 //SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-import "../interfaces/IReality.sol";
-import "../enums/Operation.sol";
+import {IReality} from "../interfaces/IReality.sol";
+import {Enum} from "../enums/Operation.sol";
 
 //TESTING ONLY
 contract TestReality is IReality {

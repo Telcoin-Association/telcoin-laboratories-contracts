@@ -1,8 +1,8 @@
 //SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "../core/BaseGuard.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {BaseGuard, IReality, Enum} from "../core/BaseGuard.sol";
 
 //TESTING ONLY
 contract MockSafeGuard is BaseGuard, Ownable {

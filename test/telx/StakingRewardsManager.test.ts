@@ -249,13 +249,13 @@ describe("StakingRewards and StakingRewardsFactory", () => {
                 await rewardToken.transfer(await stakingRewardsManager.getAddress(), tokenAmount);
                 expect(await rewardToken.balanceOf(await stakingRewardsManager.getAddress())).to.equal(tokenAmount);
                 expect(await rewardToken.balanceOf(user.address)).to.equal(0);
-                await stakingRewardsManager.recoverERC20(await rewardToken.getAddress(), tokenAmount, user.address);
+                await stakingRewardsManager.recoverTokens(await rewardToken.getAddress(), tokenAmount, user.address);
                 expect(await rewardToken.balanceOf(await stakingRewardsManager.getAddress())).to.equal(0);
                 expect(await rewardToken.balanceOf(user.address)).to.equal(tokenAmount);
             });
 
             it("should fail if called by a non-SUPPORT_ROLE account", async function () {
-                await expect(stakingRewardsManager.connect(user).recoverERC20(await stakingRewardsManager.getAddress(), tokenAmount, user.address))
+                await expect(stakingRewardsManager.connect(user).recoverTokens(await stakingRewardsManager.getAddress(), tokenAmount, user.address))
                     .to.be.reverted;
             });
         });

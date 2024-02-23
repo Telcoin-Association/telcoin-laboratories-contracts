@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.24;
 
 // imports
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import "@openzeppelin/contracts/access/Ownable2Step.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
+import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title TelcoinDistributor
@@ -89,6 +89,12 @@ contract TelcoinDistributor is Ownable2Step, Pausable {
         address[] memory destinations,
         uint256[] memory amounts
     ) external onlyCouncilMember whenNotPaused {
+        //require equal length inputs
+        require(
+            destinations.length == amounts.length,
+            "TelcoinDistributor: array lengths do not match"
+        );
+
         // Pushing the proposed transaction to the array
         proposedTransactions.push(
             ProposedTransaction({
@@ -114,7 +120,7 @@ contract TelcoinDistributor is Ownable2Step, Pausable {
      */
     function challengeTransaction(
         uint256 transactionId
-    ) external onlyCouncilMember whenNotPaused {
+    ) external onlyCouncilMember {
         // Makes sure the id exists
         require(
             transactionId < proposedTransactions.length,
@@ -164,14 +170,14 @@ contract TelcoinDistributor is Ownable2Step, Pausable {
             !proposedTransactions[transactionId].executed,
             "TelcoinDistributor: transaction has been previously executed"
         );
+        //markes transaction as executed
+        proposedTransactions[transactionId].executed = true;
         // sends out transaction
         batchTelcoin(
             proposedTransactions[transactionId].totalWithdrawl,
             proposedTransactions[transactionId].destinations,
             proposedTransactions[transactionId].amounts
         );
-        //markes transaction as executed
-        proposedTransactions[transactionId].executed = true;
     }
 
     /**
@@ -208,6 +214,7 @@ contract TelcoinDistributor is Ownable2Step, Pausable {
      * @param newPeriod the updated period
      */
     function setChallengePeriod(uint256 newPeriod) public onlyOwner {
+        require(newPeriod != 0, "TelcoinDistributor: period cannot be zero");
         //update period
         challengePeriod = newPeriod;
         // Emitting an event for new period

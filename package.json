@@ -1,6 +1,6 @@
 {
   "name": "telcoin-laboratories-contracts",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "Smart contracts regarding Telcoin governance and the Telcoin Association",
   "main": "index.js",
   "scripts": {
@@ -12,14 +12,11 @@
   },
   "keywords": [
     "telcoin",
-    "telcoin",
     "governance",
-    "telcoin",
     "association",
     "ethereum",
     "polygon",
-    "telcoin",
-    "network"
+    "telcoin"
   ],
   "author": "Amir M. Shirif",
   "license": "MIT",
@@ -29,9 +26,8 @@
   "homepage": "https://github.com/Telcoin-Association/telcoin-laboratories-contracts#readme",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
-    "@types/node": "^20.10.5",
-    "hardhat": "^2.19.4",
-    "solidity-coverage": "^0.8.5"
+    "hardhat": "^2.20.1",
+    "solidity-docgen": "^0.6.0-beta.36"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.0.1",

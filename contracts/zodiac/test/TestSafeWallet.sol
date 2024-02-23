@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-import "../enums/Operation.sol";
+import {Enum} from "../enums/Operation.sol";
 
 //TESTING ONLY
 contract TestSafeWallet {
