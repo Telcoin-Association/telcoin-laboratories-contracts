@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "./StakingRewardsFactory.sol";
-import "./StakingRewards.sol";
+import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import {StakingRewardsFactory} from "./StakingRewardsFactory.sol";
+import {StakingRewards} from "./StakingRewards.sol";
 
 /**
  * @title StakingRewardsManager
@@ -166,6 +166,10 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     function removeStakingRewardsContract(
         uint256 i
     ) external onlyRole(BUILDER_ROLE) {
+        require(
+            i < stakingContracts.length,
+            "StakingRewardsManager: invalid index"
+        );
         StakingRewards staking = stakingContracts[i];
 
         // un-mark this staking contract as included in stakingContracts
@@ -227,7 +231,7 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     /// @param tokenAddress Address of the ERC20 token contract
     /// @param tokenAmount Amount of tokens to recover
     /// @param to The account to send the recovered tokens to
-    function recoverERC20(
+    function recoverTokens(
         IERC20 tokenAddress,
         uint256 tokenAmount,
         address to
@@ -257,14 +261,14 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     ) external onlyRole(EXECUTOR_ROLE) {
         for (uint i = 0; i < indices.length; i++) {
             // get staking contract and config
-            StakingRewards staking = stakingContracts[i];
+            StakingRewards staking = stakingContracts[indices[i]];
             StakingConfig memory config = stakingConfigs[staking];
 
             // will revert if block.timestamp <= periodFinish
             staking.setRewardsDuration(config.rewardsDuration);
 
             // pull tokens from owner of this contract to fund the staking contract
-            rewardToken.transferFrom(
+            rewardToken.safeTransferFrom(
                 source,
                 address(staking),
                 config.rewardAmount

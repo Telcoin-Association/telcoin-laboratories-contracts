@@ -1,10 +1,10 @@
 //SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.24;
 
 // imports
-import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
-import "../interfaces/IStakingModule.sol";
-import "../interfaces/ISource.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IStakingModule} from "../interfaces/IStakingModule.sol";
+import {ISource} from "../interfaces/ISource.sol";
 
 /**
  * @title StakingModuleAdaptor

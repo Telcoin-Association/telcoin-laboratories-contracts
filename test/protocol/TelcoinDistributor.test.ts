@@ -96,6 +96,14 @@ describe("TelcoinDistributor", () => {
             await expect(telcoinDistributor.connect(proposer).proposeTransaction(totalWithdrawl, destinations, amounts)).to.be.revertedWithCustomError(telcoinDistributor, "EnforcedPause");
         });
 
+        it('should revert if arrays are different lengths', async () => {
+            const totalWithdrawl = 1000;
+            const destinations = [proposer.address, proposer.address];
+            const amounts = [totalWithdrawl];
+
+            await expect(telcoinDistributor.connect(proposer).proposeTransaction(totalWithdrawl, destinations, amounts)).to.be.revertedWith("TelcoinDistributor: array lengths do not match");
+        });
+
         it('should propose a transaction successfully and emit an event', async () => {
             const totalWithdrawl = 1000;
             const destinations = [proposer.address];
@@ -113,11 +121,6 @@ describe("TelcoinDistributor", () => {
 
             await expect(telcoinDistributor.connect(proposer).proposeTransaction(totalWithdrawl, destinations, amounts)).to.emit(telcoinDistributor, "TransactionProposed");
             await advanceTime(50);
-        });
-
-        it('should revert if paused', async () => {
-            await expect(telcoinDistributor.connect(owner).pause());
-            await expect(telcoinDistributor.connect(proposer).challengeTransaction(0)).to.be.revertedWithCustomError(telcoinDistributor, "EnforcedPause");
         });
 
         it('should revert if the caller is not a council member', async () => {

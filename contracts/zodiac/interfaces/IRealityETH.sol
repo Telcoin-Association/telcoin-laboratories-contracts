@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-pragma solidity ^0.8.10;
+pragma solidity ^0.8.0;
 
-import "./IBalanceHolder.sol";
+import {IBalanceHolder} from "./IBalanceHolder.sol";
 
 interface IRealityETH is IBalanceHolder {
     event LogAnswerReveal(

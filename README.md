@@ -1,9 +1,9 @@
 # telcoin-laboratories-contracts
 
-![hardhat](https://img.shields.io/badge/hardhat-2.19.4-blue)
-![node](https://img.shields.io/badge/node-v18.10.0-brightgreen.svg)
-![solidity](https://img.shields.io/badge/solidity-0.8.23-red)
-![OpenZeppelin](https://img.shields.io/badge/OpenZeppelin-^5.0.0-brightgreen.svg)
+![hardhat](https://img.shields.io/badge/hardhat-2.20.1-blue)
+![node](https://img.shields.io/badge/node-v20.11.1-brightgreen.svg)
+![solidity](https://img.shields.io/badge/solidity-0.8.24-red)
+![OpenZeppelin](https://img.shields.io/badge/OpenZeppelin-^5.0.1-brightgreen.svg)
 ![coverage](https://img.shields.io/badge/coverage->80%25-yellowgreen)
 ![comments](https://img.shields.io/badge/comments->80%25-yellowgreen)
 
@@ -30,11 +30,11 @@ npx hardhat test
 
 Currently all contracts are unaudited and likely to change. Final versions will be updated here.
 
-`Test` contracts are dummy contracts created for testing and are outside the scope of the audit. `Mock` contracts are created to be tested in place of the real contract. This is done for testing ease. In some cases using a slightly altered version is significantly simpler to test. This means some contracts show as no line coverage. Code coveratige metrics only apply to contracts that have been created by Telcoin.
+`Test` contracts are dummy contracts created for testing and are outside the scope of the audit. `Mock` contracts are created to be tested in place of the real contract. This is done for testing ease. In some cases using a slightly altered version is significantly simpler to test. This means some contracts show as no line coverage. Code coverage metrics only apply to contracts that have been created by Telcoin.
 
 ### Version
 
-`nvm` use will switch to node `v18.10.0`
+`nvm` use will switch to node `v20.11.1`
 
 ```txt
                                      ttttttttttttttt,                           

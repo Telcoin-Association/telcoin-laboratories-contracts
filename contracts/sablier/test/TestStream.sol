@@ -1,11 +1,11 @@
 //SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "../interfaces/IPRBProxy.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IPRBProxy} from "../interfaces/IPRBProxy.sol";
 
 //TESTING ONLY
-contract TestStream is IPRBProxy {
+contract TestProxy is IPRBProxy {
     IERC20 public _token;
     uint256 public lastBlock;
 

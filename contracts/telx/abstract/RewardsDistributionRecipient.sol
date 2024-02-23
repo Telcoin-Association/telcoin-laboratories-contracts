@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title Rewards Distribution Recipient
@@ -42,6 +42,11 @@ abstract contract RewardsDistributionRecipient is Ownable {
     function setRewardsDistribution(
         address rewardsDistribution_
     ) external onlyOwner {
+        //cannot be zero address
+        require(
+            rewardsDistribution_ != address(0),
+            "TelcoinDistributor: cannot set to zero address"
+        );
         rewardsDistribution = rewardsDistribution_;
         emit RewardsDistributionUpdated(rewardsDistribution);
     }

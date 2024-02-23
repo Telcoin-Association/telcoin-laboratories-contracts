@@ -1,7 +1,7 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "../enums/Operation.sol";
+import {Enum} from "../enums/Operation.sol";
 
 interface IReality {
     /// Returns the transaction hash for a given transaction
