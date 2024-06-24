@@ -1,5 +1,6 @@
 # telcoin-laboratories-contracts
 
+[![NPM Package](https://img.shields.io/badge/npm-1.0.0-blue)](https://www.npmjs.com/package/telcoin-laboratories-contracts)
 ![hardhat](https://img.shields.io/badge/hardhat-2.20.1-blue)
 ![node](https://img.shields.io/badge/node-v20.11.1-brightgreen.svg)
 ![solidity](https://img.shields.io/badge/solidity-0.8.24-red)
@@ -8,6 +9,14 @@
 ![comments](https://img.shields.io/badge/comments->80%25-yellowgreen)
 
 **Telcoin Labs** is the blockchain research and development arm of Telcoin. Labs researches, develops, and documents Telcoin Association infrastructure, including Telcoin Network, an evm-compatible, proof-of-stake blockchain network secured by mobile network operators, TELx, a DeFi network, application layer systems, and the Telcoin Platform governance system.
+
+## Installation
+
+## Hardhat (npm)
+
+```shell
+> npm install telcoin-laboratories-contracts
+```
 
 ## Running Tests
 
