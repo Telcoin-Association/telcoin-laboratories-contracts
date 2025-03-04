@@ -120,7 +120,8 @@ contract SimplePlugin is DeactivationTimelock, IPlugin, Ownable {
     function supportsInterface(
         bytes4 interfaceId
     ) public view virtual override returns (bool) {
-        return interfaceId == type(IPlugin).interfaceId;
+        return interfaceId == type(IPlugin).interfaceId 
+          || interfaceId == this.supportsInterface.selector;
     }
 
     /************************************************
