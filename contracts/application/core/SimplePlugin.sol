@@ -76,11 +76,30 @@ contract SimplePlugin is DeactivationTimelock, IPlugin, Ownable {
         address account,
         bytes calldata
     ) external view override returns (uint256) {
+        if (deactivated()) {
+            return 0;
+        }
         return _claimable[account].latest();
     }
 
     /// @return total amount claimable by all accounts
     function totalClaimable() external view override returns (uint256) {
+        if (deactivated()) {
+            return 0;
+        }
+        return _totalOwed;
+    }
+
+    /// @return amount owed to account, regardless of deactivation status
+    function owed(
+        address account, 
+        bytes calldata
+    ) external view returns (uint256) {
+        return _claimable[account].latest();
+    }
+
+    /// @return total amount owed, regardless of deactivation status
+    function totalOwed() external view returns (uint256) {
         return _totalOwed;
     }
 
@@ -101,7 +120,8 @@ contract SimplePlugin is DeactivationTimelock, IPlugin, Ownable {
     function supportsInterface(
         bytes4 interfaceId
     ) public view virtual override returns (bool) {
-        return interfaceId == type(IPlugin).interfaceId;
+        return interfaceId == type(IPlugin).interfaceId 
+          || interfaceId == this.supportsInterface.selector;
     }
 
     /************************************************
