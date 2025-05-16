@@ -125,7 +125,9 @@ contract CouncilMember is
         address previousApproval = _getApproved(tokenId);
         super.transferFrom(from, to, tokenId);
         _approve(previousApproval, tokenId, address(0), false);
-        TELCOIN.safeTransfer(from, balances[tokenId]);
+
+        uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
+        TELCOIN.safeTransfer(from, balances[balanceIndex]);
     }
 
     /************************************************
@@ -227,22 +229,24 @@ contract CouncilMember is
         _burn(tokenId);
         uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
 
+        // Transfer balance to recipient
         TELCOIN.safeTransfer(recipient, balances[balanceIndex]);
 
-        balances[balanceIndex] = balances[balances.length - 1];
-        balances[balances.length - 1] = 0;
+        // Swap-remove pattern to keep `balances` compact
+        uint256 lastIndex = balances.length - 1;
 
-        tokenIdToBalanceIndex[
-            balanceIndexToTokenId[balances.length - 1]
-        ] = balanceIndex;
-        tokenIdToBalanceIndex[tokenId] = type(uint256).max;
-
-        balanceIndexToTokenId[balanceIndex] = balanceIndexToTokenId[
-            balances.length - 1
-        ];
-        balanceIndexToTokenId[balances.length - 1] = 0;
+        if (balanceIndex != lastIndex) {
+            balances[balanceIndex] = balances[lastIndex];
+            uint256 movedTokenId = balanceIndexToTokenId[lastIndex];
+            tokenIdToBalanceIndex[movedTokenId] = balanceIndex;
+            balanceIndexToTokenId[balanceIndex] = movedTokenId;
+        }
 
         balances.pop();
+
+        // Clean up stale data
+        delete tokenIdToBalanceIndex[tokenId];
+        delete balanceIndexToTokenId[lastIndex];
     }
 
     /**
