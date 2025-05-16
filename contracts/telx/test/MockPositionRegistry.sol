@@ -12,4 +12,10 @@ contract MockPositionRegistry is IPositionRegistry {
         int24,
         int128
     ) external pure override {}
+
+    function getAllActivePositions()
+        external
+        view
+        returns (Position[] memory)
+    {}
 }

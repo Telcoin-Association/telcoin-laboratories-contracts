@@ -18,15 +18,6 @@ import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
 contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    /// @notice Struct to represent a tracked LP position
-    struct Position {
-        address provider;
-        PoolId poolId;
-        int24 tickLower;
-        int24 tickUpper;
-        uint128 liquidity;
-    }
-
     /// @notice Emitted when a position is added or its liquidity is increased
     event PositionUpdated(
         bytes32 indexed positionId,
@@ -116,6 +107,76 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /**
+     * @notice Returns the voting weight (in TEL) for a position at a given sqrtPriceX96
+     * @dev Assumes TEL is always token0 for simplicity — adjust logic if needed
+     * @param positionId The position identifier
+     * @param sqrtPriceX96 The current sqrt price (Q96)
+     */
+    function getVotingWeightInTEL(
+        bytes32 positionId,
+        uint160 sqrtPriceX96
+    ) external view returns (uint256) {
+        Position storage pos = positions[positionId];
+        require(pos.liquidity > 0, "Invalid position");
+        uint160 sqrtRatioAX96 = TickMath.getSqrtPriceAtTick(pos.tickLower);
+        uint160 sqrtRatioBX96 = TickMath.getSqrtPriceAtTick(pos.tickUpper);
+        (uint256 amount0, uint256 amount1) = getAmountsForLiquidity(
+            sqrtPriceX96,
+            sqrtRatioAX96,
+            sqrtRatioBX96,
+            pos.liquidity
+        );
+        // Assume TEL is always token0 for simplicity — adjust logic if needed
+        // Get tick-based price: price = (sqrtPriceX96^2 / 2^192)
+        uint256 priceX96 = (uint256(sqrtPriceX96) * uint256(sqrtPriceX96)) >>
+            96;
+        // Convert amount1 to TEL using tick-based rate
+        uint256 amount1InTEL = (amount1 * (1e18)) / priceX96;
+        return amount0 + amount1InTEL;
+    }
+
+    /**
+     * @notice Computes the amounts of token0 and token1 for given liquidity and prices
+     * @dev Used for Uniswap V3/V4 style liquidity math
+     */
+    function getAmountsForLiquidity(
+        uint160 sqrtPriceX96,
+        uint160 sqrtPriceAX96,
+        uint160 sqrtPriceBX96,
+        uint128 liquidity
+    ) internal pure returns (uint256 amount0, uint256 amount1) {
+        if (sqrtPriceAX96 > sqrtPriceBX96)
+            (sqrtPriceAX96, sqrtPriceBX96) = (sqrtPriceBX96, sqrtPriceAX96);
+        if (sqrtPriceX96 <= sqrtPriceAX96) {
+            // All liquidity in token0
+            amount0 = FullMath.mulDiv(
+                uint256(liquidity) << FixedPoint96.RESOLUTION,
+                sqrtPriceBX96 - sqrtPriceAX96,
+                uint256(sqrtPriceAX96) * sqrtPriceBX96
+            );
+        } else if (sqrtPriceX96 < sqrtPriceBX96) {
+            // Liquidity is split between token0 and token1
+            amount0 = FullMath.mulDiv(
+                uint256(liquidity) << FixedPoint96.RESOLUTION,
+                sqrtPriceBX96 - sqrtPriceX96,
+                uint256(sqrtPriceX96) * sqrtPriceBX96
+            );
+            amount1 = FullMath.mulDiv(
+                liquidity,
+                sqrtPriceX96 - sqrtPriceAX96,
+                FixedPoint96.Q96
+            );
+        } else {
+            // All liquidity in token1
+            amount1 = FullMath.mulDiv(
+                liquidity,
+                sqrtPriceBX96 - sqrtPriceAX96,
+                FixedPoint96.Q96
+            );
+        }
+    }
+
+    /**
      * @notice Called by Uniswap hook to add or remove tracked liquidity
      * @param provider LP address
      * @param poolId Target pool
@@ -190,7 +251,12 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     /**
      * @notice Returns all currently active LP positions
      */
-    function getAllActivePositions() external view returns (Position[] memory) {
+    function getAllActivePositions()
+        external
+        view
+        override
+        returns (Position[] memory)
+    {
         uint256 length = activePositionIds.length;
         Position[] memory result = new Position[](length);
 
@@ -264,71 +330,3 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         token.safeTransfer(destination, amount);
     }
 }
-
-// function getVotingWeightInTEL(
-//     bytes32 positionId,
-//     // int24 currentTick,
-//     uint160 sqrtPriceX96
-// ) external view returns (uint256) {
-//     Position storage pos = positions[positionId];
-//     require(pos.liquidity > 0, "Invalid position");
-
-//     uint160 sqrtRatioAX96 = TickMath.getSqrtPriceAtTick(pos.tickLower);
-//     uint160 sqrtRatioBX96 = TickMath.getSqrtPriceAtTick(pos.tickUpper);
-
-//     (uint256 amount0, uint256 amount1) = getAmountsForLiquidity(
-//         sqrtPriceX96,
-//         sqrtRatioAX96,
-//         sqrtRatioBX96,
-//         pos.liquidity
-//     );
-
-//     // Assume TEL is always token0 for simplicity — adjust logic if needed
-//     // Get tick-based price: price = (sqrtPriceX96^2 / 2^192)
-//     uint256 priceX96 = (uint256(sqrtPriceX96) * uint256(sqrtPriceX96)) >>
-//         96;
-
-//     // Convert amount1 to TEL using tick-based rate
-//     uint256 amount1InTEL = (amount1 * (1e18)) / priceX96;
-
-//     return amount0 + amount1InTEL;
-// }
-
-// function getAmountsForLiquidity(
-//     uint160 sqrtPriceX96,
-//     uint160 sqrtPriceAX96,
-//     uint160 sqrtPriceBX96,
-//     uint128 liquidity
-// ) internal pure returns (uint256 amount0, uint256 amount1) {
-//     if (sqrtPriceAX96 > sqrtPriceBX96)
-//         (sqrtPriceAX96, sqrtPriceBX96) = (sqrtPriceBX96, sqrtPriceAX96);
-
-//     if (sqrtPriceX96 <= sqrtPriceAX96) {
-//         // All liquidity in token0
-//         amount0 = FullMath.mulDiv(
-//             uint256(liquidity) << FixedPoint96.RESOLUTION,
-//             sqrtPriceBX96 - sqrtPriceAX96,
-//             uint256(sqrtPriceAX96) * sqrtPriceBX96
-//         );
-//     } else if (sqrtPriceX96 < sqrtPriceBX96) {
-//         // Liquidity is split between token0 and token1
-//         amount0 = FullMath.mulDiv(
-//             uint256(liquidity) << FixedPoint96.RESOLUTION,
-//             sqrtPriceBX96 - sqrtPriceX96,
-//             uint256(sqrtPriceX96) * sqrtPriceBX96
-//         );
-
-//         amount1 = FullMath.mulDiv(
-//             liquidity,
-//             sqrtPriceX96 - sqrtPriceAX96,
-//             FixedPoint96.Q96
-//         );
-//     } else {
-//         // All liquidity in token1
-//         amount1 = FullMath.mulDiv(
-//             liquidity,
-//             sqrtPriceBX96 - sqrtPriceAX96,
-//             FixedPoint96.Q96
-//         );
-//     }
-// }
