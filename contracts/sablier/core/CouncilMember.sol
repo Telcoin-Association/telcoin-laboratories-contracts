@@ -86,9 +86,8 @@ contract CouncilMember is
      * @notice Allows council members to claim their allocated amounts of TELCOIN
      * @dev Checks if the caller is the owner of the provided tokenId and if the requested amount is available.
      * @param tokenId The NFT index associated with a council member.
-     * @param amount Amount of TELCOIN the council member wants to withdraw.
      */
-    function claim(uint256 tokenId, uint256 amount) external {
+    function claim(uint256 tokenId) external {
         // Ensure the function caller is the owner of the token (council member) they're trying to claim for
         require(
             _msgSender() == ownerOf(tokenId),
@@ -97,16 +96,15 @@ contract CouncilMember is
         // Retrieve and distribute any pending TELCOIN for all council members
         _retrieve();
 
-        // Ensure the requested amount doesn't exceed the balance of the council member
-        require(
-            amount <= balances[tokenId],
-            "CouncilMember: withdrawal amount is higher than balance"
-        );
-
         uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
+        uint256 amount = balances[balanceIndex];
+
+        // Ensure the user has something to claim
+        require(amount > 0, "CouncilMember: no TELCOIN to claim");
 
         // Deduct the claimed amount from the token's balance
-        balances[balanceIndex] -= amount;
+        balances[balanceIndex] = 0;
+
         // Safely transfer the claimed amount of TELCOIN to the function caller
         TELCOIN.safeTransfer(_msgSender(), amount);
     }
