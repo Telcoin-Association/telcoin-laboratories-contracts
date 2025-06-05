@@ -126,12 +126,15 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             sqrtRatioBX96,
             pos.liquidity
         );
-        // Assume TEL is always token0 for simplicity — adjust logic if needed
-        // Get tick-based price: price = (sqrtPriceX96^2 / 2^192)
-        uint256 priceX96 = (uint256(sqrtPriceX96) * uint256(sqrtPriceX96)) >>
-            96;
-        // Convert amount1 to TEL using tick-based rate
-        uint256 amount1InTEL = (amount1 * (1e18)) / priceX96;
+
+        uint256 priceX96 = FullMath.mulDiv(
+            uint256(sqrtPriceX96),
+            uint256(sqrtPriceX96),
+            2 ** 96
+        );
+
+        uint256 amount1InTEL = FullMath.mulDiv(amount1, 1 << 96, priceX96);
+
         return amount0 + amount1InTEL;
     }
 
