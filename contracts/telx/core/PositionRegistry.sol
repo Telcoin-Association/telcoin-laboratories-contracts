@@ -244,6 +244,15 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
                     tickLower,
                     tickUpper
                 );
+            } else {
+                emit PositionUpdated(
+                    positionId,
+                    provider,
+                    poolId,
+                    tickLower,
+                    tickUpper,
+                    pos.liquidity
+                );
             }
         }
     }
