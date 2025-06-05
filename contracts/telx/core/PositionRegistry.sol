@@ -204,15 +204,15 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         );
         Position storage pos = positions[positionId];
 
-        if (pos.liquidity == 0 && liquidityDelta > 0) {
-            pos.provider = provider;
-            pos.poolId = poolId;
-            pos.tickLower = tickLower;
-            pos.tickUpper = tickUpper;
-            activePositionIds.push(positionId);
-        }
-
         if (liquidityDelta > 0) {
+            if (pos.liquidity == 0) {
+                pos.provider = provider;
+                pos.poolId = poolId;
+                pos.tickLower = tickLower;
+                pos.tickUpper = tickUpper;
+                activePositionIds.push(positionId);
+            }
+
             pos.liquidity += uint128(liquidityDelta);
             emit PositionUpdated(
                 positionId,
