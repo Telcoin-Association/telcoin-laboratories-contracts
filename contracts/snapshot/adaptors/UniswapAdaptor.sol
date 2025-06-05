@@ -59,9 +59,13 @@ contract UniswapAdaptor is ISource, IERC165 {
                 liquidity
             );
 
-            uint256 priceX96 = (uint256(sqrtPriceX96) *
-                uint256(sqrtPriceX96)) >> 96;
-            uint256 amount1InTEL = (amount1 * 1e18) / priceX96;
+            uint256 priceX96 = FullMath.mulDiv(
+                uint256(sqrtPriceX96),
+                uint256(sqrtPriceX96),
+                2 ** 96
+            );
+
+            uint256 amount1InTEL = FullMath.mulDiv(amount1, 1 << 96, priceX96);
 
             totalVotingWeight += amount0 + amount1InTEL;
         }
