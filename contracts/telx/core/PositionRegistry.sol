@@ -53,16 +53,16 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     mapping(bytes32 => Position) public positions;
     bytes32[] public activePositionIds;
 
-    IERC20 public immutable rewardToken;
+    IERC20 public immutable telcoin;
     uint256 public lastRewardBlock;
 
     /**
      * @notice Initializes the registry with a reward token
-     * @param _rewardToken The ERC20 token used to pay LP rewards
+     * @param _telcoin The ERC20 token used to pay LP rewards
      */
-    constructor(IERC20 _rewardToken) {
+    constructor(IERC20 _telcoin) {
         _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
-        rewardToken = _rewardToken;
+        telcoin = _telcoin;
         lastRewardBlock = block.number;
     }
 
@@ -133,9 +133,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             2 ** 96
         );
 
-        uint256 amount1InTEL = FullMath.mulDiv(amount1, 1 << 96, priceX96);
+        uint256 telEquivalent;
+        if (address(telcoin) == IERC20(pos.token0)) {
+            telEquivalent =
+                amount0 +
+                FullMath.mulDiv(amount1, 1 << 96, priceX96);
+        } else {
+            telEquivalent =
+                amount1 +
+                FullMath.mulDiv(amount1, 1 << 96, priceX96);
+        }
 
-        return amount0 + amount1InTEL;
+        return telEquivalent;
     }
 
     /**
@@ -313,7 +322,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             "PositionRegistry: Total amount mismatch"
         );
 
-        rewardToken.safeTransferFrom(_msgSender(), address(this), total);
+        telcoin.safeTransferFrom(_msgSender(), address(this), total);
         lastRewardBlock = rewardBlock;
         emit UpdateBlockStamp(rewardBlock, total);
     }
@@ -326,7 +335,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         require(reward > 0, "PositionRegistry: No claimable rewards");
 
         unclaimedRewards[_msgSender()] = 0;
-        rewardToken.safeTransfer(_msgSender(), reward);
+        telcoin.safeTransfer(_msgSender(), reward);
 
         emit RewardsClaimed(_msgSender(), reward);
     }
