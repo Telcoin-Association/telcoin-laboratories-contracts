@@ -30,6 +30,7 @@ describe("MockTELxIncentiveHook", function () {
         hook = await Hook.deploy(await poolManager.getAddress(), await registry.getAddress());
 
         await registry.grantRole(await registry.UNI_HOOK_ROLE(), deployer.address);
+        await registry.grantRole(await registry.SUPPORT_ROLE(), deployer.address);
         await registry.grantRole(await registry.UNI_HOOK_ROLE(), await hook.getAddress());
     });
 
@@ -109,8 +110,9 @@ describe("MockTELxIncentiveHook", function () {
                 [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks]
             )
         );
-        const positionId = await registry.getPositionId(user.address, poolId, params.tickLower, params.tickUpper);
 
+        const positionId = await registry.getPositionId(user.address, poolId, params.tickLower, params.tickUpper);
+        await registry.updateTelPosition(poolId, 1);
 
         await poolManager.callBeforeAddLiquidity(
             await hook.getAddress(),
@@ -146,6 +148,7 @@ describe("MockTELxIncentiveHook", function () {
         const liquidityDelta = 5000;
 
         const positionId = await registry.getPositionId(user.address, poolId, tickLower, tickUpper);
+        await registry.updateTelPosition(poolId, 1);
 
         await poolManager.callBeforeAddLiquidity(
             await hook.getAddress(),

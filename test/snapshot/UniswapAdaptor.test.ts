@@ -33,6 +33,7 @@ describe("UniswapAdaptor", function () {
         const Registry = await ethers.getContractFactory("PositionRegistry");
         registry = await Registry.deploy(await rewardToken.getAddress());
 
+        await registry.grantRole(await registry.SUPPORT_ROLE(), deployer.address);
         await registry.grantRole(await registry.UNI_HOOK_ROLE(), deployer.address);
 
         const PoolManager = await ethers.getContractFactory("TestPoolManager");
@@ -44,6 +45,15 @@ describe("UniswapAdaptor", function () {
         const Adaptor = await ethers.getContractFactory("MockUniswapAdaptor");
         adaptor = await Adaptor.deploy(await registry.getAddress(), await poolManager.getAddress());
 
+        const poolKey = {
+            currency0: ethers.ZeroAddress,
+            currency1: ethers.ZeroAddress,
+            fee: 3000,
+            tickSpacing: 60,
+            hooks: ethers.ZeroAddress,
+        };
+
+        await registry.updateTelPosition(dummyPoolId, 1);
         // Seed the registry with an active position
         await registry.addOrUpdatePosition(
             user.address,
