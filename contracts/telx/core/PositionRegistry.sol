@@ -51,6 +51,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     mapping(address => uint256) public unclaimedRewards;
     mapping(bytes32 => Position) public positions;
+    mapping(PoolId => uint8) public telcoinPosition;
     bytes32[] public activePositionIds;
 
     IERC20 public immutable telcoin;
@@ -133,18 +134,15 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             2 ** 96
         );
 
-        uint256 telEquivalent;
-        if (address(telcoin) == IERC20(pos.token0)) {
-            telEquivalent =
-                amount0 +
-                FullMath.mulDiv(amount1, 1 << 96, priceX96);
-        } else {
-            telEquivalent =
-                amount1 +
-                FullMath.mulDiv(amount1, 1 << 96, priceX96);
+        uint8 index = telcoinPosition[pos.poolId];
+
+        if (index == 1) {
+            return amount0 + FullMath.mulDiv(amount1, 1 << 96, priceX96);
+        } else if (index == 2) {
+            return amount1 + FullMath.mulDiv(amount1, 1 << 96, priceX96);
         }
 
-        return telEquivalent;
+        return 0;
     }
 
     /**
@@ -188,6 +186,17 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         }
     }
 
+    function updateTelPosition(
+        PoolId poolId,
+        uint8 location
+    ) external onlyRole(SUPPORT_ROLE) {
+        require(
+            location >= 0 && location < 2,
+            "PositionRegistry: Invalid location"
+        );
+        telcoinPosition[poolId] = location;
+    }
+
     /**
      * @notice Called by Uniswap hook to add or remove tracked liquidity
      * @param provider LP address
@@ -206,6 +215,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         require(
             liquidityDelta != type(int128).min,
             "PositionRegistry: Invalid liquidity delta"
+        );
+
+        require(
+            telcoinPosition[poolId] != 0,
+            "PositionRegistry: Invalid PoolId"
         );
 
         bytes32 positionId = getPositionId(
