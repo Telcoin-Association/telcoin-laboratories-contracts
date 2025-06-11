@@ -41,13 +41,14 @@ describe("PositionRegistry", function () {
         const UNI_HOOK_ROLE = await registry.UNI_HOOK_ROLE();
         await registry.grantRole(SUPPORT_ROLE, deployer.address);
         await registry.grantRole(UNI_HOOK_ROLE, deployer.address);
+        await registry.updateTelPosition(poolId, 1);
     });
 
     describe("Values", () => {
         it("Static Values", async () => {
             // Check block and token immutables
-            expect(await registry.lastRewardBlock()).to.equal((await ethers.provider.getBlock("latest"))!.number - 2);
-            expect(await registry.rewardToken()).to.equal(await rewardToken.getAddress());
+            expect(await registry.lastRewardBlock()).to.equal((await ethers.provider.getBlock("latest"))!.number - 3);
+            expect(await registry.telcoin()).to.equal(await rewardToken.getAddress());
 
             // Check role hash constants
             const UNI_HOOK_ROLE = await registry.UNI_HOOK_ROLE();
@@ -114,22 +115,22 @@ describe("PositionRegistry", function () {
     });
 
     describe("addRewards", () => {
-        // it("should allow adding rewards to multiple providers", async () => {
-        //     const providers = [lp1.address, lp2.address];
-        //     const amounts = [100, 250];
-        //     const total = 350;
-        //     const rewardBlock = (await ethers.provider.getBlock("latest"))!.number + 1;
+        it("should allow adding rewards to multiple providers", async () => {
+            const providers = [lp1.address, lp2.address];
+            const amounts = [100, 250];
+            const total = 350;
+            const rewardBlock = (await ethers.provider.getBlock("latest"))!.number + 1;
 
-        //     await rewardToken.approve(await registry.getAddress(), total);
+            await rewardToken.approve(await registry.getAddress(), total);
 
-        //     await expect(registry.addRewards(providers, amounts, total, rewardBlock))
-        //         .to.emit(registry, "UpdateBlockStamp")
-        //         .withArgs(rewardBlock, total);
+            await expect(registry.addRewards(providers, amounts, total, rewardBlock))
+                .to.emit(registry, "UpdateBlockStamp")
+                .withArgs(rewardBlock, total);
 
-        //     expect(await registry.getUnclaimedRewards(lp1.address)).to.equal(100);
-        //     expect(await registry.getUnclaimedRewards(lp2.address)).to.equal(250);
-        //     expect(await rewardToken.balanceOf(await registry.getAddress())).to.equal(total);
-        // });
+            expect(await registry.getUnclaimedRewards(lp1.address)).to.equal(100);
+            expect(await registry.getUnclaimedRewards(lp2.address)).to.equal(250);
+            expect(await rewardToken.balanceOf(await registry.getAddress())).to.equal(total);
+        });
         it("should allow adding rewards to multiple providers", async () => {
             const providers = [lp1.address, lp2.address];
             const amounts = [100, 250];

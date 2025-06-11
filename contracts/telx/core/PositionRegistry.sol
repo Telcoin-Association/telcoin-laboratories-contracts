@@ -51,18 +51,19 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     mapping(address => uint256) public unclaimedRewards;
     mapping(bytes32 => Position) public positions;
+    mapping(PoolId => uint8) public telcoinPosition;
     bytes32[] public activePositionIds;
 
-    IERC20 public immutable rewardToken;
+    IERC20 public immutable telcoin;
     uint256 public lastRewardBlock;
 
     /**
      * @notice Initializes the registry with a reward token
-     * @param _rewardToken The ERC20 token used to pay LP rewards
+     * @param _telcoin The ERC20 token used to pay LP rewards
      */
-    constructor(IERC20 _rewardToken) {
+    constructor(IERC20 _telcoin) {
         _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
-        rewardToken = _rewardToken;
+        telcoin = _telcoin;
         lastRewardBlock = block.number;
     }
 
@@ -133,9 +134,15 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             2 ** 96
         );
 
-        uint256 amount1InTEL = FullMath.mulDiv(amount1, 1 << 96, priceX96);
+        uint8 index = telcoinPosition[pos.poolId];
 
-        return amount0 + amount1InTEL;
+        if (index == 1) {
+            return amount0 + FullMath.mulDiv(amount1, 1 << 96, priceX96);
+        } else if (index == 2) {
+            return amount1 + FullMath.mulDiv(amount1, 1 << 96, priceX96);
+        }
+
+        return 0;
     }
 
     /**
@@ -179,6 +186,17 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         }
     }
 
+    function updateTelPosition(
+        PoolId poolId,
+        uint8 location
+    ) external onlyRole(SUPPORT_ROLE) {
+        require(
+            location >= 0 && location < 2,
+            "PositionRegistry: Invalid location"
+        );
+        telcoinPosition[poolId] = location;
+    }
+
     /**
      * @notice Called by Uniswap hook to add or remove tracked liquidity
      * @param provider LP address
@@ -197,6 +215,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         require(
             liquidityDelta != type(int128).min,
             "PositionRegistry: Invalid liquidity delta"
+        );
+
+        require(
+            telcoinPosition[poolId] != 0,
+            "PositionRegistry: Invalid PoolId"
         );
 
         bytes32 positionId = getPositionId(
@@ -313,7 +336,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             "PositionRegistry: Total amount mismatch"
         );
 
-        rewardToken.safeTransferFrom(_msgSender(), address(this), total);
+        telcoin.safeTransferFrom(_msgSender(), address(this), total);
         lastRewardBlock = rewardBlock;
         emit UpdateBlockStamp(rewardBlock, total);
     }
@@ -326,7 +349,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         require(reward > 0, "PositionRegistry: No claimable rewards");
 
         unclaimedRewards[_msgSender()] = 0;
-        rewardToken.safeTransfer(_msgSender(), reward);
+        telcoin.safeTransfer(_msgSender(), reward);
 
         emit RewardsClaimed(_msgSender(), reward);
     }
