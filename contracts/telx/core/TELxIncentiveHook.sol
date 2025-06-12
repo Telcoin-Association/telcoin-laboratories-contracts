@@ -136,17 +136,19 @@ contract TELxIncentiveHook is BaseHook {
         BalanceDelta delta,
         bytes calldata
     ) internal override returns (bytes4, int128) {
-        // Extract current tick directly from pool storage using StateLibrary
-        (, int24 tick, , ) = StateLibrary.getSlot0(poolManager, key.toId());
+        if (registry.validPool(key.toId())) {
+            // Extract current tick directly from pool storage using StateLibrary
+            (, int24 tick, , ) = StateLibrary.getSlot0(poolManager, key.toId());
 
-        // Emit swap event with tick so off-chain logic can check LP range activity
-        emit SwapOccurredWithTick(
-            key.toId(),
-            sender,
-            delta.amount0(),
-            delta.amount1(),
-            tick
-        );
+            // Emit swap event with tick so off-chain logic can check LP range activity
+            emit SwapOccurredWithTick(
+                key.toId(),
+                sender,
+                delta.amount0(),
+                delta.amount1(),
+                tick
+            );
+        }
 
         return (BaseHook.afterSwap.selector, 0);
     }

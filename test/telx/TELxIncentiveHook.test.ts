@@ -13,6 +13,7 @@ describe("MockTELxIncentiveHook", function () {
     let poolManager: TestPoolManager;
     let registry: PositionRegistry;
     let hook: MockTELxIncentiveHook;
+    const poolId = ethers.ZeroHash;
 
     beforeEach(async () => {
         [deployer, user] = await ethers.getSigners();
@@ -47,6 +48,47 @@ describe("MockTELxIncentiveHook", function () {
         expect(perms.afterRemoveLiquidity).to.be.false;
     });
 
+    it("should not emit SwapOccurredWithTick on _afterSwap", async () => {
+        const poolKey = {
+            currency0: ethers.ZeroAddress,
+            currency1: ethers.ZeroAddress,
+            fee: 3000,
+            tickSpacing: 60,
+            hooks: await hook.getAddress(),
+        };
+
+        const swapParams = {
+            zeroForOne: true,
+            amountSpecified: 1000,
+            sqrtPriceLimitX96: 0,
+        };
+
+        const abiCoder = new ethers.AbiCoder();
+        const poolId = ethers.keccak256(
+            abiCoder.encode(
+                ["address", "address", "uint24", "int24", "address"],
+                [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks]
+            )
+        );
+        await poolManager.setSlot0(0, 123, 0, 0); // tick = 123
+
+        const amount0 = 1000n;
+        const amount1 = -950n;
+
+        // Pack amount0 and amount1 into a single int256
+        const delta = (amount0 << 128n) | (amount1 & ((1n << 128n) - 1n));
+        await expect(
+            poolManager.callAfterSwap(
+                await hook.getAddress(),
+                user.address,
+                poolKey,
+                swapParams,
+                delta,
+                "0x"
+            )
+        );
+    });
+
     it("should emit SwapOccurredWithTick on _afterSwap", async () => {
         const poolKey = {
             currency0: ethers.ZeroAddress,
@@ -76,7 +118,7 @@ describe("MockTELxIncentiveHook", function () {
 
         // Pack amount0 and amount1 into a single int256
         const delta = (amount0 << 128n) | (amount1 & ((1n << 128n) - 1n));
-
+        await registry.updateTelPosition(poolId, 1);
         await expect(
             poolManager.callAfterSwap(
                 await hook.getAddress(),

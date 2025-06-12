@@ -11,7 +11,6 @@ import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/type
 import {IPositionRegistry} from "../interfaces/IPositionRegistry.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
-// TESTING ONLY
 contract MockTELxIncentiveHook is BaseHook {
     using PoolIdLibrary for PoolKey;
 
@@ -100,15 +99,17 @@ contract MockTELxIncentiveHook is BaseHook {
         BalanceDelta delta,
         bytes calldata
     ) internal override returns (bytes4, int128) {
-        (, int24 tick, , ) = StateLibrary.getSlot0(poolManager, key.toId());
+        if (registry.validPool(key.toId())) {
+            (, int24 tick, , ) = StateLibrary.getSlot0(poolManager, key.toId());
 
-        emit SwapOccurredWithTick(
-            key.toId(),
-            sender,
-            delta.amount0(),
-            delta.amount1(),
-            tick
-        );
+            emit SwapOccurredWithTick(
+                key.toId(),
+                sender,
+                delta.amount0(),
+                delta.amount1(),
+                tick
+            );
+        }
 
         return (BaseHook.afterSwap.selector, 0);
     }

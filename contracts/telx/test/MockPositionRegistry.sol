@@ -18,4 +18,8 @@ contract MockPositionRegistry is IPositionRegistry {
         view
         returns (Position[] memory)
     {}
+
+    function validPool(PoolId) external view override returns (bool) {
+        return true;
+    }
 }
