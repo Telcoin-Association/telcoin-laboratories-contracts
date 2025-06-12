@@ -22,4 +22,6 @@ interface IPositionRegistry {
         int24 tickUpper,
         int128 liquidityDelta
     ) external;
+
+    function validPool(PoolId id) external view returns (bool);
 }

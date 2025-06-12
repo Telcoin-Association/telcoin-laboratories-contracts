@@ -67,6 +67,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         lastRewardBlock = block.number;
     }
 
+    function validPool(PoolId id) external view override returns (bool) {
+        return telcoinPosition[id] != 0;
+    }
+
     /**
      * @notice Computes a unique identifier for a position
      */
@@ -212,14 +216,14 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         int24 tickUpper,
         int128 liquidityDelta
     ) external onlyRole(UNI_HOOK_ROLE) {
+        // Does not fail on invalid poolId, just skips update
+        if (telcoinPosition[poolId] == 0) {
+            return;
+        }
+
         require(
             liquidityDelta != type(int128).min,
             "PositionRegistry: Invalid liquidity delta"
-        );
-
-        require(
-            telcoinPosition[poolId] != 0,
-            "PositionRegistry: Invalid PoolId"
         );
 
         bytes32 positionId = getPositionId(
