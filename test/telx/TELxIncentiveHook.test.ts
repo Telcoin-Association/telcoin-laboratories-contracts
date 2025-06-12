@@ -211,9 +211,9 @@ describe("MockTELxIncentiveHook", function () {
                 user.address,
                 poolKey,
                 {
-                    tickLower,
-                    tickUpper,
-                    liquidityDelta,
+                    tickLower: tickLower,
+                    tickUpper: tickUpper,
+                    liquidityDelta: -liquidityDelta,
                     salt: "0x0000000000000000000000000000000000000000000000000000000000000000",
                 },
                 "0x"

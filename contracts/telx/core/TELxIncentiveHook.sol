@@ -115,7 +115,7 @@ contract TELxIncentiveHook is BaseHook {
             key.toId(),
             params.tickLower,
             params.tickUpper,
-            -int128(params.liquidityDelta)
+            int128(params.liquidityDelta)
         );
 
         return BaseHook.beforeRemoveLiquidity.selector;
