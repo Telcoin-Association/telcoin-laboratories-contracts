@@ -9,6 +9,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {IPositionRegistry} from "../interfaces/IPositionRegistry.sol";
+import {IMsgSender} from "../interfaces/IMsgSender.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 contract MockTELxIncentiveHook is BaseHook {
@@ -65,7 +66,7 @@ contract MockTELxIncentiveHook is BaseHook {
         bytes calldata
     ) internal override returns (bytes4) {
         registry.addOrUpdatePosition(
-            sender,
+            _resolveUser(sender),
             key.toId(),
             params.tickLower,
             params.tickUpper,
@@ -82,7 +83,7 @@ contract MockTELxIncentiveHook is BaseHook {
         bytes calldata
     ) internal override returns (bytes4) {
         registry.addOrUpdatePosition(
-            sender,
+            _resolveUser(sender),
             key.toId(),
             params.tickLower,
             params.tickUpper,
@@ -104,7 +105,7 @@ contract MockTELxIncentiveHook is BaseHook {
 
             emit SwapOccurredWithTick(
                 key.toId(),
-                sender,
+                _resolveUser(sender),
                 delta.amount0(),
                 delta.amount1(),
                 tick
@@ -112,5 +113,16 @@ contract MockTELxIncentiveHook is BaseHook {
         }
 
         return (BaseHook.afterSwap.selector, 0);
+    }
+
+    function _resolveUser(address sender) internal view returns (address) {
+        if (registry.activeRouters(sender)) {
+            try IMsgSender(sender).msgSender() returns (address user) {
+                return user;
+            } catch {
+                revert("Trusted router must implement msgSender()");
+            }
+        }
+        return sender;
     }
 }
