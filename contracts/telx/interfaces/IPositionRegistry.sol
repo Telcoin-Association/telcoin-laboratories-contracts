@@ -23,5 +23,7 @@ interface IPositionRegistry {
         int128 liquidityDelta
     ) external;
 
+    function activeRouters(address router) external view returns (bool);
+
     function validPool(PoolId id) external view returns (bool);
 }

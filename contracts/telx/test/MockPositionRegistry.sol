@@ -19,7 +19,11 @@ contract MockPositionRegistry is IPositionRegistry {
         returns (Position[] memory)
     {}
 
-    function validPool(PoolId) external view override returns (bool) {
+    function activeRouters(address) external pure override returns (bool) {
+        return true;
+    }
+
+    function validPool(PoolId) external pure override returns (bool) {
         return true;
     }
 }

@@ -46,12 +46,19 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     /// @notice Emitted when a new reward distribution round is initialized
     event UpdateBlockStamp(uint256 rewardBlock, uint256 totalRewardAmount);
 
+    /// @notice Emitted when a router's trust status is updated.
+    event RouterRegistryUpdated(address indexed router, bool listed);
+
+    /// @notice Emitted when the TEL token position is updated for a pool.
+    event TelPositionUpdated(PoolId indexed poolId, uint8 location);
+
     bytes32 public constant UNI_HOOK_ROLE = keccak256("UNI_HOOK_ROLE");
     bytes32 public constant SUPPORT_ROLE = keccak256("SUPPORT_ROLE");
 
     mapping(address => uint256) public unclaimedRewards;
     mapping(bytes32 => Position) public positions;
     mapping(PoolId => uint8) public telcoinPosition;
+    mapping(address => bool) public routers;
     bytes32[] public activePositionIds;
 
     IERC20 public immutable telcoin;
@@ -67,8 +74,26 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         lastRewardBlock = block.number;
     }
 
+    /**
+     * @notice Returns whether a given PoolId is associated with a TEL position.
+     * @dev A PoolId is considered valid if a TEL token exists at index 1 or 2.
+     * @param id The unique identifier for the Uniswap V4 pool.
+     * @return True if the pool has a non-zero TEL token position mapping.
+     */
     function validPool(PoolId id) external view override returns (bool) {
         return telcoinPosition[id] != 0;
+    }
+
+    /**
+     * @notice Returns whether a router is in the trusted routers list.
+     * @dev Used to determine if a router can be queried for the actual msg.sender.
+     * @param router The address of the router to query.
+     * @return True if the router is listed as trusted.
+     */
+    function activeRouters(
+        address router
+    ) external view override returns (bool) {
+        return routers[router];
     }
 
     /**
@@ -191,15 +216,37 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         }
     }
 
+    /**
+     * @notice Adds or removes a router from the trusted routers registry.
+     * @dev Only callable by an address with SUPPORT_ROLE.
+     * @param router The router address to update.
+     * @param listed Whether the router should be marked as trusted.
+     */
+    function updateRegistry(
+        address router,
+        bool listed
+    ) external onlyRole(SUPPORT_ROLE) {
+        routers[router] = listed;
+        emit RouterRegistryUpdated(router, listed);
+    }
+
+    /**
+     * @notice Updates the stored index of TEL in a specific Uniswap V4 pool.
+     * @dev Only callable by an address with SUPPORT_ROLE.
+     *      Index must be 1 (token0) or 2 (token1).
+     * @param poolId The unique identifier for the pool.
+     * @param location The token index for TEL.
+     */
     function updateTelPosition(
         PoolId poolId,
         uint8 location
     ) external onlyRole(SUPPORT_ROLE) {
         require(
-            location >= 0 && location < 2,
+            location >= 0 && location <= 2,
             "PositionRegistry: Invalid location"
         );
         telcoinPosition[poolId] = location;
+        emit TelPositionUpdated(poolId, location);
     }
 
     /**
