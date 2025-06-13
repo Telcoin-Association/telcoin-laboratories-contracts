@@ -29,6 +29,21 @@ contract MockUniswapAdaptor is ISource, IERC165 {
             interfaceId == type(IERC165).interfaceId;
     }
 
+    function testGetAmountsForLiquidity(
+        uint160 sqrtPriceX96,
+        uint160 sqrtPriceAX96,
+        uint160 sqrtPriceBX96,
+        uint128 liquidity
+    ) external pure returns (uint256 amount0, uint256 amount1) {
+        return
+            _getAmountsForLiquidity(
+                sqrtPriceX96,
+                sqrtPriceAX96,
+                sqrtPriceBX96,
+                liquidity
+            );
+    }
+
     function balanceOf(
         address voter
     ) external view override returns (uint256 totalVotingWeight) {
@@ -60,27 +75,16 @@ contract MockUniswapAdaptor is ISource, IERC165 {
                 liquidity
             );
 
-            uint256 priceX96 = (uint256(sqrtPriceX96) *
-                uint256(sqrtPriceX96)) >> 96;
-            uint256 amount1InTEL = (amount1 * 1e18) / priceX96;
+            uint256 priceX96 = FullMath.mulDiv(
+                uint256(sqrtPriceX96),
+                uint256(sqrtPriceX96),
+                2 ** 96
+            );
+
+            uint256 amount1InTEL = FullMath.mulDiv(amount1, 1 << 96, priceX96);
 
             totalVotingWeight += amount0 + amount1InTEL;
         }
-    }
-
-    function testGetAmountsForLiquidity(
-        uint160 sqrtPriceX96,
-        uint160 sqrtPriceAX96,
-        uint160 sqrtPriceBX96,
-        uint128 liquidity
-    ) external pure returns (uint256 amount0, uint256 amount1) {
-        return
-            _getAmountsForLiquidity(
-                sqrtPriceX96,
-                sqrtPriceAX96,
-                sqrtPriceBX96,
-                liquidity
-            );
     }
 
     function _getAmountsForLiquidity(
@@ -93,17 +97,19 @@ contract MockUniswapAdaptor is ISource, IERC165 {
             (sqrtPriceAX96, sqrtPriceBX96) = (sqrtPriceBX96, sqrtPriceAX96);
 
         if (sqrtPriceX96 <= sqrtPriceAX96) {
-            amount0 = FullMath.mulDiv(
-                uint256(liquidity) << FixedPoint96.RESOLUTION,
+            uint256 intermediate = FullMath.mulDiv(
+                liquidity,
                 sqrtPriceBX96 - sqrtPriceAX96,
-                uint256(sqrtPriceAX96) * sqrtPriceBX96
+                sqrtPriceBX96
             );
+            amount0 = FullMath.mulDiv(intermediate, 1 << 96, sqrtPriceAX96);
         } else if (sqrtPriceX96 < sqrtPriceBX96) {
-            amount0 = FullMath.mulDiv(
-                uint256(liquidity) << FixedPoint96.RESOLUTION,
-                sqrtPriceBX96 - sqrtPriceX96,
-                uint256(sqrtPriceX96) * sqrtPriceBX96
+            uint256 intermediate = FullMath.mulDiv(
+                liquidity,
+                sqrtPriceBX96 - sqrtPriceAX96,
+                sqrtPriceBX96
             );
+            amount0 = FullMath.mulDiv(intermediate, 1 << 96, sqrtPriceAX96);
             amount1 = FullMath.mulDiv(
                 liquidity,
                 sqrtPriceX96 - sqrtPriceAX96,
