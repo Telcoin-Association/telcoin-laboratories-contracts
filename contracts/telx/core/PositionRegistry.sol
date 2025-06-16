@@ -5,9 +5,11 @@ import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IPositionRegistry, PoolId} from "../interfaces/IPositionRegistry.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 /**
  * @title Position Registry
@@ -55,6 +57,9 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     bytes32 public constant UNI_HOOK_ROLE = keccak256("UNI_HOOK_ROLE");
     bytes32 public constant SUPPORT_ROLE = keccak256("SUPPORT_ROLE");
 
+    uint256 constant MAX_POSITIONS = 100;
+
+    mapping(address => bytes32[]) internal providerPositions;
     mapping(address => uint256) public unclaimedRewards;
     mapping(bytes32 => Position) public positions;
     mapping(PoolId => uint8) public telcoinPosition;
@@ -63,14 +68,16 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     IERC20 public immutable telcoin;
     uint256 public lastRewardBlock;
+    IPoolManager public immutable poolManager;
 
     /**
      * @notice Initializes the registry with a reward token
      * @param _telcoin The ERC20 token used to pay LP rewards
      */
-    constructor(IERC20 _telcoin) {
+    constructor(IERC20 _telcoin, IPoolManager _poolManager) {
         _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
         telcoin = _telcoin;
+        poolManager = _poolManager;
         lastRewardBlock = block.number;
     }
 
@@ -118,6 +125,12 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         return positions[positionId];
     }
 
+    function getPositionsByStaker(
+        address staker
+    ) external view returns (bytes32[] memory) {
+        return providerPositions[staker];
+    }
+
     /**
      * @notice Lists all active tracked position IDs
      */
@@ -127,6 +140,25 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         returns (bytes32[] memory)
     {
         return activePositionIds;
+    }
+
+    /**
+     * @notice Returns all currently active LP positions
+     */
+    function getAllActivePositions()
+        external
+        view
+        override
+        returns (Position[] memory)
+    {
+        uint256 length = activePositionIds.length;
+        Position[] memory result = new Position[](length);
+
+        for (uint256 i = 0; i < length; i++) {
+            result[i] = positions[activePositionIds[i]];
+        }
+
+        return result;
     }
 
     /**
@@ -140,14 +172,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @notice Returns the voting weight (in TEL) for a position at a given sqrtPriceX96
      * @dev Assumes TEL is always token0 for simplicity — adjust logic if needed
      * @param positionId The position identifier
-     * @param sqrtPriceX96 The current sqrt price (Q96)
      */
-    function getVotingWeightInTEL(
-        bytes32 positionId,
-        uint160 sqrtPriceX96
+    function computeVotingWeight(
+        bytes32 positionId
     ) external view returns (uint256) {
         Position storage pos = positions[positionId];
-        require(pos.liquidity > 0, "Invalid position");
+
+        PoolId poolId = positions[positionId].poolId;
+        (uint160 sqrtPriceX96, , , ) = StateLibrary.getSlot0(
+            poolManager,
+            poolId
+        );
+
         uint160 sqrtRatioAX96 = TickMath.getSqrtPriceAtTick(pos.tickLower);
         uint160 sqrtRatioBX96 = TickMath.getSqrtPriceAtTick(pos.tickUpper);
         (uint256 amount0, uint256 amount1) = getAmountsForLiquidity(
@@ -186,6 +222,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     ) internal pure returns (uint256 amount0, uint256 amount1) {
         if (sqrtPriceAX96 > sqrtPriceBX96)
             (sqrtPriceAX96, sqrtPriceBX96) = (sqrtPriceBX96, sqrtPriceAX96);
+
         if (sqrtPriceX96 <= sqrtPriceAX96) {
             uint256 intermediate = FullMath.mulDiv(
                 liquidity,
@@ -207,7 +244,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
                 FixedPoint96.Q96
             );
         } else {
-            // All liquidity in token1
             amount1 = FullMath.mulDiv(
                 liquidity,
                 sqrtPriceBX96 - sqrtPriceAX96,
@@ -269,6 +305,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             return;
         }
 
+        //Does not allow excessive positions
+        if (providerPositions[provider].length >= MAX_POSITIONS) {
+            return;
+        }
+
         require(
             liquidityDelta != type(int128).min,
             "PositionRegistry: Invalid liquidity delta"
@@ -289,6 +330,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
                 pos.tickLower = tickLower;
                 pos.tickUpper = tickUpper;
                 activePositionIds.push(positionId);
+                providerPositions[provider].push(positionId);
             }
 
             pos.liquidity += uint128(liquidityDelta);
@@ -314,6 +356,15 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
                         activePositionIds.pop();
                         break;
                     }
+
+                    bytes32[] storage list = providerPositions[provider];
+                    for (uint256 j = 0; j < list.length; j++) {
+                        if (list[j] == positionId) {
+                            list[j] = list[list.length - 1];
+                            list.pop();
+                            break;
+                        }
+                    }
                 }
                 emit PositionRemoved(
                     positionId,
@@ -333,25 +384,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
                 );
             }
         }
-    }
-
-    /**
-     * @notice Returns all currently active LP positions
-     */
-    function getAllActivePositions()
-        external
-        view
-        override
-        returns (Position[] memory)
-    {
-        uint256 length = activePositionIds.length;
-        Position[] memory result = new Position[](length);
-
-        for (uint256 i = 0; i < length; i++) {
-            result[i] = positions[activePositionIds[i]];
-        }
-
-        return result;
     }
 
     /**

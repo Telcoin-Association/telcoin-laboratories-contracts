@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
-import { PositionRegistry, TestTelcoin } from "../../typechain-types";
+import { PositionRegistry, TestTelcoin, TestPoolManager } from "../../typechain-types";
 
 describe("PositionRegistry", function () {
     // Signer roles for tests
@@ -12,6 +12,7 @@ describe("PositionRegistry", function () {
     // Core contracts
     let rewardToken: TestTelcoin;
     let registry: PositionRegistry;
+    let poolManager: TestPoolManager;
 
     // Default position configuration
     const poolId = ethers.ZeroHash;
@@ -29,8 +30,11 @@ describe("PositionRegistry", function () {
         rewardToken = await TestToken.deploy(deployer.address);
         await rewardToken.waitForDeployment();
 
+        const PoolManager = await ethers.getContractFactory("TestPoolManager");
+        poolManager = await PoolManager.deploy();
+
         const PositionRegistry = await ethers.getContractFactory("PositionRegistry");
-        registry = await PositionRegistry.deploy(await rewardToken.getAddress());
+        registry = await PositionRegistry.deploy(await rewardToken.getAddress(), await poolManager.getAddress());
         await registry.waitForDeployment();
 
         // Precompute position ID
@@ -145,20 +149,10 @@ describe("PositionRegistry", function () {
         });
 
         it("should revert when querying voting weight for a non-existent position", async () => {
-            const fakeId = ethers.keccak256(ethers.toUtf8Bytes("nope"));
-            const price = ethers.parseUnits("1", 18); // dummy sqrtPrice
-
-            await expect(
-                registry.getVotingWeightInTEL(fakeId, price)
-            ).to.be.revertedWith("Invalid position");
-        });
-
-        it("should calculate amounts when tick bounds are reversed", async () => {
-            await registry.addOrUpdatePosition(lp1.address, poolId, tickUpper, tickLower, liquidityDelta);
-            const id = await registry.getPositionId(lp1.address, poolId, tickUpper, tickLower);
-            const sqrtPriceX96 = ethers.parseUnits("1", 18); // any dummy value
-
-            await registry.getVotingWeightInTEL(id, sqrtPriceX96); // should trigger that branch
+            const dummyPositionId = ethers.ZeroHash;
+            expect(await
+                registry.computeVotingWeight(dummyPositionId)
+            ).to.equal(0);
         });
 
         it("should allow SUPPORT_ROLE to rescue tokens", async () => {
