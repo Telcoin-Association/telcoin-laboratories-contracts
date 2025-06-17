@@ -233,10 +233,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         } else if (sqrtPriceX96 < sqrtPriceBX96) {
             uint256 intermediate = FullMath.mulDiv(
                 liquidity,
-                sqrtPriceBX96 - sqrtPriceAX96,
+                sqrtPriceBX96 - sqrtPriceX96,
                 sqrtPriceBX96
             );
-            amount0 = FullMath.mulDiv(intermediate, 1 << 96, sqrtPriceAX96);
+            amount0 = FullMath.mulDiv(intermediate, 1 << 96, sqrtPriceX96);
 
             amount1 = FullMath.mulDiv(
                 liquidity,
