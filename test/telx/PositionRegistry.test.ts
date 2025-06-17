@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
-import { PositionRegistry, TestTelcoin } from "../../typechain-types";
+import { PositionRegistry, TestTelcoin, TestPoolManager } from "../../typechain-types";
 
 describe("PositionRegistry", function () {
     // Signer roles for tests
@@ -12,6 +12,7 @@ describe("PositionRegistry", function () {
     // Core contracts
     let rewardToken: TestTelcoin;
     let registry: PositionRegistry;
+    let poolManager: TestPoolManager;
 
     // Default position configuration
     const poolId = ethers.ZeroHash;
@@ -29,8 +30,11 @@ describe("PositionRegistry", function () {
         rewardToken = await TestToken.deploy(deployer.address);
         await rewardToken.waitForDeployment();
 
+        const PoolManager = await ethers.getContractFactory("TestPoolManager");
+        poolManager = await PoolManager.deploy();
+
         const PositionRegistry = await ethers.getContractFactory("PositionRegistry");
-        registry = await PositionRegistry.deploy(await rewardToken.getAddress());
+        registry = await PositionRegistry.deploy(await rewardToken.getAddress(), await poolManager.getAddress());
         await registry.waitForDeployment();
 
         // Precompute position ID
@@ -68,6 +72,37 @@ describe("PositionRegistry", function () {
             expect(intermediatePosition.tickLower).to.equal(tickLower);
             expect(intermediatePosition.tickUpper).to.equal(tickUpper);
             expect(intermediatePosition.liquidity).to.equal(liquidityDelta);
+        });
+
+        it("should return true for a valid TEL pool", async () => {
+            expect(await registry.validPool(poolId)).to.equal(true);
+        });
+
+        it("should return false for an untracked TEL pool", async () => {
+            const fakePool = ethers.keccak256(ethers.toUtf8Bytes("fake"));
+            expect(await registry.validPool(fakePool)).to.equal(false);
+        });
+
+        it("should return true for active routers", async () => {
+            await registry.updateRegistry(lp1.address, true);
+            expect(await registry.activeRouters(lp1.address)).to.equal(true);
+        });
+
+        it("should return false for unknown routers", async () => {
+            expect(await registry.activeRouters(lp2.address)).to.equal(false);
+        });
+
+        it("should update TEL position and emit event", async () => {
+            const newPool = ethers.keccak256(ethers.toUtf8Bytes("new"));
+            await expect(registry.updateTelPosition(newPool, 1))
+                .to.emit(registry, "TelPositionUpdated")
+                .withArgs(newPool, 1);
+        });
+
+        it("should revert on invalid TEL index", async () => {
+            await expect(
+                registry.updateTelPosition(poolId, 3)
+            ).to.be.revertedWith("PositionRegistry: Invalid location");
         });
     });
 
@@ -111,6 +146,21 @@ describe("PositionRegistry", function () {
             expect(await registry.getPosition(positionId)).to.be.reverted;
             const allIds = await registry.getAllActivePositionIds();
             expect(allIds).to.not.include(positionId);
+        });
+
+        it("should revert when querying voting weight for a non-existent position", async () => {
+            const dummyPositionId = ethers.ZeroHash;
+            expect(await
+                registry.computeVotingWeight(dummyPositionId)
+            ).to.equal(0);
+        });
+
+        it("should allow SUPPORT_ROLE to rescue tokens", async () => {
+            await rewardToken.transfer(await registry.getAddress(), 1000);
+            const before = await rewardToken.balanceOf(lp1.address);
+            await registry.erc20Rescue(rewardToken.getAddress(), lp1.address, 1000);
+            const after = await rewardToken.balanceOf(lp1.address);
+            expect(after - before).to.equal(1000);
         });
     });
 

@@ -21,11 +21,11 @@ describe("MockTELxIncentiveHook", function () {
         const Token = await ethers.getContractFactory("TestToken", deployer);
         const rewardToken = await Token.deploy(deployer.address);
 
-        const Registry = await ethers.getContractFactory("PositionRegistry", deployer);
-        registry = await Registry.deploy(await rewardToken.getAddress());
-
         const PoolManager = await ethers.getContractFactory("TestPoolManager", deployer);
         poolManager = await PoolManager.deploy();
+
+        const Registry = await ethers.getContractFactory("PositionRegistry", deployer);
+        registry = await Registry.deploy(await rewardToken.getAddress(), await poolManager.getAddress());
 
         const Hook = await ethers.getContractFactory("MockTELxIncentiveHook", deployer);
         hook = await Hook.deploy(await poolManager.getAddress(), await registry.getAddress());
@@ -223,5 +223,44 @@ describe("MockTELxIncentiveHook", function () {
         const position = await registry.getPosition(positionId);
         expect(position.provider).to.equal(ethers.ZeroAddress);
         expect(position.liquidity).to.equal(0);
+    });
+
+    it("should skip _afterSwap if pool is not TEL-associated", async () => {
+        const poolKey = {
+            currency0: ethers.ZeroAddress,
+            currency1: ethers.ZeroAddress,
+            fee: 3000,
+            tickSpacing: 60,
+            hooks: await hook.getAddress(),
+        };
+
+        const swapParams = {
+            zeroForOne: true,
+            amountSpecified: 1000,
+            sqrtPriceLimitX96: 0,
+        };
+
+        const abiCoder = new ethers.AbiCoder();
+        const poolId = ethers.keccak256(
+            abiCoder.encode(
+                ["address", "address", "uint24", "int24", "address"],
+                [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks]
+            )
+        );
+
+        const amount0 = 1000n;
+        const amount1 = -900n;
+        const delta = (amount0 << 128n) | (amount1 & ((1n << 128n) - 1n));
+
+        await expect(
+            poolManager.callAfterSwap(
+                await hook.getAddress(),
+                user.address,
+                poolKey,
+                swapParams,
+                delta,
+                "0x"
+            )
+        ).to.not.emit(hook, "SwapOccurredWithTick");
     });
 });
