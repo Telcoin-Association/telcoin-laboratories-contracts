@@ -177,6 +177,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         bytes32 positionId
     ) external view returns (uint256) {
         Position storage pos = positions[positionId];
+        if (pos.liquidity == 0) return 0;
 
         PoolId poolId = positions[positionId].poolId;
         (uint160 sqrtPriceX96, , , ) = StateLibrary.getSlot0(
@@ -184,12 +185,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             poolId
         );
 
-        uint160 sqrtRatioAX96 = TickMath.getSqrtPriceAtTick(pos.tickLower);
-        uint160 sqrtRatioBX96 = TickMath.getSqrtPriceAtTick(pos.tickUpper);
         (uint256 amount0, uint256 amount1) = getAmountsForLiquidity(
             sqrtPriceX96,
-            sqrtRatioAX96,
-            sqrtRatioBX96,
+            TickMath.getSqrtPriceAtTick(pos.tickLower),
+            TickMath.getSqrtPriceAtTick(pos.tickUpper),
             pos.liquidity
         );
 
@@ -202,9 +201,9 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         uint8 index = telcoinPosition[pos.poolId];
 
         if (index == 1) {
-            return amount0 + FullMath.mulDiv(amount1, 1 << 96, priceX96);
+            return amount0 + FullMath.mulDiv(amount1, 2 ** 96, priceX96);
         } else if (index == 2) {
-            return amount1 + FullMath.mulDiv(amount1, 1 << 96, priceX96);
+            return amount1 + FullMath.mulDiv(amount0, priceX96, 2 ** 96);
         }
 
         return 0;
