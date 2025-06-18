@@ -318,12 +318,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         Position storage pos = positions[positionId];
 
         if (liquidityDelta > 0) {
-            //Does not allow excessive positions
-            if (providerPositions[provider].length >= MAX_POSITIONS) {
-                return;
-            }
-
             if (pos.liquidity == 0) {
+                //Does not allow excessive positions
+                if (providerPositions[provider].length >= MAX_POSITIONS) {
+                    return;
+                }
                 pos.provider = provider;
                 pos.poolId = poolId;
                 pos.tickLower = tickLower;
