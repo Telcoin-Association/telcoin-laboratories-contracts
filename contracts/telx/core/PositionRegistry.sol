@@ -304,11 +304,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             return;
         }
 
-        //Does not allow excessive positions
-        if (providerPositions[provider].length >= MAX_POSITIONS) {
-            return;
-        }
-
         require(
             liquidityDelta != type(int128).min,
             "PositionRegistry: Invalid liquidity delta"
@@ -323,6 +318,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         Position storage pos = positions[positionId];
 
         if (liquidityDelta > 0) {
+            //Does not allow excessive positions
+            if (providerPositions[provider].length >= MAX_POSITIONS) {
+                return;
+            }
+
             if (pos.liquidity == 0) {
                 pos.provider = provider;
                 pos.poolId = poolId;
