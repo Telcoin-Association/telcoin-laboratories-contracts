@@ -354,16 +354,17 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
                         activePositionIds.pop();
                         break;
                     }
+                }
 
-                    bytes32[] storage list = providerPositions[provider];
-                    for (uint256 j = 0; j < list.length; j++) {
-                        if (list[j] == positionId) {
-                            list[j] = list[list.length - 1];
-                            list.pop();
-                            break;
-                        }
+                bytes32[] storage list = providerPositions[provider];
+                for (uint256 j = 0; j < list.length; j++) {
+                    if (list[j] == positionId) {
+                        list[j] = list[list.length - 1];
+                        list.pop();
+                        break;
                     }
                 }
+
                 emit PositionRemoved(
                     positionId,
                     provider,
