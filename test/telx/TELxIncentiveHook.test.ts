@@ -25,7 +25,7 @@ describe("MockTELxIncentiveHook", function () {
         poolManager = await PoolManager.deploy();
 
         const Registry = await ethers.getContractFactory("PositionRegistry", deployer);
-        registry = await Registry.deploy(await rewardToken.getAddress(), await poolManager.getAddress());
+        registry = await Registry.deploy(await rewardToken.getAddress(), await poolManager.getAddress(), await poolManager.getAddress());
 
         const Hook = await ethers.getContractFactory("MockTELxIncentiveHook", deployer);
         hook = await Hook.deploy(await poolManager.getAddress(), await registry.getAddress());

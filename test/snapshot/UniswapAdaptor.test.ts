@@ -35,7 +35,7 @@ describe("UniswapAdaptor", function () {
 
 
         const Registry = await ethers.getContractFactory("PositionRegistry");
-        registry = await Registry.deploy(await rewardToken.getAddress(), await poolManager.getAddress());
+        registry = await Registry.deploy(await rewardToken.getAddress(), await poolManager.getAddress(), await poolManager.getAddress());
         await registry.grantRole(await registry.SUPPORT_ROLE(), deployer.address);
         await registry.grantRole(await registry.UNI_HOOK_ROLE(), deployer.address);
 
