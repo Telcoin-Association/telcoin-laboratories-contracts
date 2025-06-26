@@ -34,7 +34,7 @@ describe("PositionRegistry", function () {
         poolManager = await PoolManager.deploy();
 
         const PositionRegistry = await ethers.getContractFactory("PositionRegistry");
-        registry = await PositionRegistry.deploy(await rewardToken.getAddress(), await poolManager.getAddress());
+        registry = await PositionRegistry.deploy(await rewardToken.getAddress(), await poolManager.getAddress(), await poolManager.getAddress());
         await registry.waitForDeployment();
 
         // Precompute position ID

@@ -10,6 +10,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import {IPositionManager, PoolKey, PositionInfo} from "../interfaces/IPositionManager.sol";
 
 /**
  * @title Position Registry
@@ -56,6 +57,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     bytes32 public constant UNI_HOOK_ROLE = keccak256("UNI_HOOK_ROLE");
     bytes32 public constant SUPPORT_ROLE = keccak256("SUPPORT_ROLE");
+    bytes32 public constant SUBSCIBER_ROLE = keccak256("SUBSCIBER_ROLE");
 
     uint256 constant MAX_POSITIONS = 100;
 
@@ -69,15 +71,21 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     IERC20 public immutable telcoin;
     uint256 public lastRewardBlock;
     IPoolManager public immutable poolManager;
+    IPositionManager public immutable positionManager;
 
     /**
      * @notice Initializes the registry with a reward token
      * @param _telcoin The ERC20 token used to pay LP rewards
      */
-    constructor(IERC20 _telcoin, IPoolManager _poolManager) {
+    constructor(
+        IERC20 _telcoin,
+        IPoolManager _poolManager,
+        IPositionManager _positionManager
+    ) {
         _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
         telcoin = _telcoin;
         poolManager = _poolManager;
+        positionManager = _positionManager;
         lastRewardBlock = block.number;
     }
 
@@ -319,61 +327,36 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         if (liquidityDelta > 0) {
             if (pos.liquidity == 0) {
-                //Does not allow excessive positions
-                if (providerPositions[provider].length >= MAX_POSITIONS) {
-                    return;
-                }
-                pos.provider = provider;
-                pos.poolId = poolId;
-                pos.tickLower = tickLower;
-                pos.tickUpper = tickUpper;
-                activePositionIds.push(positionId);
-                providerPositions[provider].push(positionId);
+                _addNewPosition(
+                    provider,
+                    poolId,
+                    tickLower,
+                    tickUpper,
+                    positionId
+                );
             }
-
-            pos.liquidity += uint128(liquidityDelta);
-            emit PositionUpdated(
+            _updatePositionLiquidity(
                 positionId,
                 provider,
                 poolId,
                 tickLower,
                 tickUpper,
-                pos.liquidity
+                uint128(liquidityDelta)
             );
         } else {
             uint128 delta = uint128(-liquidityDelta);
             pos.liquidity -= delta;
 
             if (pos.liquidity == 0) {
-                delete positions[positionId];
-                for (uint256 i = 0; i < activePositionIds.length; i++) {
-                    if (activePositionIds[i] == positionId) {
-                        activePositionIds[i] = activePositionIds[
-                            activePositionIds.length - 1
-                        ];
-                        activePositionIds.pop();
-                        break;
-                    }
-                }
-
-                bytes32[] storage list = providerPositions[provider];
-                for (uint256 j = 0; j < list.length; j++) {
-                    if (list[j] == positionId) {
-                        list[j] = list[list.length - 1];
-                        list.pop();
-                        break;
-                    }
-                }
-
-                emit PositionRemoved(
-                    positionId,
+                _removePosition(
                     provider,
+                    positionId,
                     poolId,
                     tickLower,
                     tickUpper
                 );
             } else {
-                emit PositionUpdated(
+                _updatePositionLiquidity(
                     positionId,
                     provider,
                     poolId,
@@ -383,6 +366,203 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
                 );
             }
         }
+    }
+
+    /**
+     * @notice Internally registers a new LP position under a specific provider.
+     * @dev This function assumes the positionId is already computed externally.
+     *      Adds the positionId to both the provider's list and the global active set.
+     *      Fails if the provider has reached the MAX_POSITIONS limit.
+     * @param provider The address of the LP owner.
+     * @param poolId The identifier of the Uniswap V4 pool.
+     * @param tickLower The lower tick boundary of the position.
+     * @param tickUpper The upper tick boundary of the position.
+     * @param positionId The precomputed unique identifier for the position.
+     */
+    function _addNewPosition(
+        address provider,
+        PoolId poolId,
+        int24 tickLower,
+        int24 tickUpper,
+        bytes32 positionId
+    ) internal {
+        require(
+            providerPositions[provider].length < MAX_POSITIONS,
+            "Too many positions"
+        );
+
+        Position storage pos = positions[positionId];
+        pos.provider = provider;
+        pos.poolId = poolId;
+        pos.tickLower = tickLower;
+        pos.tickUpper = tickUpper;
+
+        providerPositions[provider].push(positionId);
+        activePositionIds.push(positionId);
+    }
+
+    /**
+     * @notice Updates the liquidity of an existing LP position and emits PositionUpdated.
+     * @dev Assumes the position already exists in storage and has been properly added.
+     * @param positionId The identifier of the position to update.
+     * @param provider The owner of the position (used for event emission).
+     * @param poolId The Uniswap V4 pool associated with the position.
+     * @param tickLower The lower tick boundary of the position.
+     * @param tickUpper The upper tick boundary of the position.
+     * @param newLiquidity The new liquidity value to assign.
+     */
+    function _updatePositionLiquidity(
+        bytes32 positionId,
+        address provider,
+        PoolId poolId,
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 newLiquidity
+    ) internal {
+        positions[positionId].liquidity = newLiquidity;
+
+        emit PositionUpdated(
+            positionId,
+            provider,
+            poolId,
+            tickLower,
+            tickUpper,
+            newLiquidity
+        );
+    }
+
+    /**
+     * @notice Internally removes a position from both the provider and global registries.
+     * @dev Deletes the position mapping, removes from activePositionIds and providerPositions arrays.
+     *      Emits a PositionRemoved event.
+     * @param provider The address of the LP whose position is being removed.
+     * @param positionId The identifier of the position to remove.
+     * @param poolId The pool associated with the position.
+     * @param tickLower The lower tick boundary of the position.
+     * @param tickUpper The upper tick boundary of the position.
+     */
+    function _removePosition(
+        address provider,
+        bytes32 positionId,
+        PoolId poolId,
+        int24 tickLower,
+        int24 tickUpper
+    ) internal {
+        delete positions[positionId];
+
+        for (uint256 i = 0; i < activePositionIds.length; i++) {
+            if (activePositionIds[i] == positionId) {
+                activePositionIds[i] = activePositionIds[
+                    activePositionIds.length - 1
+                ];
+                activePositionIds.pop();
+                break;
+            }
+        }
+
+        bytes32[] storage list = providerPositions[provider];
+        for (uint256 j = 0; j < list.length; j++) {
+            if (list[j] == positionId) {
+                list[j] = list[list.length - 1];
+                list.pop();
+                break;
+            }
+        }
+
+        emit PositionRemoved(
+            positionId,
+            provider,
+            poolId,
+            tickLower,
+            tickUpper
+        );
+    }
+
+    /**
+     * @notice Transfers a position's ownership to a new address using the NFT tokenId.
+     * @dev Must be called by an address with the SUBSCIBER_ROLE.
+     *      Reads the existing position metadata, removes it from the old provider, and reassigns it to the new owner.
+     *      Keeps liquidity unchanged and emits appropriate events.
+     * @param tokenId The NFT tokenId corresponding to the original position.
+     * @param newOwner The address that will become the new owner of the position.
+     */
+    function transferPosition(
+        uint256 tokenId,
+        address newOwner
+    ) external onlyRole(SUBSCIBER_ROLE) {
+        // Step 1: Look up old position info
+        Position memory oldPos = positionFromTokenId(tokenId);
+        bytes32 oldPositionId = getPositionId(
+            oldPos.provider,
+            oldPos.poolId,
+            oldPos.tickLower,
+            oldPos.tickUpper
+        );
+
+        // Step 2: Remove old position
+        _removePosition(
+            oldPos.provider,
+            oldPositionId,
+            oldPos.poolId,
+            oldPos.tickLower,
+            oldPos.tickUpper
+        );
+
+        // Step 3: Generate new positionId for the new owner
+        bytes32 newPositionId = getPositionId(
+            newOwner,
+            oldPos.poolId,
+            oldPos.tickLower,
+            oldPos.tickUpper
+        );
+
+        // Step 4: Add position under the new owner
+        _addNewPosition(
+            newOwner,
+            oldPos.poolId,
+            oldPos.tickLower,
+            oldPos.tickUpper,
+            newPositionId
+        );
+
+        // Step 5: Update liquidity with same value
+        _updatePositionLiquidity(
+            newPositionId,
+            newOwner,
+            oldPos.poolId,
+            oldPos.tickLower,
+            oldPos.tickUpper,
+            oldPos.liquidity
+        );
+    }
+
+    function positionFromTokenId(
+        uint256 tokenId
+    ) internal view returns (Position memory) {
+        // 1. Get poolKey and PositionInfo (packed struct)
+        (PoolKey memory poolKey, PositionInfo info) = IPositionManager(
+            positionManager
+        ).getPoolAndPositionInfo(tokenId);
+
+        // 2. Decode values
+        bytes32 poolId = PoolId.unwrap(poolKey.toId()); // Unwraps PoolId
+        int24 tickLower = info.tickLower();
+        int24 tickUpper = info.tickUpper();
+
+        // 3. Get remaining values
+        uint128 liquidity = IPositionManager(positionManager)
+            .getPositionLiquidity(tokenId);
+        address owner = IPositionManager(positionManager).ownerOf(tokenId);
+
+        // 4. Return Position
+        return
+            Position({
+                provider: owner,
+                poolId: PoolId.wrap(poolId),
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidity: liquidity
+            });
     }
 
     /**
