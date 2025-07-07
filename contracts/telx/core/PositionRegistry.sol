@@ -466,7 +466,9 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         // It's a transfer — perform internal bookkeeping
         address oldOwner = tokenIdToOwner[tokenId];
-        require(oldOwner != address(0), "PositionRegistry: No previous owner");
+        if (oldOwner == newOwner) {
+            return;
+        }
 
         int24 tickLower = info.tickLower();
         int24 tickUpper = info.tickUpper();
