@@ -66,6 +66,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     mapping(bytes32 => Position) public positions;
     mapping(PoolId => uint8) public telcoinPosition;
     mapping(address => bool) public routers;
+    mapping(uint256 => bool) public hasSubscribed;
+    mapping(uint256 => address) internal tokenIdToOwner;
 
     IERC20 public immutable telcoin;
     uint256 public lastRewardBlock;
@@ -442,85 +444,56 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      *      Reads the existing position metadata, removes it from the old provider, and reassigns it to the new owner.
      *      Keeps liquidity unchanged and emits appropriate events.
      * @param tokenId The NFT tokenId corresponding to the original position.
-     * @param newOwner The address that will become the new owner of the position.
      */
-    function transferPosition(
-        uint256 tokenId,
-        address newOwner
-    ) external onlyRole(SUBSCIBER_ROLE) {
-        // Step 1: Look up old position info
-        Position memory oldPos = positionFromTokenId(tokenId);
-        bytes32 oldPositionId = getPositionId(
-            oldPos.provider,
-            oldPos.poolId,
-            oldPos.tickLower,
-            oldPos.tickUpper
-        );
-
-        // Step 2: Remove old position
-        _removePosition(
-            oldPos.provider,
-            oldPositionId,
-            oldPos.poolId,
-            oldPos.tickLower,
-            oldPos.tickUpper
-        );
-
-        // Step 3: Generate new positionId for the new owner
-        bytes32 newPositionId = getPositionId(
-            newOwner,
-            oldPos.poolId,
-            oldPos.tickLower,
-            oldPos.tickUpper
-        );
-
-        // Step 4: Add position under the new owner
-        _addNewPosition(
-            newOwner,
-            oldPos.poolId,
-            oldPos.tickLower,
-            oldPos.tickUpper,
-            newPositionId
-        );
-
-        // Step 5: Update liquidity with same value
-        _updatePositionLiquidity(
-            newPositionId,
-            newOwner,
-            oldPos.poolId,
-            oldPos.tickLower,
-            oldPos.tickUpper,
-            oldPos.liquidity
-        );
-    }
-
-    function positionFromTokenId(
+    function handleSubscribe(
         uint256 tokenId
-    ) internal view returns (Position memory) {
-        // 1. Get poolKey and PositionInfo (packed struct)
+    ) external onlyRole(SUBSCIBER_ROLE) {
+        address newOwner = IPositionManager(positionManager).ownerOf(tokenId);
+
+        if (!hasSubscribed[tokenId]) {
+            tokenIdToOwner[tokenId] = newOwner;
+            hasSubscribed[tokenId] = true;
+            return;
+        }
+
+        // It's a transfer — perform internal bookkeeping
+        address oldOwner = tokenIdToOwner[tokenId];
+        require(oldOwner != address(0), "PositionRegistry: No previous owner");
+
         (PoolKey memory poolKey, PositionInfo info) = IPositionManager(
             positionManager
         ).getPoolAndPositionInfo(tokenId);
-
-        // 2. Decode values
-        bytes32 poolId = PoolId.unwrap(poolKey.toId()); // Unwraps PoolId
+        PoolId poolId = PoolId.wrap(PoolId.unwrap(poolKey.toId()));
         int24 tickLower = info.tickLower();
         int24 tickUpper = info.tickUpper();
-
-        // 3. Get remaining values
         uint128 liquidity = IPositionManager(positionManager)
             .getPositionLiquidity(tokenId);
-        address owner = IPositionManager(positionManager).ownerOf(tokenId);
 
-        // 4. Return Position
-        return
-            Position({
-                provider: owner,
-                poolId: PoolId.wrap(poolId),
-                tickLower: tickLower,
-                tickUpper: tickUpper,
-                liquidity: liquidity
-            });
+        bytes32 oldPositionId = getPositionId(
+            oldOwner,
+            poolId,
+            tickLower,
+            tickUpper
+        );
+        _removePosition(oldOwner, oldPositionId, poolId, tickLower, tickUpper);
+
+        bytes32 newPositionId = getPositionId(
+            newOwner,
+            poolId,
+            tickLower,
+            tickUpper
+        );
+        _addNewPosition(newOwner, poolId, tickLower, tickUpper, newPositionId);
+        _updatePositionLiquidity(
+            newPositionId,
+            newOwner,
+            poolId,
+            tickLower,
+            tickUpper,
+            liquidity
+        );
+
+        tokenIdToOwner[tokenId] = newOwner;
     }
 
     /**

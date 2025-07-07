@@ -25,7 +25,7 @@ interface IPositionRegistry {
         int128 liquidityDelta
     ) external;
 
-    function transferPosition(uint256 tokenId, address newOwner) external;
+    function handleSubscribe(uint256 tokenId) external;
 
     function computeVotingWeight(
         bytes32 positionId
