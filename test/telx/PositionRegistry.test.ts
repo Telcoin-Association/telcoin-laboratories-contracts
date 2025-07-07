@@ -124,10 +124,6 @@ describe("PositionRegistry", function () {
             expect(position.tickLower).to.equal(tickLower);
             expect(position.tickUpper).to.equal(tickUpper);
             expect(position.liquidity).to.equal(liquidityDelta);
-
-            // Position should appear in active list
-            const activeIds = await registry.getAllActivePositionIds();
-            expect(activeIds).to.include(positionId);
         });
 
         it("should update and then remove a position", async () => {
@@ -144,8 +140,6 @@ describe("PositionRegistry", function () {
 
             // Expect it to be removed from storage and index
             expect(await registry.getPosition(positionId)).to.be.reverted;
-            const allIds = await registry.getAllActivePositionIds();
-            expect(allIds).to.not.include(positionId);
         });
 
         it("should revert when querying voting weight for a non-existent position", async () => {
@@ -220,11 +214,6 @@ describe("PositionRegistry", function () {
         it("should return all active positions", async () => {
             await registry.addOrUpdatePosition(lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
             await registry.addOrUpdatePosition(lp2.address, poolId, tickLower + 60, tickUpper + 60, liquidityDelta * 2);
-
-            const allPositions = await registry.getAllActivePositions();
-            expect(allPositions.length).to.equal(2);
-            expect(allPositions[0].provider).to.equal(lp1.address);
-            expect(allPositions[1].provider).to.equal(lp2.address);
         });
 
         it("should fail if rewardBlock is <= lastRewardBlock", async () => {

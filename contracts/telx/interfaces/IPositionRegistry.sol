@@ -17,8 +17,6 @@ interface IPositionRegistry {
         address staker
     ) external view returns (bytes32[] memory);
 
-    function getAllActivePositions() external view returns (Position[] memory);
-
     function addOrUpdatePosition(
         address provider,
         PoolId poolId,
