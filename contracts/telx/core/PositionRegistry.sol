@@ -66,7 +66,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     mapping(bytes32 => Position) public positions;
     mapping(PoolId => uint8) public telcoinPosition;
     mapping(address => bool) public routers;
-    bytes32[] public activePositionIds;
 
     IERC20 public immutable telcoin;
     uint256 public lastRewardBlock;
@@ -137,36 +136,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         address staker
     ) external view returns (bytes32[] memory) {
         return providerPositions[staker];
-    }
-
-    /**
-     * @notice Lists all active tracked position IDs
-     */
-    function getAllActivePositionIds()
-        external
-        view
-        returns (bytes32[] memory)
-    {
-        return activePositionIds;
-    }
-
-    /**
-     * @notice Returns all currently active LP positions
-     */
-    function getAllActivePositions()
-        external
-        view
-        override
-        returns (Position[] memory)
-    {
-        uint256 length = activePositionIds.length;
-        Position[] memory result = new Position[](length);
-
-        for (uint256 i = 0; i < length; i++) {
-            result[i] = positions[activePositionIds[i]];
-        }
-
-        return result;
     }
 
     /**
@@ -398,7 +367,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         pos.tickUpper = tickUpper;
 
         providerPositions[provider].push(positionId);
-        activePositionIds.push(positionId);
     }
 
     /**
@@ -433,7 +401,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     /**
      * @notice Internally removes a position from both the provider and global registries.
-     * @dev Deletes the position mapping, removes from activePositionIds and providerPositions arrays.
+     * @dev Deletes the position mapping, removes from providerPositions arrays.
      *      Emits a PositionRemoved event.
      * @param provider The address of the LP whose position is being removed.
      * @param positionId The identifier of the position to remove.
@@ -449,16 +417,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         int24 tickUpper
     ) internal {
         delete positions[positionId];
-
-        for (uint256 i = 0; i < activePositionIds.length; i++) {
-            if (activePositionIds[i] == positionId) {
-                activePositionIds[i] = activePositionIds[
-                    activePositionIds.length - 1
-                ];
-                activePositionIds.pop();
-                break;
-            }
-        }
 
         bytes32[] storage list = providerPositions[provider];
         for (uint256 j = 0; j < list.length; j++) {
