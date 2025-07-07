@@ -341,7 +341,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
                 poolId,
                 tickLower,
                 tickUpper,
-                uint128(liquidityDelta)
+                pos.liquidity + uint128(liquidityDelta)
             );
         } else {
             uint128 delta = uint128(-liquidityDelta);
