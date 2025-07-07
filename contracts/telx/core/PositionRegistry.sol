@@ -449,6 +449,14 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         uint256 tokenId
     ) external onlyRole(SUBSCIBER_ROLE) {
         address newOwner = IPositionManager(positionManager).ownerOf(tokenId);
+        (PoolKey memory poolKey, PositionInfo info) = IPositionManager(
+            positionManager
+        ).getPoolAndPositionInfo(tokenId);
+        PoolId poolId = PoolId.wrap(PoolId.unwrap(poolKey.toId()));
+
+        if (telcoinPosition[poolId] == 0) {
+            return;
+        }
 
         if (!hasSubscribed[tokenId]) {
             tokenIdToOwner[tokenId] = newOwner;
@@ -460,10 +468,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         address oldOwner = tokenIdToOwner[tokenId];
         require(oldOwner != address(0), "PositionRegistry: No previous owner");
 
-        (PoolKey memory poolKey, PositionInfo info) = IPositionManager(
-            positionManager
-        ).getPoolAndPositionInfo(tokenId);
-        PoolId poolId = PoolId.wrap(PoolId.unwrap(poolKey.toId()));
         int24 tickLower = info.tickLower();
         int24 tickUpper = info.tickUpper();
         uint128 liquidity = IPositionManager(positionManager)
