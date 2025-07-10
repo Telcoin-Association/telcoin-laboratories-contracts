@@ -55,9 +55,12 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     /// @notice Emitted when the TEL token position is updated for a pool.
     event TelPositionUpdated(PoolId indexed poolId, uint8 location);
 
+    /// @notice Emitted when a token is subscribed for the first time
+    event Subscribed(uint256 indexed tokenId, address indexed owner);
+
     bytes32 public constant UNI_HOOK_ROLE = keccak256("UNI_HOOK_ROLE");
     bytes32 public constant SUPPORT_ROLE = keccak256("SUPPORT_ROLE");
-    bytes32 public constant SUBSCIBER_ROLE = keccak256("SUBSCIBER_ROLE");
+    bytes32 public constant SUBSCRIBER_ROLE = keccak256("SUBSCRIBER_ROLE");
 
     uint256 constant MAX_POSITIONS = 100;
 
@@ -303,7 +306,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
                     poolId,
                     tickLower,
                     tickUpper,
-                    positionId
+                    positionId,
+                    uint128(liquidityDelta)
                 );
             }
             _updatePositionLiquidity(
@@ -355,7 +359,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         PoolId poolId,
         int24 tickLower,
         int24 tickUpper,
-        bytes32 positionId
+        bytes32 positionId,
+        uint128 liquidityDelta
     ) internal {
         require(
             providerPositions[provider].length < MAX_POSITIONS,
@@ -369,6 +374,15 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         pos.tickUpper = tickUpper;
 
         providerPositions[provider].push(positionId);
+
+        emit PositionUpdated(
+            positionId,
+            provider,
+            poolId,
+            tickLower,
+            tickUpper,
+            liquidityDelta
+        );
     }
 
     /**
@@ -440,14 +454,14 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     /**
      * @notice Transfers a position's ownership to a new address using the NFT tokenId.
-     * @dev Must be called by an address with the SUBSCIBER_ROLE.
+     * @dev Must be called by an address with the SUBSCRIBER_ROLE.
      *      Reads the existing position metadata, removes it from the old provider, and reassigns it to the new owner.
      *      Keeps liquidity unchanged and emits appropriate events.
      * @param tokenId The NFT tokenId corresponding to the original position.
      */
     function handleSubscribe(
         uint256 tokenId
-    ) external onlyRole(SUBSCIBER_ROLE) {
+    ) external onlyRole(SUBSCRIBER_ROLE) {
         address newOwner = IPositionManager(positionManager).ownerOf(tokenId);
         (PoolKey memory poolKey, PositionInfo info) = IPositionManager(
             positionManager
@@ -461,6 +475,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         if (!hasSubscribed[tokenId]) {
             tokenIdToOwner[tokenId] = newOwner;
             hasSubscribed[tokenId] = true;
+            emit Subscribed(tokenId, newOwner);
             return;
         }
 
@@ -489,7 +504,14 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             tickLower,
             tickUpper
         );
-        _addNewPosition(newOwner, poolId, tickLower, tickUpper, newPositionId);
+        _addNewPosition(
+            newOwner,
+            poolId,
+            tickLower,
+            tickUpper,
+            newPositionId,
+            liquidity
+        );
         _updatePositionLiquidity(
             newPositionId,
             newOwner,

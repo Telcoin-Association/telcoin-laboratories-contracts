@@ -30,7 +30,6 @@ contract TELxSubscriber is ISubscriber {
             msg.sender == positionManager,
             "TELxSubscriber: Caller is not Position Manager"
         );
-        // address realOwner = IPositionManager(positionManager).ownerOf(tokenId);
         registry.handleSubscribe(tokenId);
     }
 

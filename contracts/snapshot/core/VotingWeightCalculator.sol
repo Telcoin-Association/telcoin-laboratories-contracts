@@ -36,7 +36,7 @@ contract VotingWeightCalculator is Ownable2Step {
     }
 
     /**
-     * @notice Adds a new soure to be considered when calculating voting weight.
+     * @notice Adds a new source to be considered when calculating voting weight.
      * @param source liquidity source to be added
      */
     function addSource(ISource source) external onlyOwner {
