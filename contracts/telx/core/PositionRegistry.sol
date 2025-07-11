@@ -162,7 +162,22 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         Position storage pos = positions[positionId];
         if (pos.liquidity == 0) return 0;
 
-        PoolId poolId = positions[positionId].poolId;
+        uint256 tokenId = positionIdToTokenId[positionId];
+
+        if (hasSubscribed[tokenId]) {
+            address trackedOwner = tokenIdToOwner[tokenId];
+            address actualOwner = IPositionManager(positionManager).ownerOf(
+                tokenId
+            );
+
+            if (trackedOwner != actualOwner) {
+                return 0;
+            }
+        } else {
+            return 0;
+        }
+
+        PoolId poolId = pos.poolId;
         (uint160 sqrtPriceX96, , , ) = StateLibrary.getSlot0(
             poolManager,
             poolId
