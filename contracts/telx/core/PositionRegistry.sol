@@ -65,6 +65,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     uint256 constant MAX_POSITIONS = 100;
 
     mapping(address => bytes32[]) internal providerPositions;
+    mapping(bytes32 => uint256) public positionIdToTokenId;
     mapping(address => uint256) public unclaimedRewards;
     mapping(bytes32 => Position) public positions;
     mapping(PoolId => uint8) public telcoinPosition;
@@ -299,6 +300,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         );
         Position storage pos = positions[positionId];
 
+        uint256 tokenId = positionIdToTokenId[positionId];
+        if (hasSubscribed[tokenId]) {
+            if (
+                tokenIdToOwner[tokenId] !=
+                IPositionManager(positionManager).ownerOf(tokenId)
+            ) {
+                revert(
+                    "PositionRegistry: Must call subscribe to sync ownership"
+                );
+            }
+        }
+
         if (liquidityDelta > 0) {
             if (pos.liquidity == 0) {
                 _addNewPosition(
@@ -472,13 +485,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             return;
         }
 
-        if (!hasSubscribed[tokenId]) {
-            tokenIdToOwner[tokenId] = newOwner;
-            hasSubscribed[tokenId] = true;
-            emit Subscribed(tokenId, newOwner);
-            return;
-        }
-
         // It's a transfer — perform internal bookkeeping
         address oldOwner = tokenIdToOwner[tokenId];
         if (oldOwner == newOwner) {
@@ -490,20 +496,31 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         uint128 liquidity = IPositionManager(positionManager)
             .getPositionLiquidity(tokenId);
 
-        bytes32 oldPositionId = getPositionId(
-            oldOwner,
-            poolId,
-            tickLower,
-            tickUpper
-        );
-        _removePosition(oldOwner, oldPositionId, poolId, tickLower, tickUpper);
-
         bytes32 newPositionId = getPositionId(
             newOwner,
             poolId,
             tickLower,
             tickUpper
         );
+
+        if (!hasSubscribed[tokenId]) {
+            tokenIdToOwner[tokenId] = newOwner;
+            positionIdToTokenId[newPositionId] = tokenId;
+            hasSubscribed[tokenId] = true;
+            emit Subscribed(tokenId, newOwner);
+            return;
+        }
+
+        bytes32 oldPositionId = getPositionId(
+            oldOwner,
+            poolId,
+            tickLower,
+            tickUpper
+        );
+
+        _removePosition(oldOwner, oldPositionId, poolId, tickLower, tickUpper);
+        delete positionIdToTokenId[oldPositionId];
+
         _addNewPosition(
             newOwner,
             poolId,
