@@ -56,6 +56,7 @@ describe("UniswapAdaptor", function () {
         await registry.updateTelPosition(dummyPoolId, 1);
         // Seed the registry with an active position
         await registry.addOrUpdatePosition(
+            dummyPoolId,
             user.address,
             dummyPoolId,
             tickLower,
@@ -69,12 +70,12 @@ describe("UniswapAdaptor", function () {
         expect(await adaptor.supportsInterface(selector)).to.be.true;
     });
 
-    it("should return voting weight > 0 if user has a position", async () => {
+    it("should return voting weight == 0 if user has a position but not subscribed", async () => {
         // Default tick = 0 so sqrtPrice = 1.0 (Q96)
         await poolManager.setSlot0(2n ** 96n, 0, 0, 0);
 
         const weight = await adaptor.balanceOf(user.address);
-        expect(weight).to.be.gt(0);
+        expect(weight).to.not.be.gt(0);
     });
 
     it("should return 0 voting weight if user has no positions", async () => {

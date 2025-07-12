@@ -153,7 +153,7 @@ describe("MockTELxIncentiveHook", function () {
             )
         );
 
-        const positionId = await registry.getPositionId(user.address, poolId, params.tickLower, params.tickUpper);
+        const positionId = poolId;
         await registry.updateTelPosition(poolId, 1);
 
         await poolManager.callBeforeAddLiquidity(
@@ -189,7 +189,7 @@ describe("MockTELxIncentiveHook", function () {
         const tickUpper = 100;
         const liquidityDelta = 5000;
 
-        const positionId = await registry.getPositionId(user.address, poolId, tickLower, tickUpper);
+        const positionId = poolId;
         await registry.updateTelPosition(poolId, 1);
 
         await poolManager.callBeforeAddLiquidity(

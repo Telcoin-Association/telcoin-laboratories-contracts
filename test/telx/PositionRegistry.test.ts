@@ -37,9 +37,6 @@ describe("PositionRegistry", function () {
         registry = await PositionRegistry.deploy(await rewardToken.getAddress(), await poolManager.getAddress(), await poolManager.getAddress());
         await registry.waitForDeployment();
 
-        // Precompute position ID
-        positionId = (await registry.getPositionId(lp1.address, poolId, tickLower, tickUpper));
-
         // Grant necessary roles for calling reward + update functions
         const SUPPORT_ROLE = await registry.SUPPORT_ROLE();
         const UNI_HOOK_ROLE = await registry.UNI_HOOK_ROLE();
@@ -63,8 +60,8 @@ describe("PositionRegistry", function () {
         });
 
         it("Dynamic Values", async () => {
-            await registry.addOrUpdatePosition(lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
-            const intermediatePosition = await registry.getPosition(positionId);
+            await registry.addOrUpdatePosition(poolId, lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
+            const intermediatePosition = await registry.getPosition(poolId);
 
             // Validate position state
             expect(intermediatePosition.provider).to.equal(lp1.address);
@@ -108,11 +105,11 @@ describe("PositionRegistry", function () {
 
     describe("addOrUpdatePosition", () => {
         it("should add a new position", async () => {
-            const positionId = await registry.getPositionId(lp1.address, poolId, tickLower, tickUpper);
+            const positionId = poolId;
 
             // Add position and expect event
             await expect(
-                registry.addOrUpdatePosition(lp1.address, poolId, tickLower, tickUpper, liquidityDelta)
+                registry.addOrUpdatePosition(poolId, lp1.address, poolId, tickLower, tickUpper, liquidityDelta)
             )
                 .to.emit(registry, "PositionUpdated")
                 .withArgs(positionId, lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
@@ -127,13 +124,13 @@ describe("PositionRegistry", function () {
         });
 
         it("should update and then remove a position", async () => {
-            const positionId = await registry.getPositionId(lp1.address, poolId, tickLower, tickUpper);
+            const positionId = poolId;
 
             // Add then remove same position
-            await registry.addOrUpdatePosition(lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
+            await registry.addOrUpdatePosition(poolId, lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
             // Remove the same amount to zero it out, expect removal
             await expect(
-                registry.addOrUpdatePosition(lp1.address, poolId, tickLower, tickUpper, -liquidityDelta)
+                registry.addOrUpdatePosition(poolId, lp1.address, poolId, tickLower, tickUpper, -liquidityDelta)
             )
                 .to.emit(registry, "PositionRemoved")
                 .withArgs(positionId, lp1.address, poolId, tickLower, tickUpper);
@@ -212,8 +209,8 @@ describe("PositionRegistry", function () {
         });
 
         it("should return all active positions", async () => {
-            await registry.addOrUpdatePosition(lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
-            await registry.addOrUpdatePosition(lp2.address, poolId, tickLower + 60, tickUpper + 60, liquidityDelta * 2);
+            await registry.addOrUpdatePosition(poolId, lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
+            await registry.addOrUpdatePosition(poolId, lp2.address, poolId, tickLower + 60, tickUpper + 60, liquidityDelta * 2);
         });
 
         it("should fail if rewardBlock is <= lastRewardBlock", async () => {

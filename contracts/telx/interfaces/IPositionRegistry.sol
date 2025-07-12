@@ -15,9 +15,10 @@ interface IPositionRegistry {
 
     function getPositionsByStaker(
         address staker
-    ) external view returns (bytes32[] memory);
+    ) external view returns (uint256[] memory);
 
     function addOrUpdatePosition(
+        uint256 tokenId,
         address provider,
         PoolId poolId,
         int24 tickLower,
@@ -28,7 +29,7 @@ interface IPositionRegistry {
     function handleSubscribe(uint256 tokenId) external;
 
     function computeVotingWeight(
-        bytes32 positionId
+        uint256 tokenId
     ) external view returns (uint256);
 
     function activeRouters(address router) external view returns (bool);
