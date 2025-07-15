@@ -13,11 +13,46 @@ interface IPositionRegistry {
         uint128 liquidity;
     }
 
-    function getPositionsByStaker(
-        address staker
-    ) external view returns (bytes32[] memory);
+    /// @notice Emitted when a position is added or its liquidity is increased
+    event PositionUpdated(
+        uint256 indexed tokenId,
+        address indexed provider,
+        PoolId indexed poolId,
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 liquidity
+    );
+
+    /// @notice Emitted when a position's liquidity reaches zero and is removed
+    event PositionRemoved(
+        uint256 indexed tokenId,
+        address indexed provider,
+        PoolId indexed poolId,
+        int24 tickLower,
+        int24 tickUpper
+    );
+
+    /// @notice Emitted when reward tokens are added to a user
+    event RewardsAdded(address indexed provider, uint256 amount);
+
+    /// @notice Emitted when a user successfully claims their reward
+    event RewardsClaimed(address indexed provider, uint256 amount);
+
+    /// @notice Emitted when a router's trust status is updated.
+    event RouterRegistryUpdated(address indexed router, bool listed);
+
+    /// @notice Emitted when the TEL token position is updated for a pool.
+    event TelPositionUpdated(PoolId indexed poolId, uint8 location);
+
+    /// @notice Emitted when a token is subscribed for the first time
+    event Subscribed(uint256 indexed tokenId, address indexed owner);
+
+    function getTokenIdsByProvider(
+        address provider
+    ) external view returns (uint256[] memory);
 
     function addOrUpdatePosition(
+        uint256 tokenId,
         address provider,
         PoolId poolId,
         int24 tickLower,
@@ -28,7 +63,7 @@ interface IPositionRegistry {
     function handleSubscribe(uint256 tokenId) external;
 
     function computeVotingWeight(
-        bytes32 positionId
+        uint256 tokenId
     ) external view returns (uint256);
 
     function activeRouters(address router) external view returns (bool);

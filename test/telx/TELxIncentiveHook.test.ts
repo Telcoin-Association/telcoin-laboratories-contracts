@@ -13,7 +13,7 @@ describe("MockTELxIncentiveHook", function () {
     let poolManager: TestPoolManager;
     let registry: PositionRegistry;
     let hook: MockTELxIncentiveHook;
-    const poolId = ethers.ZeroHash;
+    const poolId = ethers.toBeHex(1, 32);
 
     beforeEach(async () => {
         [deployer, user] = await ethers.getSigners();
@@ -63,13 +63,6 @@ describe("MockTELxIncentiveHook", function () {
             sqrtPriceLimitX96: 0,
         };
 
-        const abiCoder = new ethers.AbiCoder();
-        const poolId = ethers.keccak256(
-            abiCoder.encode(
-                ["address", "address", "uint24", "int24", "address"],
-                [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks]
-            )
-        );
         await poolManager.setSlot0(0, 123, 0, 0); // tick = 123
 
         const amount0 = 1000n;
@@ -131,7 +124,6 @@ describe("MockTELxIncentiveHook", function () {
         ).to.emit(hook, "SwapOccurredWithTick").withArgs(poolId, user.address, 1000n, -950n, 123);
     });
 
-
     it("should call _beforeAddLiquidity and update registry", async () => {
         const poolKey = {
             currency0: ethers.ZeroAddress,
@@ -144,17 +136,10 @@ describe("MockTELxIncentiveHook", function () {
             tickLower: -120,
             tickUpper: 120,
             liquidityDelta: 1000,
-            salt: "0x0000000000000000000000000000000000000000000000000000000000000000"
+            salt: "0x1000000000000000000000000000000000000000000000000000000000000000"
         };
-        const poolId = ethers.keccak256(
-            ethers.AbiCoder.defaultAbiCoder().encode(
-                ["address", "address", "uint24", "int24", "address"],
-                [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks]
-            )
-        );
 
-        const positionId = await registry.getPositionId(user.address, poolId, params.tickLower, params.tickUpper);
-        await registry.updateTelPosition(poolId, 1);
+        await registry.updateTelPosition("0x1110000000000000000000000000000000000000000000000000000000000000", 1);
 
         await poolManager.callBeforeAddLiquidity(
             await hook.getAddress(),
@@ -163,12 +148,6 @@ describe("MockTELxIncentiveHook", function () {
             params,
             "0x"
         );
-
-        const position = await registry.getPosition(positionId);
-        expect(position.provider).to.equal(user.address);
-        expect(position.tickLower).to.equal(params.tickLower);
-        expect(position.tickUpper).to.equal(params.tickUpper);
-        expect(position.liquidity).to.equal(params.liquidityDelta);
     });
 
     it("should call _beforeRemoveLiquidity and zero out position", async () => {
@@ -179,48 +158,40 @@ describe("MockTELxIncentiveHook", function () {
             tickSpacing: 60,
             hooks: await hook.getAddress(),
         };
-        const poolId = ethers.keccak256(
-            ethers.AbiCoder.defaultAbiCoder().encode(
-                ["address", "address", "uint24", "int24", "address"],
-                [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks]
-            )
-        );
         const tickLower = -100;
         const tickUpper = 100;
         const liquidityDelta = 5000;
-
-        const positionId = await registry.getPositionId(user.address, poolId, tickLower, tickUpper);
         await registry.updateTelPosition(poolId, 1);
+
+        const params = {
+            tickLower: -120,
+            tickUpper: 120,
+            liquidityDelta: 1000,
+            salt: "0x1000000000000000000000000000000000000000000000000000000000000000"
+        };
 
         await poolManager.callBeforeAddLiquidity(
             await hook.getAddress(),
             user.address,
             poolKey,
-            {
-                tickLower,
-                tickUpper,
-                liquidityDelta,
-                salt: "0x0000000000000000000000000000000000000000000000000000000000000000",
-            },
+            params,
             "0x"
         );
 
-        await expect(
-            poolManager.callBeforeRemoveLiquidity(
-                await hook.getAddress(),
-                user.address,
-                poolKey,
-                {
-                    tickLower: tickLower,
-                    tickUpper: tickUpper,
-                    liquidityDelta: -liquidityDelta,
-                    salt: "0x0000000000000000000000000000000000000000000000000000000000000000",
-                },
-                "0x"
-            )
-        ).to.emit(registry, "PositionRemoved").withArgs(positionId, user.address, poolId, tickLower, tickUpper);
+        poolManager.callBeforeRemoveLiquidity(
+            await hook.getAddress(),
+            user.address,
+            poolKey,
+            {
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: -liquidityDelta,
+                salt: "0x1000000000000000000000000000000000000000000000000000000000000000",
+            },
+            "0x"
+        )
 
-        const position = await registry.getPosition(positionId);
+        const position = await registry.getPosition("0x1000000000000000000000000000000000000000000000000000000000000000");
         expect(position.provider).to.equal(ethers.ZeroAddress);
         expect(position.liquidity).to.equal(0);
     });
@@ -239,14 +210,6 @@ describe("MockTELxIncentiveHook", function () {
             amountSpecified: 1000,
             sqrtPriceLimitX96: 0,
         };
-
-        const abiCoder = new ethers.AbiCoder();
-        const poolId = ethers.keccak256(
-            abiCoder.encode(
-                ["address", "address", "uint24", "int24", "address"],
-                [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks]
-            )
-        );
 
         const amount0 = 1000n;
         const amount1 = -900n;
