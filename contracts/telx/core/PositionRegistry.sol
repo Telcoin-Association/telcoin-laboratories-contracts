@@ -112,6 +112,12 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         Position storage pos = positions[tokenId];
         if (pos.liquidity == 0) return 0;
 
+        if (
+            pos.provider != IPositionManager(positionManager).ownerOf(tokenId)
+        ) {
+            return 0;
+        }
+
         PoolId poolId = positions[tokenId].poolId;
         (uint160 sqrtPriceX96, , , ) = StateLibrary.getSlot0(
             poolManager,
@@ -250,18 +256,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         );
 
         Position storage pos = positions[tokenId];
-
-        uint256 tokenId = positionIdToTokenId[positionId];
-        if (hasSubscribed[tokenId]) {
-            if (
-                tokenIdToOwner[tokenId] !=
-                IPositionManager(positionManager).ownerOf(tokenId)
-            ) {
-                revert(
-                    "PositionRegistry: Must call subscribe to sync ownership"
-                );
-            }
-        }
 
         if (liquidityDelta > 0) {
             if (pos.liquidity == 0) {
