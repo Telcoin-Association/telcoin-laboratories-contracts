@@ -251,6 +251,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         Position storage pos = positions[tokenId];
 
+        uint256 tokenId = positionIdToTokenId[positionId];
+        if (hasSubscribed[tokenId]) {
+            if (
+                tokenIdToOwner[tokenId] !=
+                IPositionManager(positionManager).ownerOf(tokenId)
+            ) {
+                revert(
+                    "PositionRegistry: Must call subscribe to sync ownership"
+                );
+            }
+        }
+
         if (liquidityDelta > 0) {
             if (pos.liquidity == 0) {
                 // First time seeing this tokenId — register it
