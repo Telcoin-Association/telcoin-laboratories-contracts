@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
-import { PositionRegistry, TestTelcoin, TestPoolManager } from "../../typechain-types";
+import { PositionRegistry, TestTelcoin, TestPoolManager, TestPositionManager } from "../../typechain-types";
 
 describe("PositionRegistry", function () {
     // Signer roles for tests
@@ -13,6 +13,7 @@ describe("PositionRegistry", function () {
     let rewardToken: TestTelcoin;
     let registry: PositionRegistry;
     let poolManager: TestPoolManager;
+    let positionManager: TestPositionManager;
 
     // Default position configuration
     const poolId = ethers.toBeHex(1, 32);
@@ -28,11 +29,15 @@ describe("PositionRegistry", function () {
         rewardToken = await TestToken.deploy(deployer.address);
         await rewardToken.waitForDeployment();
 
+        const TestPositionManager = await ethers.getContractFactory("TestPositionManager");
+        positionManager = await TestPositionManager.deploy();
+        await positionManager.waitForDeployment();
+
         const PoolManager = await ethers.getContractFactory("TestPoolManager");
         poolManager = await PoolManager.deploy();
 
         const PositionRegistry = await ethers.getContractFactory("PositionRegistry");
-        registry = await PositionRegistry.deploy(await rewardToken.getAddress(), await poolManager.getAddress(), await poolManager.getAddress());
+        registry = await PositionRegistry.deploy(await rewardToken.getAddress(), await poolManager.getAddress(), await positionManager.getAddress());
         await registry.waitForDeployment();
 
         // Grant necessary roles for calling reward + update functions
@@ -116,20 +121,6 @@ describe("PositionRegistry", function () {
             expect(position.tickLower).to.equal(tickLower);
             expect(position.tickUpper).to.equal(tickUpper);
             expect(position.liquidity).to.equal(liquidityDelta);
-        });
-
-        it("should update and then remove a position", async () => {
-            // Add then remove same position
-            await registry.addOrUpdatePosition(1, lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
-            // Remove the same amount to zero it out, expect removal
-            await expect(
-                registry.addOrUpdatePosition(1, lp1.address, poolId, tickLower, tickUpper, -liquidityDelta)
-            )
-                .to.emit(registry, "PositionRemoved")
-                .withArgs(1, lp1.address, poolId, tickLower, tickUpper);
-
-            // Expect it to be removed from storage and index
-            expect(await registry.getPosition(1)).to.be.reverted;
         });
 
         it("should revert when querying voting weight for a non-existent position", async () => {

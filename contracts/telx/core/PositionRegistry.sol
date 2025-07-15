@@ -255,6 +255,15 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             "PositionRegistry: Invalid liquidity delta"
         );
 
+        if (positions[tokenId].liquidity > 0) {
+            if (
+                positions[tokenId].provider !=
+                IPositionManager(positionManager).ownerOf(tokenId)
+            ) {
+                return;
+            }
+        }
+
         Position storage pos = positions[tokenId];
 
         if (liquidityDelta > 0) {
