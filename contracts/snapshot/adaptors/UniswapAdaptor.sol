@@ -27,7 +27,7 @@ contract UniswapAdaptor is ISource, IERC165 {
     function balanceOf(
         address voter
     ) external view override returns (uint256 totalVotingWeight) {
-        bytes32[] memory positionIds = registry.getPositionsByStaker(voter);
+        uint256[] memory positionIds = registry.getTokenIdsByProvider(voter);
 
         for (uint256 i = 0; i < positionIds.length; i++) {
             totalVotingWeight += registry.computeVotingWeight(positionIds[i]);

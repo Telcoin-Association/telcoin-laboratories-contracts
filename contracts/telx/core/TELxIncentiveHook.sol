@@ -87,7 +87,10 @@ contract TELxIncentiveHook is BaseHook {
         IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata
     ) internal override returns (bytes4) {
+        uint256 tokenId = uint256(uint160(bytes20(params.salt)));
+
         registry.addOrUpdatePosition(
+            tokenId,
             _resolveUser(sender),
             key.toId(),
             params.tickLower,
@@ -111,7 +114,10 @@ contract TELxIncentiveHook is BaseHook {
         IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata
     ) internal override returns (bytes4) {
+        uint256 tokenId = uint256(uint160(bytes20(params.salt)));
+
         registry.addOrUpdatePosition(
+            tokenId,
             _resolveUser(sender),
             key.toId(),
             params.tickLower,

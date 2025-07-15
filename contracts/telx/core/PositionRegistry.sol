@@ -21,56 +21,17 @@ import {IPositionManager, PoolKey, PositionInfo} from "../interfaces/IPositionMa
 contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    /// @notice Emitted when a position is added or its liquidity is increased
-    event PositionUpdated(
-        bytes32 indexed positionId,
-        address indexed provider,
-        PoolId indexed poolId,
-        int24 tickLower,
-        int24 tickUpper,
-        uint128 liquidity
-    );
-
-    /// @notice Emitted when a position's liquidity reaches zero and is removed
-    event PositionRemoved(
-        bytes32 indexed positionId,
-        address indexed provider,
-        PoolId indexed poolId,
-        int24 tickLower,
-        int24 tickUpper
-    );
-
-    /// @notice Emitted when reward tokens are added to a user
-    event RewardsAdded(address indexed provider, uint256 amount);
-
-    /// @notice Emitted when a user successfully claims their reward
-    event RewardsClaimed(address indexed provider, uint256 amount);
-
-    /// @notice Emitted when a new reward distribution round is initialized
-    event UpdateBlockStamp(uint256 rewardBlock, uint256 totalRewardAmount);
-
-    /// @notice Emitted when a router's trust status is updated.
-    event RouterRegistryUpdated(address indexed router, bool listed);
-
-    /// @notice Emitted when the TEL token position is updated for a pool.
-    event TelPositionUpdated(PoolId indexed poolId, uint8 location);
-
-    /// @notice Emitted when a token is subscribed for the first time
-    event Subscribed(uint256 indexed tokenId, address indexed owner);
-
     bytes32 public constant UNI_HOOK_ROLE = keccak256("UNI_HOOK_ROLE");
     bytes32 public constant SUPPORT_ROLE = keccak256("SUPPORT_ROLE");
     bytes32 public constant SUBSCRIBER_ROLE = keccak256("SUBSCRIBER_ROLE");
 
     uint256 constant MAX_POSITIONS = 100;
 
-    mapping(address => bytes32[]) internal providerPositions;
+    mapping(address => uint256[]) public providerTokenIds;
     mapping(address => uint256) public unclaimedRewards;
-    mapping(bytes32 => Position) public positions;
+    mapping(uint256 => Position) public positions;
     mapping(PoolId => uint8) public telcoinPosition;
     mapping(address => bool) public routers;
-    mapping(uint256 => bool) public hasSubscribed;
-    mapping(uint256 => address) internal tokenIdToOwner;
 
     IERC20 public immutable telcoin;
     uint256 public lastRewardBlock;
@@ -116,31 +77,21 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Computes a unique identifier for a position
-     */
-    function getPositionId(
-        address provider,
-        PoolId poolId,
-        int24 tickLower,
-        int24 tickUpper
-    ) public pure returns (bytes32) {
-        return
-            keccak256(abi.encodePacked(provider, poolId, tickLower, tickUpper));
-    }
-
-    /**
      * @notice Returns position metadata given its ID
      */
     function getPosition(
-        bytes32 positionId
+        uint256 tokenId
     ) external view returns (Position memory) {
-        return positions[positionId];
+        return positions[tokenId];
     }
 
-    function getPositionsByStaker(
-        address staker
-    ) external view returns (bytes32[] memory) {
-        return providerPositions[staker];
+    /**
+     * @notice Returns positionIds for a Provider
+     */
+    function getTokenIdsByProvider(
+        address provider
+    ) external view override returns (uint256[] memory) {
+        return providerTokenIds[provider];
     }
 
     /**
@@ -153,15 +104,15 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     /**
      * @notice Returns the voting weight (in TEL) for a position at a given sqrtPriceX96
      * @dev Assumes TEL is always token0 for simplicity — adjust logic if needed
-     * @param positionId The position identifier
+     * @param tokenId The position identifier
      */
     function computeVotingWeight(
-        bytes32 positionId
+        uint256 tokenId
     ) external view returns (uint256) {
-        Position storage pos = positions[positionId];
+        Position storage pos = positions[tokenId];
         if (pos.liquidity == 0) return 0;
 
-        PoolId poolId = positions[positionId].poolId;
+        PoolId poolId = positions[tokenId].poolId;
         (uint160 sqrtPriceX96, , , ) = StateLibrary.getSlot0(
             poolManager,
             poolId
@@ -268,6 +219,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     /**
      * @notice Called by Uniswap hook to add or remove tracked liquidity
+     * @param tokenId The identifier of the position to remove.
      * @param provider LP address
      * @param poolId Target pool
      * @param tickLower Lower tick bound
@@ -275,6 +227,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @param liquidityDelta Change in liquidity (positive = add, negative = remove)
      */
     function addOrUpdatePosition(
+        uint256 tokenId,
         address provider,
         PoolId poolId,
         int24 tickLower,
@@ -287,52 +240,63 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         }
 
         require(
+            tokenId != 0,
+            "PositionRegistry: Only NFT-backed positions supported"
+        );
+
+        require(
             liquidityDelta != type(int128).min,
             "PositionRegistry: Invalid liquidity delta"
         );
 
-        bytes32 positionId = getPositionId(
-            provider,
-            poolId,
-            tickLower,
-            tickUpper
-        );
-        Position storage pos = positions[positionId];
+        Position storage pos = positions[tokenId];
 
         if (liquidityDelta > 0) {
             if (pos.liquidity == 0) {
-                _addNewPosition(
+                // First time seeing this tokenId — register it
+                positions[tokenId] = Position({
+                    provider: provider,
+                    poolId: poolId,
+                    tickLower: tickLower,
+                    tickUpper: tickUpper,
+                    liquidity: uint128(liquidityDelta)
+                });
+                emit PositionUpdated(
+                    tokenId,
                     provider,
                     poolId,
                     tickLower,
                     tickUpper,
-                    positionId,
                     uint128(liquidityDelta)
                 );
+                providerTokenIds[provider].push(tokenId);
+            } else {
+                pos.liquidity += uint128(liquidityDelta);
+                emit PositionUpdated(
+                    tokenId,
+                    provider,
+                    poolId,
+                    tickLower,
+                    tickUpper,
+                    pos.liquidity
+                );
             }
-            _updatePositionLiquidity(
-                positionId,
-                provider,
-                poolId,
-                tickLower,
-                tickUpper,
-                pos.liquidity + uint128(liquidityDelta)
-            );
         } else {
             uint128 delta = uint128(-liquidityDelta);
+            require(pos.liquidity >= delta, "Insufficient liquidity");
             pos.liquidity -= delta;
 
             if (pos.liquidity == 0) {
                 _removePosition(
+                    tokenId,
                     provider,
-                    positionId,
                     poolId,
                     tickLower,
                     tickUpper
                 );
             } else {
-                _updatePositionLiquidity(
-                    positionId,
+                emit PositionUpdated(
+                    tokenId,
                     provider,
                     poolId,
                     tickLower,
@@ -344,112 +308,34 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Internally registers a new LP position under a specific provider.
-     * @dev This function assumes the positionId is already computed externally.
-     *      Adds the positionId to both the provider's list and the global active set.
-     *      Fails if the provider has reached the MAX_POSITIONS limit.
-     * @param provider The address of the LP owner.
-     * @param poolId The identifier of the Uniswap V4 pool.
-     * @param tickLower The lower tick boundary of the position.
-     * @param tickUpper The upper tick boundary of the position.
-     * @param positionId The precomputed unique identifier for the position.
-     */
-    function _addNewPosition(
-        address provider,
-        PoolId poolId,
-        int24 tickLower,
-        int24 tickUpper,
-        bytes32 positionId,
-        uint128 liquidityDelta
-    ) internal {
-        require(
-            providerPositions[provider].length < MAX_POSITIONS,
-            "Too many positions"
-        );
-
-        Position storage pos = positions[positionId];
-        pos.provider = provider;
-        pos.poolId = poolId;
-        pos.tickLower = tickLower;
-        pos.tickUpper = tickUpper;
-
-        providerPositions[provider].push(positionId);
-
-        emit PositionUpdated(
-            positionId,
-            provider,
-            poolId,
-            tickLower,
-            tickUpper,
-            liquidityDelta
-        );
-    }
-
-    /**
-     * @notice Updates the liquidity of an existing LP position and emits PositionUpdated.
-     * @dev Assumes the position already exists in storage and has been properly added.
-     * @param positionId The identifier of the position to update.
-     * @param provider The owner of the position (used for event emission).
-     * @param poolId The Uniswap V4 pool associated with the position.
-     * @param tickLower The lower tick boundary of the position.
-     * @param tickUpper The upper tick boundary of the position.
-     * @param newLiquidity The new liquidity value to assign.
-     */
-    function _updatePositionLiquidity(
-        bytes32 positionId,
-        address provider,
-        PoolId poolId,
-        int24 tickLower,
-        int24 tickUpper,
-        uint128 newLiquidity
-    ) internal {
-        positions[positionId].liquidity = newLiquidity;
-
-        emit PositionUpdated(
-            positionId,
-            provider,
-            poolId,
-            tickLower,
-            tickUpper,
-            newLiquidity
-        );
-    }
-
-    /**
      * @notice Internally removes a position from both the provider and global registries.
      * @dev Deletes the position mapping, removes from providerPositions arrays.
      *      Emits a PositionRemoved event.
+     * @param tokenId The identifier of the position to remove.
      * @param provider The address of the LP whose position is being removed.
-     * @param positionId The identifier of the position to remove.
      * @param poolId The pool associated with the position.
      * @param tickLower The lower tick boundary of the position.
      * @param tickUpper The upper tick boundary of the position.
      */
     function _removePosition(
+        uint256 tokenId,
         address provider,
-        bytes32 positionId,
         PoolId poolId,
         int24 tickLower,
         int24 tickUpper
     ) internal {
-        delete positions[positionId];
+        delete positions[tokenId];
 
-        bytes32[] storage list = providerPositions[provider];
+        uint256[] storage list = providerTokenIds[provider];
         for (uint256 j = 0; j < list.length; j++) {
-            if (list[j] == positionId) {
+            if (list[j] == tokenId) {
                 list[j] = list[list.length - 1];
                 list.pop();
                 break;
             }
         }
 
-        emit PositionRemoved(
-            positionId,
-            provider,
-            poolId,
-            tickLower,
-            tickUpper
-        );
+        emit PositionRemoved(tokenId, provider, poolId, tickLower, tickUpper);
     }
 
     /**
@@ -462,66 +348,61 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     function handleSubscribe(
         uint256 tokenId
     ) external onlyRole(SUBSCRIBER_ROLE) {
+        require(tokenId != 0, "PositionRegistry: Invalid tokenId");
         address newOwner = IPositionManager(positionManager).ownerOf(tokenId);
+
         (PoolKey memory poolKey, PositionInfo info) = IPositionManager(
             positionManager
         ).getPoolAndPositionInfo(tokenId);
         PoolId poolId = PoolId.wrap(PoolId.unwrap(poolKey.toId()));
 
+        // Skip if not a TEL pool
         if (telcoinPosition[poolId] == 0) {
             return;
         }
 
-        if (!hasSubscribed[tokenId]) {
-            tokenIdToOwner[tokenId] = newOwner;
-            hasSubscribed[tokenId] = true;
+        Position storage pos = positions[tokenId];
+
+        // First time seeing this tokenId — register it
+        if (pos.liquidity == 0) {
             emit Subscribed(tokenId, newOwner);
             return;
         }
 
-        // It's a transfer — perform internal bookkeeping
-        address oldOwner = tokenIdToOwner[tokenId];
-        if (oldOwner == newOwner) {
+        // No change in ownership
+        if (pos.provider == newOwner) {
             return;
         }
 
-        int24 tickLower = info.tickLower();
-        int24 tickUpper = info.tickUpper();
+        // Ownership has changed — reassign the position
+        // Remove from old provider's list
+        _removePosition(
+            tokenId,
+            pos.provider,
+            poolId,
+            pos.tickLower,
+            pos.tickUpper
+        );
+
+        // Add under new owner
         uint128 liquidity = IPositionManager(positionManager)
             .getPositionLiquidity(tokenId);
-
-        bytes32 oldPositionId = getPositionId(
-            oldOwner,
-            poolId,
-            tickLower,
-            tickUpper
-        );
-        _removePosition(oldOwner, oldPositionId, poolId, tickLower, tickUpper);
-
-        bytes32 newPositionId = getPositionId(
+        positions[tokenId] = Position({
+            provider: newOwner,
+            poolId: poolId,
+            tickLower: info.tickLower(),
+            tickUpper: info.tickUpper(),
+            liquidity: liquidity
+        });
+        providerTokenIds[newOwner].push(tokenId);
+        emit PositionUpdated(
+            tokenId,
             newOwner,
             poolId,
-            tickLower,
-            tickUpper
-        );
-        _addNewPosition(
-            newOwner,
-            poolId,
-            tickLower,
-            tickUpper,
-            newPositionId,
+            info.tickLower(),
+            info.tickUpper(),
             liquidity
         );
-        _updatePositionLiquidity(
-            newPositionId,
-            newOwner,
-            poolId,
-            tickLower,
-            tickUpper,
-            liquidity
-        );
-
-        tokenIdToOwner[tokenId] = newOwner;
     }
 
     /**
@@ -529,22 +410,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @param providers LP addresses
      * @param amounts Reward values per address
      * @param totalAmount Sum of all `amounts`
-     * @param rewardBlock Block number associated with the reward round
      */
     function addRewards(
         address[] calldata providers,
         uint256[] calldata amounts,
-        uint256 totalAmount,
-        uint256 rewardBlock
+        uint256 totalAmount
     ) external nonReentrant onlyRole(SUPPORT_ROLE) {
         require(
             providers.length == amounts.length,
             "PositionRegistry: Length mismatch"
         );
-        require(
-            rewardBlock > lastRewardBlock,
-            "PositionRegistry: Block must be greater than last reward block"
-        );
+
+        telcoin.safeTransferFrom(_msgSender(), address(this), totalAmount);
 
         uint256 total = 0;
         for (uint256 i = 0; i < providers.length; i++) {
@@ -557,10 +434,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             total == totalAmount,
             "PositionRegistry: Total amount mismatch"
         );
-
-        telcoin.safeTransferFrom(_msgSender(), address(this), total);
-        lastRewardBlock = rewardBlock;
-        emit UpdateBlockStamp(rewardBlock, total);
     }
 
     /**

@@ -15,12 +15,10 @@ describe("PositionRegistry", function () {
     let poolManager: TestPoolManager;
 
     // Default position configuration
-    const poolId = ethers.ZeroHash;
+    const poolId = ethers.toBeHex(1, 32);
     const tickLower = -600;
     const tickUpper = 600;
     const liquidityDelta = 1000;
-
-    let positionId: string;
 
     beforeEach(async function () {
         [deployer, lp1, lp2] = await ethers.getSigners();
@@ -37,9 +35,6 @@ describe("PositionRegistry", function () {
         registry = await PositionRegistry.deploy(await rewardToken.getAddress(), await poolManager.getAddress(), await poolManager.getAddress());
         await registry.waitForDeployment();
 
-        // Precompute position ID
-        positionId = (await registry.getPositionId(lp1.address, poolId, tickLower, tickUpper));
-
         // Grant necessary roles for calling reward + update functions
         const SUPPORT_ROLE = await registry.SUPPORT_ROLE();
         const UNI_HOOK_ROLE = await registry.UNI_HOOK_ROLE();
@@ -51,7 +46,6 @@ describe("PositionRegistry", function () {
     describe("Values", () => {
         it("Static Values", async () => {
             // Check block and token immutables
-            expect(await registry.lastRewardBlock()).to.equal((await ethers.provider.getBlock("latest"))!.number - 3);
             expect(await registry.telcoin()).to.equal(await rewardToken.getAddress());
 
             // Check role hash constants
@@ -63,8 +57,8 @@ describe("PositionRegistry", function () {
         });
 
         it("Dynamic Values", async () => {
-            await registry.addOrUpdatePosition(lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
-            const intermediatePosition = await registry.getPosition(positionId);
+            await registry.addOrUpdatePosition(1, lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
+            const intermediatePosition = await registry.getPosition(1);
 
             // Validate position state
             expect(intermediatePosition.provider).to.equal(lp1.address);
@@ -108,17 +102,15 @@ describe("PositionRegistry", function () {
 
     describe("addOrUpdatePosition", () => {
         it("should add a new position", async () => {
-            const positionId = await registry.getPositionId(lp1.address, poolId, tickLower, tickUpper);
-
             // Add position and expect event
             await expect(
-                registry.addOrUpdatePosition(lp1.address, poolId, tickLower, tickUpper, liquidityDelta)
+                registry.addOrUpdatePosition(100, lp1.address, poolId, tickLower, tickUpper, liquidityDelta)
             )
                 .to.emit(registry, "PositionUpdated")
-                .withArgs(positionId, lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
+                .withArgs(100, lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
 
             // Validate state after adding
-            const position = await registry.getPosition(positionId);
+            const position = await registry.getPosition(100);
             expect(position.provider).to.equal(lp1.address);
             expect(position.poolId).to.equal(poolId);
             expect(position.tickLower).to.equal(tickLower);
@@ -127,25 +119,22 @@ describe("PositionRegistry", function () {
         });
 
         it("should update and then remove a position", async () => {
-            const positionId = await registry.getPositionId(lp1.address, poolId, tickLower, tickUpper);
-
             // Add then remove same position
-            await registry.addOrUpdatePosition(lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
+            await registry.addOrUpdatePosition(1, lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
             // Remove the same amount to zero it out, expect removal
             await expect(
-                registry.addOrUpdatePosition(lp1.address, poolId, tickLower, tickUpper, -liquidityDelta)
+                registry.addOrUpdatePosition(1, lp1.address, poolId, tickLower, tickUpper, -liquidityDelta)
             )
                 .to.emit(registry, "PositionRemoved")
-                .withArgs(positionId, lp1.address, poolId, tickLower, tickUpper);
+                .withArgs(1, lp1.address, poolId, tickLower, tickUpper);
 
             // Expect it to be removed from storage and index
-            expect(await registry.getPosition(positionId)).to.be.reverted;
+            expect(await registry.getPosition(1)).to.be.reverted;
         });
 
         it("should revert when querying voting weight for a non-existent position", async () => {
-            const dummyPositionId = ethers.ZeroHash;
             expect(await
-                registry.computeVotingWeight(dummyPositionId)
+                registry.computeVotingWeight(ethers.ZeroHash)
             ).to.equal(0);
         });
 
@@ -163,13 +152,12 @@ describe("PositionRegistry", function () {
             const providers = [lp1.address, lp2.address];
             const amounts = [100, 250];
             const total = 350;
-            const rewardBlock = (await ethers.provider.getBlock("latest"))!.number + 1;
 
             await rewardToken.approve(await registry.getAddress(), total);
 
-            await expect(registry.addRewards(providers, amounts, total, rewardBlock))
-                .to.emit(registry, "UpdateBlockStamp")
-                .withArgs(rewardBlock, total);
+            await expect(registry.addRewards(providers, amounts, total))
+                .to.emit(registry, "RewardsAdded")
+                .withArgs(lp1.address, 100);
 
             expect(await registry.getUnclaimedRewards(lp1.address)).to.equal(100);
             expect(await registry.getUnclaimedRewards(lp2.address)).to.equal(250);
@@ -179,69 +167,38 @@ describe("PositionRegistry", function () {
             const providers = [lp1.address, lp2.address];
             const amounts = [100, 250];
             const total = 350;
-            const rewardBlock = (await ethers.provider.getBlock("latest"))!.number + 1;
 
             await rewardToken.approve(await registry.getAddress(), total);
 
-            await expect(registry.addRewards(providers, amounts, total, rewardBlock))
+            await expect(registry.addRewards(providers, amounts, total))
                 .to.emit(registry, "RewardsAdded")
                 .withArgs(lp1.address, 100)
                 .and.to.emit(registry, "RewardsAdded")
                 .withArgs(lp2.address, 250)
-                .and.to.emit(registry, "UpdateBlockStamp")
-                .withArgs(rewardBlock, total);
 
             expect(await registry.getUnclaimedRewards(lp1.address)).to.equal(100);
             expect(await registry.getUnclaimedRewards(lp2.address)).to.equal(250);
         });
 
         it("should fail if array lengths do not match", async () => {
-            const rewardBlock = (await ethers.provider.getBlock("latest"))!.number + 1;
             await expect(
-                registry.addRewards([lp1.address], [100, 200], 300, rewardBlock)
+                registry.addRewards([lp1.address], [100, 200], 300)
             ).to.be.revertedWith("PositionRegistry: Length mismatch");
         });
 
         it("should fail if total doesn't match sum", async () => {
-            const rewardBlock = (await ethers.provider.getBlock("latest"))!.number + 1;
             await rewardToken.approve(await registry.getAddress(), 500);
 
             await expect(
-                registry.addRewards([lp1.address, lp2.address], [100, 200], 500, rewardBlock)
+                registry.addRewards([lp1.address, lp2.address], [100, 200], 500)
             ).to.be.revertedWith("PositionRegistry: Total amount mismatch");
-        });
-
-        it("should return all active positions", async () => {
-            await registry.addOrUpdatePosition(lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
-            await registry.addOrUpdatePosition(lp2.address, poolId, tickLower + 60, tickUpper + 60, liquidityDelta * 2);
-        });
-
-        it("should fail if rewardBlock is <= lastRewardBlock", async () => {
-            const lastRewardBlock = await registry.lastRewardBlock();
-            await rewardToken.approve(await registry.getAddress(), 100);
-            await expect(
-                registry.addRewards([lp1.address], [100], 100, lastRewardBlock)
-            ).to.be.revertedWith("PositionRegistry: Block must be greater than last reward block");
-        });
-
-        it("should update lastRewardBlock and contract balance after rewards are added", async () => {
-            const rewardBlock = (await ethers.provider.getBlock("latest"))!.number + 1;
-            const total = 300;
-            await rewardToken.approve(await registry.getAddress(), total);
-            const oldBalance = await rewardToken.balanceOf(await registry.getAddress());
-
-            await registry.addRewards([lp1.address, lp2.address], [100, 200], total, rewardBlock);
-
-            expect(await rewardToken.balanceOf(await registry.getAddress()) - oldBalance).to.equal(total);
-            expect(await registry.lastRewardBlock()).to.equal(rewardBlock);
         });
     });
 
     describe("claim", () => {
         it("should allow a user to claim rewards", async () => {
-            const rewardBlock = (await ethers.provider.getBlock("latest"))!.number + 1;
             await rewardToken.approve(await registry.getAddress(), 500);
-            await registry.addRewards([lp1.address], [500], 500, rewardBlock);
+            await registry.addRewards([lp1.address], [500], 500);
 
             await expect(registry.connect(lp1).claim())
                 .to.emit(registry, "RewardsClaimed")
@@ -257,16 +214,14 @@ describe("PositionRegistry", function () {
         });
 
         it("should allow claiming multiple times if rewards are re-added", async () => {
-            const rewardBlock1 = (await ethers.provider.getBlock("latest"))!.number + 1;
             await rewardToken.approve(await registry.getAddress(), 200);
-            await registry.addRewards([lp1.address], [200], 200, rewardBlock1);
+            await registry.addRewards([lp1.address], [200], 200);
 
             await registry.connect(lp1).claim();
             expect(await rewardToken.balanceOf(lp1.address)).to.equal(200);
 
-            const rewardBlock2 = rewardBlock1 + 1;
             await rewardToken.approve(await registry.getAddress(), 300);
-            await registry.addRewards([lp1.address], [300], 300, rewardBlock2);
+            await registry.addRewards([lp1.address], [300], 300);
 
             await registry.connect(lp1).claim();
             expect(await rewardToken.balanceOf(lp1.address)).to.equal(500);
