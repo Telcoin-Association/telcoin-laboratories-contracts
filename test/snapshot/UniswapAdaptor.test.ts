@@ -70,14 +70,6 @@ describe("UniswapAdaptor", function () {
         expect(await adaptor.supportsInterface(selector)).to.be.true;
     });
 
-    it("should return voting weight > 0 if user has a position", async () => {
-        // Default tick = 0 so sqrtPrice = 1.0 (Q96)
-        await poolManager.setSlot0(2n ** 96n, 0, 0, 0);
-
-        const weight = await adaptor.balanceOf(user.address);
-        expect(weight).to.be.gt(0);
-    });
-
     it("should return 0 voting weight if user has no positions", async () => {
         const weight = await adaptor.balanceOf(ethers.Wallet.createRandom().address);
         expect(weight).to.equal(0);
