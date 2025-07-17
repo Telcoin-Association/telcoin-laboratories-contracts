@@ -32,17 +32,21 @@ contract TELxIncentiveHook is BaseHook {
 
     /// @notice Registry used to store and track liquidity positions
     IPositionRegistry public immutable registry;
+    address public immutable positionManager;
 
     /**
      * @notice Constructs the incentive hook contract
      * @param _poolManager Address of the Uniswap V4 PoolManager
      * @param _registry Address of the position registry used to track LP data
+     * @param _registry Address of the position manager used to track LP data
      */
     constructor(
         IPoolManager _poolManager,
+        address _positionManager,
         IPositionRegistry _registry
     ) BaseHook(_poolManager) {
         registry = _registry;
+        positionManager = _positionManager;
     }
 
     /**
@@ -87,6 +91,11 @@ contract TELxIncentiveHook is BaseHook {
         IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata
     ) internal override returns (bytes4) {
+        require(
+            msg.sender == positionManager,
+            "TELxIncentiveHook: Caller is not Position Manager"
+        );
+
         uint256 tokenId = uint256(uint160(bytes20(params.salt)));
 
         registry.addOrUpdatePosition(
@@ -114,6 +123,11 @@ contract TELxIncentiveHook is BaseHook {
         IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata
     ) internal override returns (bytes4) {
+        require(
+            msg.sender == positionManager,
+            "TELxIncentiveHook: Caller is not Position Manager"
+        );
+
         uint256 tokenId = uint256(uint160(bytes20(params.salt)));
 
         registry.addOrUpdatePosition(
@@ -143,6 +157,11 @@ contract TELxIncentiveHook is BaseHook {
         BalanceDelta delta,
         bytes calldata
     ) internal override returns (bytes4, int128) {
+        require(
+            msg.sender == positionManager,
+            "TELxIncentiveHook: Caller is not Position Manager"
+        );
+
         if (registry.validPool(key.toId())) {
             // Extract current tick directly from pool storage using StateLibrary
             (, int24 tick, , ) = StateLibrary.getSlot0(poolManager, key.toId());
