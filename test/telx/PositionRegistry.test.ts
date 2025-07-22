@@ -62,7 +62,7 @@ describe("PositionRegistry", function () {
         });
 
         it("Dynamic Values", async () => {
-            await registry.addOrUpdatePosition(1, lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
+            await registry.addOrUpdatePosition(1, poolId, liquidityDelta);
             const intermediatePosition = await registry.getPosition(1);
 
             // Validate position state
@@ -109,7 +109,7 @@ describe("PositionRegistry", function () {
         it("should add a new position", async () => {
             // Add position and expect event
             await expect(
-                registry.addOrUpdatePosition(100, lp1.address, poolId, tickLower, tickUpper, liquidityDelta)
+                registry.addOrUpdatePosition(100, poolId, liquidityDelta)
             )
                 .to.emit(registry, "PositionUpdated")
                 .withArgs(100, lp1.address, poolId, tickLower, tickUpper, liquidityDelta);

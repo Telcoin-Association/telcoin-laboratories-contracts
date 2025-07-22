@@ -67,12 +67,11 @@ contract MockTELxIncentiveHook is BaseHook {
     ) internal override returns (bytes4) {
         uint256 tokenId = uint256(uint160(bytes20(params.salt)));
 
+        _resolveUser(sender);
+
         registry.addOrUpdatePosition(
             tokenId,
-            _resolveUser(sender),
             key.toId(),
-            params.tickLower,
-            params.tickUpper,
             int128(params.liquidityDelta)
         );
 
@@ -87,12 +86,11 @@ contract MockTELxIncentiveHook is BaseHook {
     ) internal override returns (bytes4) {
         uint256 tokenId = uint256(uint160(bytes20(params.salt)));
 
+        _resolveUser(sender);
+
         registry.addOrUpdatePosition(
             tokenId,
-            _resolveUser(sender),
             key.toId(),
-            params.tickLower,
-            params.tickUpper,
             int128(params.liquidityDelta)
         );
 

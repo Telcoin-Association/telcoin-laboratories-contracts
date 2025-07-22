@@ -57,10 +57,7 @@ describe("UniswapAdaptor", function () {
         // Seed the registry with an active position
         await registry.addOrUpdatePosition(
             1,
-            user.address,
             dummyPoolId,
-            tickLower,
-            tickUpper,
             liquidity
         );
     });

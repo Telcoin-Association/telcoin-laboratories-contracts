@@ -374,3 +374,5 @@ artifacts
 
 # Local
 .DS_Store
+
+.env

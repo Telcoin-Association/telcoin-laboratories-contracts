@@ -53,10 +53,7 @@ interface IPositionRegistry {
 
     function addOrUpdatePosition(
         uint256 tokenId,
-        address provider,
         PoolId poolId,
-        int24 tickLower,
-        int24 tickUpper,
         int128 liquidityDelta
     ) external;
 

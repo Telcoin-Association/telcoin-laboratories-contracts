@@ -226,18 +226,12 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     /**
      * @notice Called by Uniswap hook to add or remove tracked liquidity
      * @param tokenId The identifier of the position to remove.
-     * @param provider LP address
      * @param poolId Target pool
-     * @param tickLower Lower tick bound
-     * @param tickUpper Upper tick bound
      * @param liquidityDelta Change in liquidity (positive = add, negative = remove)
      */
     function addOrUpdatePosition(
         uint256 tokenId,
-        address provider,
         PoolId poolId,
-        int24 tickLower,
-        int24 tickUpper,
         int128 liquidityDelta
     ) external onlyRole(UNI_HOOK_ROLE) {
         // Does not fail on invalid poolId, just skips update
@@ -255,71 +249,52 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             "PositionRegistry: Invalid liquidity delta"
         );
 
-        if (positions[tokenId].liquidity > 0) {
-            if (
-                positions[tokenId].provider !=
-                IPositionManager(positionManager).ownerOf(tokenId)
-            ) {
-                return;
-            }
-        }
-
         Position storage pos = positions[tokenId];
 
+        // If the position does not exist, we expect the owner to call `subscribe`
+        if (pos.provider == address(0)) {
+            return;
+        }
+
+        address tokenOwner = IPositionManager(positionManager).ownerOf(tokenId);
+
+        // The token is being burned
+        // You can get to a liquidity 0 state without burning the token
+        // using DECREASE operations but the token will still exist and have
+        // an owner.
+        if (tokenOwner == address(0)) {
+            _removePosition(
+                tokenId,
+                pos.provider,
+                poolId,
+                pos.tickLower,
+                pos.tickUpper
+            );
+            return;
+        }
+
+        // If the position does exist, we need to make sure the owner didn't change. Otherwise
+        // we require the new owner to also call `subscribe`
+        if (pos.provider != tokenOwner) {
+            return;
+        }
+
         if (liquidityDelta > 0) {
-            if (pos.liquidity == 0) {
-                // First time seeing this tokenId — register it
-                positions[tokenId] = Position({
-                    provider: provider,
-                    poolId: poolId,
-                    tickLower: tickLower,
-                    tickUpper: tickUpper,
-                    liquidity: uint128(liquidityDelta)
-                });
-                emit PositionUpdated(
-                    tokenId,
-                    provider,
-                    poolId,
-                    tickLower,
-                    tickUpper,
-                    uint128(liquidityDelta)
-                );
-                providerTokenIds[provider].push(tokenId);
-            } else {
-                pos.liquidity += uint128(liquidityDelta);
-                emit PositionUpdated(
-                    tokenId,
-                    provider,
-                    poolId,
-                    tickLower,
-                    tickUpper,
-                    pos.liquidity
-                );
-            }
+            pos.liquidity += uint128(liquidityDelta);
         } else {
             uint128 delta = uint128(-liquidityDelta);
             require(pos.liquidity >= delta, "Insufficient liquidity");
             pos.liquidity -= delta;
-
-            if (pos.liquidity == 0) {
-                _removePosition(
-                    tokenId,
-                    provider,
-                    poolId,
-                    tickLower,
-                    tickUpper
-                );
-            } else {
-                emit PositionUpdated(
-                    tokenId,
-                    provider,
-                    poolId,
-                    tickLower,
-                    tickUpper,
-                    pos.liquidity
-                );
-            }
         }
+
+        emit PositionUpdated(
+            tokenId,
+            pos.provider,
+            poolId,
+            pos.tickLower,
+            pos.tickUpper,
+            uint128(pos.liquidity)
+        );
     }
 
     /**
@@ -378,26 +353,27 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         Position storage pos = positions[tokenId];
 
-        // First time seeing this tokenId — register it
-        if (pos.liquidity == 0) {
-            emit Subscribed(tokenId, newOwner);
-            return;
-        }
-
         // No change in ownership
+        // Liquidity should be updated via addOrUpdatePosition actions anyway due to the hook.
         if (pos.provider == newOwner) {
             return;
         }
 
-        // Ownership has changed — reassign the position
-        // Remove from old provider's list
-        _removePosition(
-            tokenId,
-            pos.provider,
-            poolId,
-            pos.tickLower,
-            pos.tickUpper
-        );
+        // First time seeing this tokenId,
+        // Emit the event but let the add logic go though
+        // to set the initial liquidity balance.
+        if (pos.provider == address(0)) {
+            emit Subscribed(tokenId, newOwner);
+        } else {
+            // Ownership has changed — remove the position from the old owner
+            _removePosition(
+                tokenId,
+                pos.provider,
+                poolId,
+                pos.tickLower,
+                pos.tickUpper
+            );
+        }
 
         // Add under new owner
         uint128 liquidity = IPositionManager(positionManager)
