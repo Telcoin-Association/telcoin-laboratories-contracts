@@ -92,13 +92,11 @@ contract TELxIncentiveHook is BaseHook {
         bytes calldata
     ) internal override returns (bytes4) {
         require(
-            msg.sender == positionManager,
+            sender == positionManager,
             "TELxIncentiveHook: Caller is not Position Manager"
         );
 
         uint256 tokenId = uint256(uint160(bytes20(params.salt)));
-
-        _resolveUser(sender);
 
         registry.addOrUpdatePosition(
             tokenId,
@@ -123,13 +121,11 @@ contract TELxIncentiveHook is BaseHook {
         bytes calldata
     ) internal override returns (bytes4) {
         require(
-            msg.sender == positionManager,
+            sender == positionManager,
             "TELxIncentiveHook: Caller is not Position Manager"
         );
 
         uint256 tokenId = uint256(uint160(bytes20(params.salt)));
-
-        _resolveUser(sender);
 
         registry.addOrUpdatePosition(
             tokenId,
@@ -155,11 +151,6 @@ contract TELxIncentiveHook is BaseHook {
         BalanceDelta delta,
         bytes calldata
     ) internal override returns (bytes4, int128) {
-        require(
-            msg.sender == positionManager,
-            "TELxIncentiveHook: Caller is not Position Manager"
-        );
-
         if (registry.validPool(key.toId())) {
             // Extract current tick directly from pool storage using StateLibrary
             (, int24 tick, , ) = StateLibrary.getSlot0(poolManager, key.toId());
@@ -167,7 +158,7 @@ contract TELxIncentiveHook is BaseHook {
             // Emit swap event with tick so off-chain logic can check LP range activity
             emit SwapOccurredWithTick(
                 key.toId(),
-                _resolveUser(sender),
+                sender,
                 delta.amount0(),
                 delta.amount1(),
                 tick
@@ -175,24 +166,5 @@ contract TELxIncentiveHook is BaseHook {
         }
 
         return (BaseHook.afterSwap.selector, 0);
-    }
-
-    /**
-     * @notice Resolves the actual user address from the swap initiator
-     * @dev If the sender is a trusted router (tracked in PositionRegistry), attempts to call `msgSender()` on the router to get the original user (EOA or smart account).
-     *      Reverts if the router is trusted but does not implement the `msgSender()` function.
-     *      If the sender is not a trusted router, it is assumed to be the actual user and returned directly.
-     * @param sender Address passed to the hook by the PoolManager (typically a router or user)
-     * @return user Resolved user address — either the EOA from a router or the direct sender
-     */
-    function _resolveUser(address sender) internal view returns (address) {
-        if (registry.activeRouters(sender)) {
-            try IMsgSender(sender).msgSender() returns (address user) {
-                return user;
-            } catch {
-                revert("Trusted router must implement msgSender()");
-            }
-        }
-        return sender;
     }
 }

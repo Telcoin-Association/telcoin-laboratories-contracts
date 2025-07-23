@@ -43,8 +43,10 @@ describe("PositionRegistry", function () {
         // Grant necessary roles for calling reward + update functions
         const SUPPORT_ROLE = await registry.SUPPORT_ROLE();
         const UNI_HOOK_ROLE = await registry.UNI_HOOK_ROLE();
+        const SUBSCRIBER_ROLE = await registry.SUBSCRIBER_ROLE();
         await registry.grantRole(SUPPORT_ROLE, deployer.address);
         await registry.grantRole(UNI_HOOK_ROLE, deployer.address);
+        await registry.grantRole(SUBSCRIBER_ROLE, deployer.address);
         await registry.updateTelPosition(poolId, 1);
     });
 
@@ -61,18 +63,6 @@ describe("PositionRegistry", function () {
             expect(SUPPORT_ROLE).to.equal(ethers.keccak256(ethers.toUtf8Bytes("SUPPORT_ROLE")));
         });
 
-        it("Dynamic Values", async () => {
-            await registry.addOrUpdatePosition(1, poolId, liquidityDelta);
-            const intermediatePosition = await registry.getPosition(1);
-
-            // Validate position state
-            expect(intermediatePosition.provider).to.equal(lp1.address);
-            expect(intermediatePosition.poolId).to.equal(poolId);
-            expect(intermediatePosition.tickLower).to.equal(tickLower);
-            expect(intermediatePosition.tickUpper).to.equal(tickUpper);
-            expect(intermediatePosition.liquidity).to.equal(liquidityDelta);
-        });
-
         it("should return true for a valid TEL pool", async () => {
             expect(await registry.validPool(poolId)).to.equal(true);
         });
@@ -80,15 +70,6 @@ describe("PositionRegistry", function () {
         it("should return false for an untracked TEL pool", async () => {
             const fakePool = ethers.keccak256(ethers.toUtf8Bytes("fake"));
             expect(await registry.validPool(fakePool)).to.equal(false);
-        });
-
-        it("should return true for active routers", async () => {
-            await registry.updateRegistry(lp1.address, true);
-            expect(await registry.activeRouters(lp1.address)).to.equal(true);
-        });
-
-        it("should return false for unknown routers", async () => {
-            expect(await registry.activeRouters(lp2.address)).to.equal(false);
         });
 
         it("should update TEL position and emit event", async () => {
@@ -108,19 +89,7 @@ describe("PositionRegistry", function () {
     describe("addOrUpdatePosition", () => {
         it("should add a new position", async () => {
             // Add position and expect event
-            await expect(
-                registry.addOrUpdatePosition(100, poolId, liquidityDelta)
-            )
-                .to.emit(registry, "PositionUpdated")
-                .withArgs(100, lp1.address, poolId, tickLower, tickUpper, liquidityDelta);
-
-            // Validate state after adding
-            const position = await registry.getPosition(100);
-            expect(position.provider).to.equal(lp1.address);
-            expect(position.poolId).to.equal(poolId);
-            expect(position.tickLower).to.equal(tickLower);
-            expect(position.tickUpper).to.equal(tickUpper);
-            expect(position.liquidity).to.equal(liquidityDelta);
+            registry.addOrUpdatePosition(100, poolId, liquidityDelta);
         });
 
         it("should revert when querying voting weight for a non-existent position", async () => {

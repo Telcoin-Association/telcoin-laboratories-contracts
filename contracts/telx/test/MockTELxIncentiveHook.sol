@@ -60,14 +60,12 @@ contract MockTELxIncentiveHook is BaseHook {
     }
 
     function _beforeAddLiquidity(
-        address sender,
+        address,
         PoolKey calldata key,
         IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata
     ) internal override returns (bytes4) {
         uint256 tokenId = uint256(uint160(bytes20(params.salt)));
-
-        _resolveUser(sender);
 
         registry.addOrUpdatePosition(
             tokenId,
@@ -79,14 +77,12 @@ contract MockTELxIncentiveHook is BaseHook {
     }
 
     function _beforeRemoveLiquidity(
-        address sender,
+        address,
         PoolKey calldata key,
         IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata
     ) internal override returns (bytes4) {
         uint256 tokenId = uint256(uint160(bytes20(params.salt)));
-
-        _resolveUser(sender);
 
         registry.addOrUpdatePosition(
             tokenId,
@@ -109,7 +105,7 @@ contract MockTELxIncentiveHook is BaseHook {
 
             emit SwapOccurredWithTick(
                 key.toId(),
-                _resolveUser(sender),
+                sender,
                 delta.amount0(),
                 delta.amount1(),
                 tick
@@ -117,16 +113,5 @@ contract MockTELxIncentiveHook is BaseHook {
         }
 
         return (BaseHook.afterSwap.selector, 0);
-    }
-
-    function _resolveUser(address sender) internal view returns (address) {
-        if (registry.activeRouters(sender)) {
-            try IMsgSender(sender).msgSender() returns (address user) {
-                return user;
-            } catch {
-                revert("Trusted router must implement msgSender()");
-            }
-        }
-        return sender;
     }
 }

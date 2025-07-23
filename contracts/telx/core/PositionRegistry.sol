@@ -31,10 +31,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     mapping(address => uint256) public unclaimedRewards;
     mapping(uint256 => Position) public positions;
     mapping(PoolId => uint8) public telcoinPosition;
-    mapping(address => bool) public routers;
 
     IERC20 public immutable telcoin;
-    uint256 public lastRewardBlock;
     IPoolManager public immutable poolManager;
     IPositionManager public immutable positionManager;
 
@@ -51,7 +49,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         telcoin = _telcoin;
         poolManager = _poolManager;
         positionManager = _positionManager;
-        lastRewardBlock = block.number;
     }
 
     /**
@@ -62,18 +59,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      */
     function validPool(PoolId id) external view override returns (bool) {
         return telcoinPosition[id] != 0;
-    }
-
-    /**
-     * @notice Returns whether a router is in the trusted routers list.
-     * @dev Used to determine if a router can be queried for the actual msg.sender.
-     * @param router The address of the router to query.
-     * @return True if the router is listed as trusted.
-     */
-    function activeRouters(
-        address router
-    ) external view override returns (bool) {
-        return routers[router];
     }
 
     /**
@@ -191,20 +176,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Adds or removes a router from the trusted routers registry.
-     * @dev Only callable by an address with SUPPORT_ROLE.
-     * @param router The router address to update.
-     * @param listed Whether the router should be marked as trusted.
-     */
-    function updateRegistry(
-        address router,
-        bool listed
-    ) external onlyRole(SUPPORT_ROLE) {
-        routers[router] = listed;
-        emit RouterRegistryUpdated(router, listed);
-    }
-
-    /**
      * @notice Updates the stored index of TEL in a specific Uniswap V4 pool.
      * @dev Only callable by an address with SUPPORT_ROLE.
      *      Index must be 1 (token0) or 2 (token1).
@@ -283,7 +254,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             pos.liquidity += uint128(liquidityDelta);
         } else {
             uint128 delta = uint128(-liquidityDelta);
-            require(pos.liquidity >= delta, "Insufficient liquidity");
+            require(
+                pos.liquidity >= delta,
+                "PositionRegistry: Insufficient liquidity"
+            );
             pos.liquidity -= delta;
         }
 

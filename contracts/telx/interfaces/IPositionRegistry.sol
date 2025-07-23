@@ -38,9 +38,6 @@ interface IPositionRegistry {
     /// @notice Emitted when a user successfully claims their reward
     event RewardsClaimed(address indexed provider, uint256 amount);
 
-    /// @notice Emitted when a router's trust status is updated.
-    event RouterRegistryUpdated(address indexed router, bool listed);
-
     /// @notice Emitted when the TEL token position is updated for a pool.
     event TelPositionUpdated(PoolId indexed poolId, uint8 location);
 
@@ -62,8 +59,6 @@ interface IPositionRegistry {
     function computeVotingWeight(
         uint256 tokenId
     ) external view returns (uint256);
-
-    function activeRouters(address router) external view returns (bool);
 
     function validPool(PoolId id) external view returns (bool);
 }
