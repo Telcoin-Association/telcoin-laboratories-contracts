@@ -28,6 +28,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     uint256 constant MAX_POSITIONS = 100;
 
     mapping(address => uint256[]) public providerTokenIds;
+    mapping(address => uint256[]) public unsubscribedTokenIds;
     mapping(address => uint256) public unclaimedRewards;
     mapping(uint256 => Position) public positions;
     mapping(PoolId => uint8) public telcoinPosition;
@@ -78,6 +79,15 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         address provider
     ) external view override returns (uint256[] memory) {
         return providerTokenIds[provider];
+    }
+
+    /**
+     * @notice Returns positionIds for a Provider that have not been subscribed
+     */
+    function getUnsubscribedTokenIdsByProvider(
+        address provider
+    ) external view override returns (uint256[] memory) {
+        return unsubscribedTokenIds[provider];
     }
 
     /**
@@ -249,12 +259,13 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         Position storage pos = positions[tokenId];
 
+        address tokenOwner = IPositionManager(positionManager).ownerOf(tokenId);
+
         // If the position does not exist, we expect the owner to call `subscribe`
         if (pos.provider == address(0)) {
+            providerTokenIds[tokenOwner].push(tokenId);
             return;
         }
-
-        address tokenOwner = IPositionManager(positionManager).ownerOf(tokenId);
 
         // The token is being burned
         // You can get to a liquidity 0 state without burning the token
@@ -296,6 +307,25 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             pos.tickUpper,
             uint128(pos.liquidity)
         );
+    }
+
+    /**
+     * @notice Internally removes a position from both the provider and global registries.
+     * @param tokenId The identifier of the position to remove.
+     * @param provider The address of the LP whose position is now subscribed.
+     */
+    function _removeUnsubscribedPosition(
+        uint256 tokenId,
+        address provider
+    ) internal {
+        uint256[] storage list = unsubscribedTokenIds[provider];
+        for (uint256 j = 0; j < list.length; j++) {
+            if (list[j] == tokenId) {
+                list[j] = list[list.length - 1];
+                list.pop();
+                break;
+            }
+        }
     }
 
     /**
@@ -364,6 +394,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         // Emit the event but let the add logic go though
         // to set the initial liquidity balance.
         if (pos.provider == address(0)) {
+            _removeUnsubscribedPosition(tokenId, newOwner);
             emit Subscribed(tokenId, newOwner);
         } else {
             // Ownership has changed — remove the position from the old owner

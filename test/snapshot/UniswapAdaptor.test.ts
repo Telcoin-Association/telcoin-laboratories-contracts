@@ -54,12 +54,6 @@ describe("UniswapAdaptor", function () {
         };
 
         await registry.updateTelPosition(dummyPoolId, 1);
-        // Seed the registry with an active position
-        await registry.addOrUpdatePosition(
-            1,
-            dummyPoolId,
-            liquidity
-        );
     });
 
     it("should support the ISource interface", async () => {
