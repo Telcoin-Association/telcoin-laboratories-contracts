@@ -114,4 +114,15 @@ contract MockTELxIncentiveHook is BaseHook {
 
         return (BaseHook.afterSwap.selector, 0);
     }
+
+    function _resolveUser(address sender) internal view returns (address) {
+        if (registry.activeRouters(sender)) {
+            try IMsgSender(sender).msgSender() returns (address user) {
+                return user;
+            } catch {
+                revert("Trusted router must implement msgSender()");
+            }
+        }
+        return sender;
+    }
 }

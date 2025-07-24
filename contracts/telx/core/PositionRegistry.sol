@@ -31,6 +31,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     mapping(address => uint256) public unclaimedRewards;
     mapping(uint256 => Position) public positions;
     mapping(PoolId => uint8) public telcoinPosition;
+    mapping(address => bool) public routers;
 
     IERC20 public immutable telcoin;
     IPoolManager public immutable poolManager;
@@ -77,6 +78,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         address provider
     ) external view override returns (uint256[] memory) {
         return providerTokenIds[provider];
+    }
+
+    /**
+     * @notice Returns whether a router is in the trusted routers list.
+     * @dev Used to determine if a router can be queried for the actual msg.sender.
+     * @param router The address of the router to query.
+     * @return True if the router is listed as trusted.
+     */
+    function activeRouters(
+        address router
+    ) external view override returns (bool) {
+        return routers[router];
     }
 
     /**
@@ -192,6 +205,20 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         );
         telcoinPosition[poolId] = location;
         emit TelPositionUpdated(poolId, location);
+    }
+
+    /**
+     * @notice Adds or removes a router from the trusted routers registry.
+     * @dev Only callable by an address with SUPPORT_ROLE.
+     * @param router The router address to update.
+     * @param listed Whether the router should be marked as trusted.
+     */
+    function updateRegistry(
+        address router,
+        bool listed
+    ) external onlyRole(SUPPORT_ROLE) {
+        routers[router] = listed;
+        emit RouterRegistryUpdated(router, listed);
     }
 
     /**

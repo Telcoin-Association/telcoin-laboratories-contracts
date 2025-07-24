@@ -72,6 +72,15 @@ describe("PositionRegistry", function () {
             expect(await registry.validPool(fakePool)).to.equal(false);
         });
 
+        it("should return true for active routers", async () => {
+            await registry.updateRegistry(lp1.address, true);
+            expect(await registry.activeRouters(lp1.address)).to.equal(true);
+        });
+
+        it("should return false for unknown routers", async () => {
+            expect(await registry.activeRouters(lp2.address)).to.equal(false);
+        });
+
         it("should update TEL position and emit event", async () => {
             const newPool = ethers.keccak256(ethers.toUtf8Bytes("new"));
             await expect(registry.updateTelPosition(newPool, 1))
