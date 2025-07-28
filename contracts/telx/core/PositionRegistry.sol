@@ -262,8 +262,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         address tokenOwner = IPositionManager(positionManager).ownerOf(tokenId);
 
         // If the position does not exist, we expect the owner to call `subscribe`
-        if (pos.provider == address(0)) {
-            providerTokenIds[tokenOwner].push(tokenId);
+        if (
+            pos.provider == address(0) &&
+            providerTokenIds[tokenOwner].length <= MAX_POSITIONS
+        ) {
+            unsubscribedTokenIds[tokenOwner].push(tokenId);
             return;
         }
 
@@ -417,15 +420,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             tickUpper: info.tickUpper(),
             liquidity: liquidity
         });
-        providerTokenIds[newOwner].push(tokenId);
-        emit PositionUpdated(
-            tokenId,
-            newOwner,
-            poolId,
-            info.tickLower(),
-            info.tickUpper(),
-            liquidity
-        );
+
+        if (providerTokenIds[newOwner].length <= MAX_POSITIONS) {
+            providerTokenIds[newOwner].push(tokenId);
+            emit PositionUpdated(
+                tokenId,
+                newOwner,
+                poolId,
+                info.tickLower(),
+                info.tickUpper(),
+                liquidity
+            );
+        }
     }
 
     /**

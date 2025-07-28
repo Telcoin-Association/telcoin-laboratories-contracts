@@ -155,12 +155,12 @@ contract TELxIncentiveHook is BaseHook {
             // Extract current tick directly from pool storage using StateLibrary
             (, int24 tick, , ) = StateLibrary.getSlot0(poolManager, key.toId());
 
-            _resolveUser(sender);
+            address user = _resolveUser(sender);
 
             // Emit swap event with tick so off-chain logic can check LP range activity
             emit SwapOccurredWithTick(
                 key.toId(),
-                sender,
+                user,
                 delta.amount0(),
                 delta.amount1(),
                 tick
