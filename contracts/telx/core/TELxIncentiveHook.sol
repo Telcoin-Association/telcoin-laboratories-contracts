@@ -37,7 +37,7 @@ contract TELxIncentiveHook is BaseHook {
     /**
      * @notice Constructs the incentive hook contract
      * @param _poolManager Address of the Uniswap V4 PoolManager
-     * @param _registry Address of the position registry used to track LP data
+     * @param _positionManager Address of the position manager used to track LP data
      * @param _registry Address of the position manager used to track LP data
      */
     constructor(
