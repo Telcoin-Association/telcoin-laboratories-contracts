@@ -478,6 +478,13 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         emit RewardsClaimed(_msgSender(), reward);
     }
 
+    function removeUnsubscribedPosition(
+        uint256 tokenId,
+        address provider
+    ) external onlyRole(SUPPORT_ROLE) {
+        _removeUnsubscribedPosition(tokenId, provider);
+    }
+
     /**
      * @notice Admin function to recover ERC20 tokens sent to contract in error
      */
