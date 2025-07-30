@@ -37,8 +37,8 @@ contract TELxIncentiveHook is BaseHook {
     /**
      * @notice Constructs the incentive hook contract
      * @param _poolManager Address of the Uniswap V4 PoolManager
-     * @param _registry Address of the position registry used to track LP data
-     * @param _registry Address of the position manager used to track LP data
+     * @param _positionManager Address of the position manager used to track LP data
+     * @param _registry Address of the PositionRegistry used to track LP metadata
      */
     constructor(
         IPoolManager _poolManager,
@@ -92,7 +92,7 @@ contract TELxIncentiveHook is BaseHook {
         bytes calldata
     ) internal override returns (bytes4) {
         require(
-            msg.sender == positionManager,
+            sender == positionManager,
             "TELxIncentiveHook: Caller is not Position Manager"
         );
 
@@ -100,10 +100,7 @@ contract TELxIncentiveHook is BaseHook {
 
         registry.addOrUpdatePosition(
             tokenId,
-            _resolveUser(sender),
             key.toId(),
-            params.tickLower,
-            params.tickUpper,
             int128(params.liquidityDelta)
         );
 
@@ -124,7 +121,7 @@ contract TELxIncentiveHook is BaseHook {
         bytes calldata
     ) internal override returns (bytes4) {
         require(
-            msg.sender == positionManager,
+            sender == positionManager,
             "TELxIncentiveHook: Caller is not Position Manager"
         );
 
@@ -132,10 +129,7 @@ contract TELxIncentiveHook is BaseHook {
 
         registry.addOrUpdatePosition(
             tokenId,
-            _resolveUser(sender),
             key.toId(),
-            params.tickLower,
-            params.tickUpper,
             int128(params.liquidityDelta)
         );
 
@@ -157,19 +151,16 @@ contract TELxIncentiveHook is BaseHook {
         BalanceDelta delta,
         bytes calldata
     ) internal override returns (bytes4, int128) {
-        require(
-            msg.sender == positionManager,
-            "TELxIncentiveHook: Caller is not Position Manager"
-        );
-
         if (registry.validPool(key.toId())) {
             // Extract current tick directly from pool storage using StateLibrary
             (, int24 tick, , ) = StateLibrary.getSlot0(poolManager, key.toId());
 
+            address user = _resolveUser(sender);
+
             // Emit swap event with tick so off-chain logic can check LP range activity
             emit SwapOccurredWithTick(
                 key.toId(),
-                _resolveUser(sender),
+                user,
                 delta.amount0(),
                 delta.amount1(),
                 tick

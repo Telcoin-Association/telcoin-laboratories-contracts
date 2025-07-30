@@ -60,7 +60,7 @@ contract MockTELxIncentiveHook is BaseHook {
     }
 
     function _beforeAddLiquidity(
-        address sender,
+        address,
         PoolKey calldata key,
         IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata
@@ -69,10 +69,7 @@ contract MockTELxIncentiveHook is BaseHook {
 
         registry.addOrUpdatePosition(
             tokenId,
-            _resolveUser(sender),
             key.toId(),
-            params.tickLower,
-            params.tickUpper,
             int128(params.liquidityDelta)
         );
 
@@ -80,7 +77,7 @@ contract MockTELxIncentiveHook is BaseHook {
     }
 
     function _beforeRemoveLiquidity(
-        address sender,
+        address,
         PoolKey calldata key,
         IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata
@@ -89,10 +86,7 @@ contract MockTELxIncentiveHook is BaseHook {
 
         registry.addOrUpdatePosition(
             tokenId,
-            _resolveUser(sender),
             key.toId(),
-            params.tickLower,
-            params.tickUpper,
             int128(params.liquidityDelta)
         );
 
@@ -111,7 +105,7 @@ contract MockTELxIncentiveHook is BaseHook {
 
             emit SwapOccurredWithTick(
                 key.toId(),
-                _resolveUser(sender),
+                sender,
                 delta.amount0(),
                 delta.amount1(),
                 tick

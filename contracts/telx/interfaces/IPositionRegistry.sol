@@ -51,12 +51,13 @@ interface IPositionRegistry {
         address provider
     ) external view returns (uint256[] memory);
 
+    function getUnsubscribedTokenIdsByProvider(
+        address provider
+    ) external view returns (uint256[] memory);
+
     function addOrUpdatePosition(
         uint256 tokenId,
-        address provider,
         PoolId poolId,
-        int24 tickLower,
-        int24 tickUpper,
         int128 liquidityDelta
     ) external;
 

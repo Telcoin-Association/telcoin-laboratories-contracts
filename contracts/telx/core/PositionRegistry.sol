@@ -28,13 +28,13 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     uint256 constant MAX_POSITIONS = 100;
 
     mapping(address => uint256[]) public providerTokenIds;
+    mapping(address => uint256[]) public unsubscribedTokenIds;
     mapping(address => uint256) public unclaimedRewards;
     mapping(uint256 => Position) public positions;
     mapping(PoolId => uint8) public telcoinPosition;
     mapping(address => bool) public routers;
 
     IERC20 public immutable telcoin;
-    uint256 public lastRewardBlock;
     IPoolManager public immutable poolManager;
     IPositionManager public immutable positionManager;
 
@@ -51,7 +51,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         telcoin = _telcoin;
         poolManager = _poolManager;
         positionManager = _positionManager;
-        lastRewardBlock = block.number;
     }
 
     /**
@@ -62,18 +61,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      */
     function validPool(PoolId id) external view override returns (bool) {
         return telcoinPosition[id] != 0;
-    }
-
-    /**
-     * @notice Returns whether a router is in the trusted routers list.
-     * @dev Used to determine if a router can be queried for the actual msg.sender.
-     * @param router The address of the router to query.
-     * @return True if the router is listed as trusted.
-     */
-    function activeRouters(
-        address router
-    ) external view override returns (bool) {
-        return routers[router];
     }
 
     /**
@@ -92,6 +79,27 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         address provider
     ) external view override returns (uint256[] memory) {
         return providerTokenIds[provider];
+    }
+
+    /**
+     * @notice Returns positionIds for a Provider that have not been subscribed
+     */
+    function getUnsubscribedTokenIdsByProvider(
+        address provider
+    ) external view override returns (uint256[] memory) {
+        return unsubscribedTokenIds[provider];
+    }
+
+    /**
+     * @notice Returns whether a router is in the trusted routers list.
+     * @dev Used to determine if a router can be queried for the actual msg.sender.
+     * @param router The address of the router to query.
+     * @return True if the router is listed as trusted.
+     */
+    function activeRouters(
+        address router
+    ) external view override returns (bool) {
+        return routers[router];
     }
 
     /**
@@ -191,20 +199,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Adds or removes a router from the trusted routers registry.
-     * @dev Only callable by an address with SUPPORT_ROLE.
-     * @param router The router address to update.
-     * @param listed Whether the router should be marked as trusted.
-     */
-    function updateRegistry(
-        address router,
-        bool listed
-    ) external onlyRole(SUPPORT_ROLE) {
-        routers[router] = listed;
-        emit RouterRegistryUpdated(router, listed);
-    }
-
-    /**
      * @notice Updates the stored index of TEL in a specific Uniswap V4 pool.
      * @dev Only callable by an address with SUPPORT_ROLE.
      *      Index must be 1 (token0) or 2 (token1).
@@ -224,20 +218,28 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /**
+     * @notice Adds or removes a router from the trusted routers registry.
+     * @dev Only callable by an address with SUPPORT_ROLE.
+     * @param router The router address to update.
+     * @param listed Whether the router should be marked as trusted.
+     */
+    function updateRegistry(
+        address router,
+        bool listed
+    ) external onlyRole(SUPPORT_ROLE) {
+        routers[router] = listed;
+        emit RouterRegistryUpdated(router, listed);
+    }
+
+    /**
      * @notice Called by Uniswap hook to add or remove tracked liquidity
      * @param tokenId The identifier of the position to remove.
-     * @param provider LP address
      * @param poolId Target pool
-     * @param tickLower Lower tick bound
-     * @param tickUpper Upper tick bound
      * @param liquidityDelta Change in liquidity (positive = add, negative = remove)
      */
     function addOrUpdatePosition(
         uint256 tokenId,
-        address provider,
         PoolId poolId,
-        int24 tickLower,
-        int24 tickUpper,
         int128 liquidityDelta
     ) external onlyRole(UNI_HOOK_ROLE) {
         // Does not fail on invalid poolId, just skips update
@@ -255,69 +257,76 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             "PositionRegistry: Invalid liquidity delta"
         );
 
-        if (positions[tokenId].liquidity > 0) {
-            if (
-                positions[tokenId].provider !=
-                IPositionManager(positionManager).ownerOf(tokenId)
-            ) {
-                return;
-            }
-        }
-
         Position storage pos = positions[tokenId];
 
+        address tokenOwner = IPositionManager(positionManager).ownerOf(tokenId);
+
+        // If the position does not exist, we expect the owner to call `subscribe`
+        if (
+            pos.provider == address(0) &&
+            providerTokenIds[tokenOwner].length <= MAX_POSITIONS
+        ) {
+            unsubscribedTokenIds[tokenOwner].push(tokenId);
+            return;
+        }
+
+        // The token is being burned
+        // You can get to a liquidity 0 state without burning the token
+        // using DECREASE operations but the token will still exist and have
+        // an owner.
+        if (tokenOwner == address(0)) {
+            _removePosition(
+                tokenId,
+                pos.provider,
+                poolId,
+                pos.tickLower,
+                pos.tickUpper
+            );
+            return;
+        }
+
+        // If the position does exist, we need to make sure the owner didn't change. Otherwise
+        // we require the new owner to also call `subscribe`
+        if (pos.provider != tokenOwner) {
+            return;
+        }
+
         if (liquidityDelta > 0) {
-            if (pos.liquidity == 0) {
-                // First time seeing this tokenId — register it
-                positions[tokenId] = Position({
-                    provider: provider,
-                    poolId: poolId,
-                    tickLower: tickLower,
-                    tickUpper: tickUpper,
-                    liquidity: uint128(liquidityDelta)
-                });
-                emit PositionUpdated(
-                    tokenId,
-                    provider,
-                    poolId,
-                    tickLower,
-                    tickUpper,
-                    uint128(liquidityDelta)
-                );
-                providerTokenIds[provider].push(tokenId);
-            } else {
-                pos.liquidity += uint128(liquidityDelta);
-                emit PositionUpdated(
-                    tokenId,
-                    provider,
-                    poolId,
-                    tickLower,
-                    tickUpper,
-                    pos.liquidity
-                );
-            }
+            pos.liquidity += uint128(liquidityDelta);
         } else {
             uint128 delta = uint128(-liquidityDelta);
-            require(pos.liquidity >= delta, "Insufficient liquidity");
+            require(
+                pos.liquidity >= delta,
+                "PositionRegistry: Insufficient liquidity"
+            );
             pos.liquidity -= delta;
+        }
 
-            if (pos.liquidity == 0) {
-                _removePosition(
-                    tokenId,
-                    provider,
-                    poolId,
-                    tickLower,
-                    tickUpper
-                );
-            } else {
-                emit PositionUpdated(
-                    tokenId,
-                    provider,
-                    poolId,
-                    tickLower,
-                    tickUpper,
-                    pos.liquidity
-                );
+        emit PositionUpdated(
+            tokenId,
+            pos.provider,
+            poolId,
+            pos.tickLower,
+            pos.tickUpper,
+            uint128(pos.liquidity)
+        );
+    }
+
+    /**
+     * @notice Internally removes a position from both the provider and global registries.
+     * @param tokenId The identifier of the position to remove.
+     * @param provider The address of the LP whose position is now subscribed.
+     */
+    function _removeUnsubscribedPosition(
+        uint256 tokenId,
+        address provider
+    ) internal {
+        uint256[] storage list = unsubscribedTokenIds[provider];
+        for (uint256 j = 0; j < list.length; j++) {
+            if (list[j] == tokenId) {
+                list[j] = list[list.length - 1];
+                list.pop();
+                break;
             }
         }
     }
@@ -378,26 +387,28 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         Position storage pos = positions[tokenId];
 
-        // First time seeing this tokenId — register it
-        if (pos.liquidity == 0) {
-            emit Subscribed(tokenId, newOwner);
-            return;
-        }
-
         // No change in ownership
+        // Liquidity should be updated via addOrUpdatePosition actions anyway due to the hook.
         if (pos.provider == newOwner) {
             return;
         }
 
-        // Ownership has changed — reassign the position
-        // Remove from old provider's list
-        _removePosition(
-            tokenId,
-            pos.provider,
-            poolId,
-            pos.tickLower,
-            pos.tickUpper
-        );
+        // First time seeing this tokenId,
+        // Emit the event but let the add logic go though
+        // to set the initial liquidity balance.
+        if (pos.provider == address(0)) {
+            _removeUnsubscribedPosition(tokenId, newOwner);
+            emit Subscribed(tokenId, newOwner);
+        } else {
+            // Ownership has changed — remove the position from the old owner
+            _removePosition(
+                tokenId,
+                pos.provider,
+                poolId,
+                pos.tickLower,
+                pos.tickUpper
+            );
+        }
 
         // Add under new owner
         uint128 liquidity = IPositionManager(positionManager)
@@ -409,15 +420,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             tickUpper: info.tickUpper(),
             liquidity: liquidity
         });
-        providerTokenIds[newOwner].push(tokenId);
-        emit PositionUpdated(
-            tokenId,
-            newOwner,
-            poolId,
-            info.tickLower(),
-            info.tickUpper(),
-            liquidity
-        );
+
+        if (providerTokenIds[newOwner].length <= MAX_POSITIONS) {
+            providerTokenIds[newOwner].push(tokenId);
+            emit PositionUpdated(
+                tokenId,
+                newOwner,
+                poolId,
+                info.tickLower(),
+                info.tickUpper(),
+                liquidity
+            );
+        }
     }
 
     /**
@@ -462,6 +476,13 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         telcoin.safeTransfer(_msgSender(), reward);
 
         emit RewardsClaimed(_msgSender(), reward);
+    }
+
+    function removeUnsubscribedPosition(
+        uint256 tokenId,
+        address provider
+    ) external onlyRole(SUPPORT_ROLE) {
+        _removeUnsubscribedPosition(tokenId, provider);
     }
 
     /**
