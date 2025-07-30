@@ -262,11 +262,13 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         address tokenOwner = IPositionManager(positionManager).ownerOf(tokenId);
 
         // If the position does not exist, we expect the owner to call `subscribe`
-        if (
-            pos.provider == address(0) &&
-            providerTokenIds[tokenOwner].length <= MAX_POSITIONS
-        ) {
-            unsubscribedTokenIds[tokenOwner].push(tokenId);
+        if (pos.provider == address(0)) {
+            if (
+                unsubscribedTokenIds[tokenOwner].length <= MAX_POSITIONS &&
+                providerTokenIds[tokenOwner].length <= MAX_POSITIONS
+            ) {
+                unsubscribedTokenIds[tokenOwner].push(tokenId);
+            }
             return;
         }
 
