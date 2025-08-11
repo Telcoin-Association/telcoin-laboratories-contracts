@@ -17,6 +17,16 @@ describe("CouncilMember", () => {
     let governanceRole: string = ethers.keccak256(ethers.toUtf8Bytes("GOVERNANCE_COUNCIL_ROLE"));
     let supportRole: string = ethers.keccak256(ethers.toUtf8Bytes("SUPPORT_ROLE"));
 
+    // calculate interface IDs
+    const calculateInterfaceId = (functionSignatures: string[]): string => {
+        let interfaceId = 0;
+        for (const sig of functionSignatures) {
+            const hash = ethers.keccak256(ethers.toUtf8Bytes(sig));
+            interfaceId ^= parseInt(hash.slice(0, 10));
+        }
+        return '0x' + interfaceId.toString(16).padStart(8, '0');
+    };
+
     beforeEach(async () => {
         [admin, support, member, holder, target] = await ethers.getSigners();
 
@@ -69,11 +79,24 @@ describe("CouncilMember", () => {
             });
 
             it("has AccessControlEnumerableUpgradeable interface", async () => {
-                expect(await councilMember.supportsInterface('0x5bfad1a8')).to.equal(true);
+                // IAccessControlEnumerable interface from OpenZeppelin v5
+                const interfaceId = calculateInterfaceId([
+                    'getRoleMember(bytes32,uint256)',
+                    'getRoleMemberCount(bytes32)'
+                ]);
+                expect(await councilMember.supportsInterface(interfaceId)).to.equal(true);
+                // expect(await councilMember.supportsInterface('0x5bfad1a8')).to.equal(true);
             });
 
             it("has ERC721EnumerableUpgradeable interface", async () => {
-                expect(await councilMember.supportsInterface('0x79f154c4')).to.equal(true);
+                // IERC721Enumerable interface
+                const interfaceId = calculateInterfaceId([
+                    'totalSupply()',
+                    'tokenOfOwnerByIndex(address,uint256)',
+                    'tokenByIndex(uint256)'
+                ]);
+                expect(await councilMember.supportsInterface(interfaceId)).to.equal(true);
+                // expect(await councilMember.supportsInterface('0x79f154c4')).to.equal(true);
             });
         });
 
@@ -496,4 +519,4 @@ describe("CouncilMember", () => {
         });
     });
 });
-//supportsInterface 
+//supportsInterface
