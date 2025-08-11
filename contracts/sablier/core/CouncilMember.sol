@@ -183,7 +183,7 @@ contract CouncilMember is
         bytes4 interfaceId
     )
         public
-        pure
+        view
         override(
             AccessControlEnumerableUpgradeable,
             ERC721EnumerableUpgradeable
@@ -191,10 +191,8 @@ contract CouncilMember is
         returns (bool)
     {
         return
-            interfaceId ==
-            type(AccessControlEnumerableUpgradeable).interfaceId ||
-            interfaceId == type(ERC721EnumerableUpgradeable).interfaceId ||
-            interfaceId == type(IERC721).interfaceId;
+            AccessControlEnumerableUpgradeable.supportsInterface(interfaceId) ||
+            ERC721EnumerableUpgradeable.supportsInterface(interfaceId);
     }
 
     /************************************************
