@@ -463,27 +463,27 @@ describe("CouncilMember", () => {
         describe("claim", () => {
             it("claiming rewards", async () => {
                 await expect(councilMember.mint(member.address));
-                await expect(councilMember.connect(member).claim(0, 100)).to.not.reverted;
+                await expect(councilMember.connect(member).claim(0)).to.not.reverted;
                 expect(await councilMember.balances(0)).to.equal(0);
 
                 await expect(councilMember.mint(support.address)).to.not.reverted;
-                await expect(councilMember.connect(member).claim(0, 200)).to.be.revertedWith("CouncilMember: withdrawal amount is higher than balance");
-                await expect(councilMember.connect(member).claim(0, 100)).to.not.reverted;
-                expect(await councilMember.balances(0)).to.equal(50);
+                // await expect(councilMember.connect(member).claim(0)).to.be.revertedWith("CouncilMember: withdrawal amount is higher than balance");
+                await expect(councilMember.connect(member).claim(0)).to.not.reverted;
+                expect(await councilMember.balances(0)).to.equal(0);
                 expect(await councilMember.balances(1)).to.equal(50);
 
                 await expect(councilMember.mint(member.address)).to.not.reverted;
-                expect(await councilMember.balances(0)).to.equal(100);
+                expect(await councilMember.balances(0)).to.equal(50);
                 expect(await councilMember.balances(1)).to.equal(100);
                 expect(await councilMember.balances(2)).to.equal(0);
-                await expect(councilMember.connect(member).claim(0, 100)).to.not.reverted;
-                expect(await councilMember.balances(0)).to.equal(33);
+                await expect(councilMember.connect(member).claim(0)).to.not.reverted;
+                expect(await councilMember.balances(0)).to.equal(0);
                 expect(await councilMember.balances(1)).to.equal(133);
                 expect(await councilMember.balances(2)).to.equal(33);
 
-                expect(await telcoin.balanceOf(member.address)).to.equal(300);
+                expect(await telcoin.balanceOf(member.address)).to.equal(333);
                 expect(await telcoin.balanceOf(support.address)).to.equal(0);
-                expect(await telcoin.balanceOf(await councilMember.getAddress())).to.equal(200);
+                expect(await telcoin.balanceOf(await councilMember.getAddress())).to.equal(167);
             });
         });
 
