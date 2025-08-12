@@ -2,10 +2,10 @@
 pragma solidity ^0.8.0;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IPRBProxy} from "../interfaces/IPRBProxy.sol";
+import {ISablierV2Lockup} from "../interfaces/ISablierV2Lockup.sol";
 
 //TESTING ONLY
-contract TestProxy is IPRBProxy {
+contract TestSablierV2Lockup is ISablierV2Lockup {
     IERC20 public _token;
     uint256 public lastBlock;
 
@@ -13,14 +13,15 @@ contract TestProxy is IPRBProxy {
         _token = token_;
     }
 
-    function execute(
-        address,
-        bytes calldata
-    ) external payable override returns (bytes memory response) {
+    function withdrawMax(
+        uint256,
+        address
+    ) external override returns (uint128 withdrawnAmount) {
         if (lastBlock != block.timestamp) {
             _token.transfer(msg.sender, 100);
             lastBlock = block.timestamp;
+            return 100;
         }
-        response = "";
+        return 0;
     }
 }
