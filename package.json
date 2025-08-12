@@ -25,6 +25,7 @@
   },
   "homepage": "https://github.com/Telcoin-Association/telcoin-laboratories-contracts#readme",
   "devDependencies": {
+    "@nomicfoundation/hardhat-foundry": "^1.2.0",
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
     "hardhat": "^2.20.1"
   },
