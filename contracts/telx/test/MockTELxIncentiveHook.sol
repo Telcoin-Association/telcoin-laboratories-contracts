@@ -11,6 +11,7 @@ import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/type
 import {IPositionRegistry} from "../interfaces/IPositionRegistry.sol";
 import {IMsgSender} from "../interfaces/IMsgSender.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import { TELxIncentiveHook } from "../core/TELxIncentiveHook.sol";
 
 contract MockTELxIncentiveHook is BaseHook {
     using PoolIdLibrary for PoolKey;
@@ -125,4 +126,14 @@ contract MockTELxIncentiveHook is BaseHook {
         }
         return sender;
     }
+}
+
+contract TELxIncentiveHookDeployable is TELxIncentiveHook {
+    constructor(
+        IPoolManager _poolManager,
+        address _positionManager,
+        IPositionRegistry _registry
+    ) TELxIncentiveHook(_poolManager, _positionManager, _registry) {}
+
+    function validateHookAddress(BaseHook _this) internal pure override {}
 }

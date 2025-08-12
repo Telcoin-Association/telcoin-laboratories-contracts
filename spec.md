@@ -148,3 +148,7 @@ Allows the voting calculator to treat Uniswap LP positions as if they were plain
 
 5. **Voting**
    - Snapshot calls VotingWeightCalculator → UniswapAdaptor → PositionRegistry to get TEL-equivalent LP weight.
+
+## Review Notes
+
+TEL contract position is stored in `telcoinPosition` but the position is just determined by sorting address numerically. Storing of TEL contract position requires manual tx from `SUPPORT_ROLE` which can provide incorrect params such as `TEL == address(0x0)` Is storing only necessary because uni-v4 contracts hash to `PoolId ~= bytes32`?
