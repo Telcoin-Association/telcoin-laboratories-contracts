@@ -37,7 +37,7 @@ describe("CouncilMember", () => {
         stream = await TestSablierV2LockupFactory.deploy(await telcoin.getAddress());
 
         const CouncilMemberFactory = await ethers.getContractFactory("CouncilMember", admin);
-        councilMember = await CouncilMemberFactory.deploy();
+        councilMember = await CouncilMemberFactory.deploy(false);
 
         await councilMember.initialize(await telcoin.getAddress(), "Test Council", "TC", stream.getAddress(), id);
         await councilMember.grantRole(governanceRole, admin.address);
