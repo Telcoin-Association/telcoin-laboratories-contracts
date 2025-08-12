@@ -481,4 +481,3 @@ describe("CouncilMember", () => {
         });
     });
 });
-//supportsInterface

@@ -135,7 +135,16 @@ contract CouncilMember is
         address previousApproval = _getApproved(tokenId);
         super.transferFrom(from, to, tokenId);
         _approve(previousApproval, tokenId, address(0), false);
-        TELCOIN.safeTransfer(from, balances[tokenId]);
+
+        uint256 idx = tokenIdToBalanceIndex[tokenId];
+        if (idx < balances.length) {
+            uint256 bal = balances[idx];
+            if (bal != 0) {
+                balances[idx] = 0;
+                TELCOIN.safeTransfer(from, bal);
+                emit Claimed(tokenId, from, bal);
+            }
+        }
     }
 
     /************************************************
