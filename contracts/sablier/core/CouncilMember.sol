@@ -138,34 +138,6 @@ contract CouncilMember is
         TELCOIN.safeTransfer(from, balances[tokenId]);
     }
 
-    function migrateAndFixBalanceIndex(
-        uint256 tokenId,
-        uint256 fromIndex,
-        uint256 toIndex
-    ) external onlyRole(SUPPORT_ROLE) {
-        require(toIndex < balances.length, "toIndex out of bounds");
-        require(balances[toIndex] == 0, "target index already used");
-
-        uint256 value = balances[fromIndex];
-        balances[toIndex] = value;
-        balances[fromIndex] = 0;
-
-        tokenIdToBalanceIndex[tokenId] = toIndex;
-        balanceIndexToTokenId[toIndex] = tokenId;
-    }
-
-    function debugBalanceView(
-        uint256 tokenId
-    )
-        external
-        view
-        returns (uint256 balance, uint256 tokenIndex, uint256 mappedTokenId)
-    {
-        tokenIndex = tokenIdToBalanceIndex[tokenId];
-        balance = tokenIndex < balances.length ? balances[tokenIndex] : 0;
-        mappedTokenId = balanceIndexToTokenId[tokenIndex];
-    }
-
     /************************************************
      *   view functions
      ************************************************/
