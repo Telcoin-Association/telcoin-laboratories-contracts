@@ -17,6 +17,7 @@ import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import { BaseHook } from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import { Actions } from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract PositionRegistryTest is Test {
@@ -76,6 +77,14 @@ contract PositionRegistryTest is Test {
         vm.expectEmit(true, true, true, true);
         emit IPoolManager.Initialize(poolKey.toId(), poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks, sqrtPriceX96, tick);
         assertEq(poolManager.initialize(poolKey, sqrtPriceX96), tick);
+
+        // position registry must be informed of the TEL position
+        vm.expectEmit(true, true, true, true);
+        emit IPositionRegistry.TelPositionUpdated(poolKey.toId(), uint8(2));
+        vm.prank(support);
+        positionRegistry.updateTelPosition(poolKey.toId(), uint8(2));
+
+        assertTrue(positionRegistry.validPool(poolKey.toId()));
     }
 
     function test_setUp() public view {
@@ -88,15 +97,6 @@ contract PositionRegistryTest is Test {
         assertEq(address(positionRegistry.telcoin()), address(tel));
         assertTrue(positionRegistry.hasRole(positionRegistry.UNI_HOOK_ROLE(), address(telXIncentiveHook)));
         assertTrue(positionRegistry.hasRole(positionRegistry.SUPPORT_ROLE(), support));
-    }
-
-    function test_updateTelPosition() public {
-        vm.expectEmit(true, true, true, true);
-        emit IPositionRegistry.TelPositionUpdated(poolKey.toId(), uint8(1));
-        vm.prank(support);
-        positionRegistry.updateTelPosition(poolKey.toId(), uint8(1));
-
-        assertTrue(positionRegistry.validPool(poolKey.toId()));
     }
 
     function testRevert_updateTelPosition() public {
@@ -114,14 +114,47 @@ contract PositionRegistryTest is Test {
     }
 
     function test_activeRouters() public {
-        assertFalse(positionRegistry.activeRouters(address(0x0)));
-
         // v4 universal router on sepolia
         address router = 0x3A9D48AB9751398BbFa63ad67599Bb04e4BdF98b;
+        assertFalse(positionRegistry.activeRouters(router));
+        assertFalse(positionRegistry.activeRouters(address(0x0)));
+
         vm.prank(support);
         positionRegistry.updateRegistry(router, true);
 
         assertTrue(positionRegistry.activeRouters(router));
+    }
+
+    function test_addOrUpdatePosition() public {
+        uint256 tokenId = 1; // placeholder `ModifyLiquidityParams.salt`
+        PoolId poolId = poolKey.toId();
+        int24 tickLower = -60;
+        int24 tickUpper = 60;
+        uint128 liquidity = 1_000;
+        uint128 amount0Max = 1_000_000;
+        uint128 amount1Max = 1_000_000;
+        uint256 deadline = block.timestamp + 10 minutes;
+
+        bytes memory actions = abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR));
+        bytes[] memory params = new bytes[](2);
+        params[0] = abi.encode(poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, holder, '');
+        params[1] = abi.encode(poolKey.currency0, poolKey.currency1);
+
+        vm.startPrank(holder);
+        address permit2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+        IERC20(usdc).approve(address(permit2), amount0Max);
+        tel.approve(address(permit2), amount1Max);
+        permit2.call(abi.encodeWithSignature("approve(address,address,uint160,uint48)", usdc, address(positionManager), amount0Max, type(uint48).max));
+
+        vm.expectEmit(true, true, true, true);
+        emit IPositionRegistry.PositionUpdated(tokenId, holder, poolId, tickLower, tickUpper, liquidity);
+        positionManager.modifyLiquidities(abi.encode(actions, params), deadline);
+        vm.stopPrank();
+
+        // (int24 lower, int24 upper, uint128 liq) = positionRegistry.getPosition(tokenId);
+        // assertEq(lower, tickLower);
+        // assertEq(upper, tickUpper);
+        // assertEq(liq, liquidity);
     }
 
     // helper function to return a PoolId as bytes32 type
