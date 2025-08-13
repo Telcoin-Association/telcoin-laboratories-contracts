@@ -20,6 +20,8 @@ contract CouncilMember is
 {
     using SafeERC20 for IERC20;
 
+    uint256 private constant INVALID_INDEX = type(uint256).max;
+
     /* ========== EVENTS ========== */
     // Reward Claimed Event
     event Claimed(
@@ -141,14 +143,12 @@ contract CouncilMember is
         super.transferFrom(from, to, tokenId);
         _approve(previousApproval, tokenId, address(0), false);
 
-        uint256 idx = tokenIdToBalanceIndex[tokenId];
-        if (idx < balances.length) {
-            uint256 bal = balances[idx];
-            if (bal != 0) {
-                balances[idx] = 0;
-                TELCOIN.safeTransfer(from, bal);
-                emit Claimed(tokenId, from, bal);
-            }
+        uint256 idx = _slotOf(tokenId);
+        uint256 bal = balances[idx];
+        if (bal != 0) {
+            balances[idx] = 0; // effects first
+            TELCOIN.safeTransfer(from, bal); // interaction
+            emit Claimed(tokenId, from, bal);
         }
     }
 
@@ -230,9 +230,7 @@ contract CouncilMember is
 
         uint256 index = counter++;
         _mint(newMember, index);
-        tokenIdToBalanceIndex[index] = balances.length;
-        balanceIndexToTokenId[balances.length] = index;
-        balances.push(0);
+        _assignSlot(index);
     }
 
     /**
@@ -249,47 +247,77 @@ contract CouncilMember is
         require(recipient != address(0), "CouncilMember: recipient=0");
         require(totalSupply() > 1, "CouncilMember: must maintain council");
 
-        // 1) Settle stream FIRST so leaver gets full share pre-burn
+        // Settle first so leaver gets proper share
         _retrieve();
 
-        // 2) Compute indices and owed amount
-        uint256 idx = tokenIdToBalanceIndex[tokenId];
-        require(idx < balances.length, "CouncilMember: invalid tokenId");
+        // Locate and cache owed balance
+        uint256 idx = _slotOf(tokenId);
         uint256 owed = balances[idx];
-        uint256 last = balances.length - 1;
 
-        // 3) EFFECTS FIRST (CEI)
-        //    3a) Clear the slot to prevent double-collect
+        // EFFECTS first: zero slot to avoid double-collect on failure paths
         balances[idx] = 0;
 
-        //    3b) Swap-and-pop indexes/mappings to keep array dense
-        if (idx != last) {
-            // Move last balance into idx
-            balances[idx] = balances[last];
+        // Remove the slot (swap-and-pop) and mark token invalid
+        _swapPopSlot(idx);
 
-            // Move reverse/forward pointers for the moved token
-            uint256 movedTokenId = balanceIndexToTokenId[last];
-            tokenIdToBalanceIndex[movedTokenId] = idx;
-            balanceIndexToTokenId[idx] = movedTokenId;
-        }
-
-        // Clear tail mappings and shrink
-        delete balanceIndexToTokenId[last];
-        balances.pop();
-
-        // Mark burned token as invalid
-        tokenIdToBalanceIndex[tokenId] = type(uint256).max;
-
-        // Keep totalSupply() unchanged during bookkeeping, then burn
+        // Burn NFT after accounting
         _burn(tokenId);
 
-        // 4) INTERACTIONS LAST
+        // INTERACTIONS last
         if (owed != 0) {
             TELCOIN.safeTransfer(recipient, owed);
-            // Reuse Claimed for uniform analytics
-            emit Claimed(tokenId, recipient, owed);
+            emit Claimed(tokenId, recipient, owed); // reuse existing event for traceability
         }
     }
+
+    // function burn(
+    //     uint256 tokenId,
+    //     address recipient
+    // ) external onlyRole(GOVERNANCE_COUNCIL_ROLE) {
+    //     require(recipient != address(0), "CouncilMember: recipient=0");
+    //     require(totalSupply() > 1, "CouncilMember: must maintain council");
+
+    //     // 1) Settle stream FIRST so leaver gets full share pre-burn
+    //     _retrieve();
+
+    //     // 2) Compute indices and owed amount
+    //     uint256 idx = tokenIdToBalanceIndex[tokenId];
+    //     require(idx < balances.length, "CouncilMember: invalid tokenId");
+    //     uint256 owed = balances[idx];
+    //     uint256 last = balances.length - 1;
+
+    //     // 3) EFFECTS FIRST (CEI)
+    //     //    3a) Clear the slot to prevent double-collect
+    //     balances[idx] = 0;
+
+    //     //    3b) Swap-and-pop indexes/mappings to keep array dense
+    //     if (idx != last) {
+    //         // Move last balance into idx
+    //         balances[idx] = balances[last];
+
+    //         // Move reverse/forward pointers for the moved token
+    //         uint256 movedTokenId = balanceIndexToTokenId[last];
+    //         tokenIdToBalanceIndex[movedTokenId] = idx;
+    //         balanceIndexToTokenId[idx] = movedTokenId;
+    //     }
+
+    //     // Clear tail mappings and shrink
+    //     delete balanceIndexToTokenId[last];
+    //     balances.pop();
+
+    //     // Mark burned token as invalid
+    //     tokenIdToBalanceIndex[tokenId] = type(uint256).max;
+
+    //     // Keep totalSupply() unchanged during bookkeeping, then burn
+    //     _burn(tokenId);
+
+    //     // 4) INTERACTIONS LAST
+    //     if (owed != 0) {
+    //         TELCOIN.safeTransfer(recipient, owed);
+    //         // Reuse Claimed for uniform analytics
+    //         emit Claimed(tokenId, recipient, owed);
+    //     }
+    // }
 
     /**
      * @notice Update the lockup address
@@ -318,6 +346,46 @@ contract CouncilMember is
     /************************************************
      *   internal functions
      ************************************************/
+
+    /// @dev Strictly fetch the balance slot for tokenId and verify the triad is consistent.
+    function _slotOf(uint256 tokenId) internal view returns (uint256 idx) {
+        idx = tokenIdToBalanceIndex[tokenId];
+        require(idx < balances.length, "CouncilMember: index OOB");
+        require(
+            balanceIndexToTokenId[idx] == tokenId,
+            "CouncilMember: index drift"
+        );
+    }
+
+    /// @dev Assign a fresh zeroed slot at the end for tokenId. Use in mint.
+    function _assignSlot(uint256 tokenId) internal returns (uint256 idx) {
+        idx = balances.length;
+        balances.push(0);
+        tokenIdToBalanceIndex[tokenId] = idx;
+        balanceIndexToTokenId[idx] = tokenId;
+    }
+
+    /// @dev Swap-and-pop removal of slot idx. Marks removed tokenId as INVALID_INDEX. Use in burn.
+    function _swapPopSlot(uint256 idx) internal {
+        uint256 last = balances.length - 1;
+        uint256 tokenId = balanceIndexToTokenId[idx];
+
+        if (idx != last) {
+            // move last balance + owner into idx
+            balances[idx] = balances[last];
+
+            uint256 movedTokenId = balanceIndexToTokenId[last];
+            tokenIdToBalanceIndex[movedTokenId] = idx;
+            balanceIndexToTokenId[idx] = movedTokenId;
+        }
+
+        // clear tail and shrink
+        delete balanceIndexToTokenId[last];
+        balances.pop();
+
+        // mark removed token as invalid
+        tokenIdToBalanceIndex[tokenId] = INVALID_INDEX;
+    }
 
     /**
      * @notice Retrieve and distribute TELCOIN to council members based on the stream from _target
