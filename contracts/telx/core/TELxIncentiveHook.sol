@@ -96,7 +96,7 @@ contract TELxIncentiveHook is BaseHook {
             "TELxIncentiveHook: Caller is not Position Manager"
         );
 
-        uint256 tokenId = uint256(uint160(bytes20(params.salt)));
+        uint256 tokenId = uint256(params.salt);
 
         registry.addOrUpdatePosition(
             tokenId,
