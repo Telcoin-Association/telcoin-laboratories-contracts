@@ -18,6 +18,8 @@ import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import { BaseHook } from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { Actions } from "@uniswap/v4-periphery/src/libraries/Actions.sol";
+import { LiquidityAmounts } from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
+import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract PositionRegistryTest is Test {
@@ -126,11 +128,12 @@ contract PositionRegistryTest is Test {
     }
 
     function test_addOrUpdatePosition() public {
-        uint256 tokenId = 1; // placeholder `ModifyLiquidityParams.salt`
-        PoolId poolId = poolKey.toId();
-        int24 tickLower = -60;
-        int24 tickUpper = 60;
-        uint128 liquidity = 1_000;
+        (/*uint160 sqrtPriceX96*/, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolManager)), poolKey.toId());
+        int24 tickSpacing = 60;
+        int24 range = 120;
+        int24 tickLower = (currentTick - range) / tickSpacing * tickSpacing;
+        int24 tickUpper = (currentTick + range) / tickSpacing * tickSpacing;
+        uint128 liquidity = 1_000_000;
         uint128 amount0Max = 1_000_000;
         uint128 amount1Max = 1_000_000;
         uint256 deadline = block.timestamp + 10 minutes;
@@ -144,21 +147,26 @@ contract PositionRegistryTest is Test {
         address permit2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
         IERC20(usdc).approve(address(permit2), amount0Max);
         tel.approve(address(permit2), amount1Max);
-        permit2.call(abi.encodeWithSignature("approve(address,address,uint160,uint48)", usdc, address(positionManager), amount0Max, type(uint48).max));
+        (bool r, ) = permit2.call(abi.encodeWithSignature("approve(address,address,uint160,uint48)", usdc, address(positionManager), amount0Max, type(uint48).max));
+        require(r);
+        (bool res, ) = permit2.call(abi.encodeWithSignature("approve(address,address,uint160,uint48)", tel, address(positionManager), amount1Max, type(uint48).max));
+        require(res);
 
-        vm.expectEmit(true, true, true, true);
-        emit IPositionRegistry.PositionUpdated(tokenId, holder, poolId, tickLower, tickUpper, liquidity);
+        uint256 usdcBefore = IERC20(usdc).balanceOf(holder);
+        uint256 telBefore = tel.balanceOf(holder);
+
         positionManager.modifyLiquidities(abi.encode(actions, params), deadline);
         vm.stopPrank();
 
-        // (int24 lower, int24 upper, uint128 liq) = positionRegistry.getPosition(tokenId);
-        // assertEq(lower, tickLower);
-        // assertEq(upper, tickUpper);
-        // assertEq(liq, liquidity);
-    }
-
-    // helper function to return a PoolId as bytes32 type
-    function toIdBytes32(PoolId poolId) public pure returns (bytes32) {
-        return keccak256(abi.encode(poolId));
+        // expected liquidity has been added to the pool
+        uint256 usdcAfter = IERC20(usdc).balanceOf(holder);
+        uint256 telAfter = tel.balanceOf(holder);
+        assertLt(usdcAfter, usdcBefore);
+        assertLt(telAfter, telBefore);
+        // position has been added to unsubscribed token ID storage mapping
+        assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 1);
+        // LP's token ID is not yet subscribed
+        uint256[] memory tokenIds = positionRegistry.getTokenIdsByProvider(holder);
+        assertTrue(tokenIds.length == 0);
     }
 }
