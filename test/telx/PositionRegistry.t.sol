@@ -36,12 +36,15 @@ contract PositionRegistryTest is Test {
 
     PoolKey public poolKey;
 
+    IERC20 public usdc = IERC20(0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238); // sepolia USDC
     address public holder = 0x5d5d4d04B70BFe49ad7Aac8C4454536070dAf180;
     address public admin = address(0xc0ffee);
     address public support = address(0xdeadbeef);
-    address public usdc = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238; // sepolia USDC
+    address permit2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     // address encoding the enabled afterAddLiquidity, beforeRemoveLiquidity, and afterSwap hooks
     address public hookAddress = 0x0000000000000000000000000000000000000a40;
+
+    int24 tickSpacing = 60;
 
     function setUp() public {
         // sepolia fork setup
@@ -69,7 +72,7 @@ contract PositionRegistryTest is Test {
         uint160 sqrtPriceX96 = 9.9827e27; // 0.126 * 2^96
         // create TEL-USDC pool
         poolKey = PoolKey({
-            currency0: Currency.wrap(usdc),
+            currency0: Currency.wrap(address(usdc)),
             currency1: Currency.wrap(address(tel)),
             fee: 3000,
             tickSpacing: 60,
@@ -128,45 +131,158 @@ contract PositionRegistryTest is Test {
     }
 
     function test_addOrUpdatePosition() public {
-        (/*uint160 sqrtPriceX96*/, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolManager)), poolKey.toId());
-        int24 tickSpacing = 60;
+        (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolManager)), poolKey.toId());
         int24 range = 120;
-        int24 tickLower = (currentTick - range) / tickSpacing * tickSpacing;
-        int24 tickUpper = (currentTick + range) / tickSpacing * tickSpacing;
         uint128 liquidity = 1_000_000;
         uint128 amount0Max = 1_000_000;
         uint128 amount1Max = 1_000_000;
-        uint256 deadline = block.timestamp + 10 minutes;
 
-        bytes memory actions = abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR));
-        bytes[] memory params = new bytes[](2);
-        params[0] = abi.encode(poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, holder, '');
-        params[1] = abi.encode(poolKey.currency0, poolKey.currency1);
+        mintPosition(holder, currentTick, range, liquidity, amount0Max, amount1Max);
 
-        vm.startPrank(holder);
-        address permit2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
-        IERC20(usdc).approve(address(permit2), amount0Max);
-        tel.approve(address(permit2), amount1Max);
-        (bool r, ) = permit2.call(abi.encodeWithSignature("approve(address,address,uint160,uint48)", usdc, address(positionManager), amount0Max, type(uint48).max));
-        require(r);
-        (bool res, ) = permit2.call(abi.encodeWithSignature("approve(address,address,uint160,uint48)", tel, address(positionManager), amount1Max, type(uint48).max));
-        require(res);
 
-        uint256 usdcBefore = IERC20(usdc).balanceOf(holder);
+        // todo: subscriber calls
+
+        // todo: subscriber asserts 
+        // - Check if the position is registered correctly in `positionRegistry`.
+        // - ensure voting weight is computed correctly
+    }
+
+    function test_mintPosition(int24 range, uint128 liquidity) public {        
+        // bound the range to prevent overflow/underflow
+        (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolManager)), poolKey.toId());
+        int24 maxRange = TickMath.MAX_TICK - currentTick;
+        int24 minRange = currentTick - TickMath.MIN_TICK;
+        int256 upperBound = minRange < maxRange ? minRange : maxRange;
+        range = int24(bound(range, tickSpacing, upperBound));
+        
+        // bound the liquidity to avoid exceeding holder's onchain balance
+        liquidity = uint128(bound(liquidity, 1, type(uint24).max));
+        
+        // slippage is beyond scope of this test
+        uint128 amount0Max = type(uint128).max;
+        uint128 amount1Max = type(uint128).max;
+
+        // capture state before minting
+        uint256 expectedTokenId = positionManager.nextTokenId();
+        uint256 usdcBefore = usdc.balanceOf(holder);
         uint256 telBefore = tel.balanceOf(holder);
 
-        positionManager.modifyLiquidities(abi.encode(actions, params), deadline);
-        vm.stopPrank();
+        mintPosition(holder, currentTick, range, liquidity, amount0Max, amount1Max);
 
-        // expected liquidity has been added to the pool
-        uint256 usdcAfter = IERC20(usdc).balanceOf(holder);
-        uint256 telAfter = tel.balanceOf(holder);
-        assertLt(usdcAfter, usdcBefore);
-        assertLt(telAfter, telBefore);
+        // verify the added liquidity is reflected in the pool
+        assertEq(positionManager.nextTokenId(), expectedTokenId + 1);
+        uint128 returnedLiquidity = positionManager.getPositionLiquidity(expectedTokenId);
+        assertEq(returnedLiquidity, liquidity);
+        // ensure expected transfers have been made
+        assertLt(usdc.balanceOf(holder), usdcBefore);
+        assertLt(tel.balanceOf(holder), telBefore);
+        
         // position has been added to unsubscribed token ID storage mapping
         assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 1);
         // LP's token ID is not yet subscribed
         uint256[] memory tokenIds = positionRegistry.getTokenIdsByProvider(holder);
-        assertTrue(tokenIds.length == 0);
+        assertTrue(tokenIds.length == 0);        
+    }
+
+    function mintPosition(address lp, int24 currentTick, int24 range, uint128 liquidity, uint128 amount0Max, uint128 amount1Max) internal {        
+        int24 tickLower = (currentTick - range) / tickSpacing * tickSpacing;
+        int24 tickUpper = (currentTick + range) / tickSpacing * tickSpacing;
+
+        vm.startPrank(lp);
+        approveTokens(usdc, amount0Max);
+        approveTokens(tel, amount1Max);
+
+        bytes memory actions = abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR));
+        bytes[] memory params = new bytes[](2);
+        // MINT_POSITION
+        params[0] = abi.encode(poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, lp, '');
+        // SETTLE_PAIR
+        params[1] = abi.encode(poolKey.currency0, poolKey.currency1);
+        positionManager.modifyLiquidities(
+            abi.encode(actions, params),
+            block.timestamp + 1 minutes
+        );
+        vm.stopPrank();
+    }
+
+    // function increaseLiquidity(int24 range, uint128 additionalLiquidity, uint128 amount0Max, uint128 amount1Max, uint256 deadline) internal {
+    //     (int24 currentTick,,,) = StateLibrary.getSlot0(IPoolManager(address(poolManager)), poolKey.toId());
+    //     int24 tickLower = (currentTick - range) / tickSpacing * tickSpacing;
+    //     int24 tickUpper = (currentTick + range) / tickSpacing * tickSpacing;
+
+    //     vm.startPrank(holder);
+    //     approveTokens(usdc, amount0Max);
+    //     approveTokens(tel, amount1Max);
+
+    //     positionManager.modifyLiquidities(
+    //         abi.encodePacked(uint8(Actions.INCREASE_LIQUIDITY)),
+    //         abi.encode(poolKey, tickLower, tickUpper, tokenId, additionalLiquidity, amount0Max, amount1Max, holder, ''),
+    //         deadline
+    //     );
+    //     vm.stopPrank();
+    // }
+
+    // function decreaseLiquidity(int24 range, uint128 liquidityToRemove, uint128 amount0Max, uint128 amount1Max, uint256 deadline) internal {
+    //     (int24 currentTick,,,) = StateLibrary.getSlot0(IPoolManager(address(poolManager)), poolKey.toId());
+    //     int24 tickLower = (currentTick - range) / tickSpacing * tickSpacing;
+    //     int24 tickUpper = (currentTick + range) / tickSpacing * tickSpacing;
+
+    //     vm.startPrank(holder);
+    //     approveTokens(usdc, amount0Max);
+    //     approveTokens(tel, amount1Max);
+
+    //     positionManager.modifyLiquidities(
+    //         abi.encodePacked(uint8(Actions.DECREASE_LIQUIDITY)),
+    //         abi.encode(poolKey, tickLower, tickUpper, tokenId, liquidityToRemove, amount0Max, amount1Max, holder, ''),
+    //         deadline
+    //     );
+    //     vm.stopPrank();
+    // }
+
+    // approves permit2 address and positionManager to spend `amount` of `token`
+    function approveTokens(IERC20 token, uint128 amount) internal {
+        token.approve(permit2, amount);
+        (bool r, ) = permit2.call(abi.encodeWithSignature("approve(address,address,uint160,uint48)", token, address(positionManager), amount, type(uint48).max));
+        require(r, "Token approval failed");
     }
 }
+
+    /**
+    function test_increaseLiquidity()
+    - **Objective:** Test the ability to increase liquidity for an existing position.
+    - **Checkpoints:**
+        - Confirm the increased liquidity in the pool.
+        - Verify the positionRegistry reflects the updated position.
+        - Check if the `beforeAddLiquidity` hook behaves as expected.
+                //todo
+        // vm.expectEmit(true, true, true, true);
+        // emit IPositionRegistry.PositionUpdated(tokenId, holder, poolId, tickLower, tickUpper, liquidity);
+
+
+        // IPositionRegistry.Position memory noPosition = positionRegistry.getPosition(tokenId);
+        // assertEq(noPosition.provider, address(0));
+        // assertEq(noPosition.liquidity, 0);
+        // assertEq(noPosition.tickLower, 0);
+        // assertEq(noPosition.tickUpper, 0);
+
+    function test_decreaseLiquidity()
+    - **Objective:** Test reduction of liquidity from an existing position.
+    - **Checkpoints:**
+        - Ensure liquidity decrease is accurately reflected.
+        - Check that the positionRegistry updates the position correctly.
+        - Validate the `beforeRemoveLiquidity` hook's behavior.
+
+    function test_swap()
+    - **Objective:** Simulate swaps and ensure the hook behaves correctly during and after swaps.
+    - **Checkpoints:**
+        - Verify swap execution and resulting balances.
+        - Confirm the `afterSwap` hook's impact.
+        - Ensure the swap affects the pool state as expected.
+
+    function test_burnPosition()
+    - **Objective:** Ensure a position can be fully withdrawn and removed.
+    - **Checkpoints:**
+        - Confirm the position is removed from the pool.
+        - Check if the position is deregistered from `positionRegistry`.
+        - Ensure all balances are settled correctly.
+        */
