@@ -152,3 +152,17 @@ Allows the voting calculator to treat Uniswap LP positions as if they were plain
 ## Review Notes
 
 TEL contract position is stored in `telcoinPosition` but the position is just determined by sorting address numerically. Storing of TEL contract position requires manual tx from `SUPPORT_ROLE` which can provide incorrect params such as `TEL == address(0x0)` Is storing only necessary because uni-v4 contracts hash to `PoolId ~= bytes32`?
+
+rewards only issued to LP positions that are in range (ie actually providing liquidity to the swap)
+rewards distributions calculated by offchain script on weekly basis (ideally in tandem with TANIP-1)
+derivation:
+
+- list of active positions
+- list of swaps in pool
+  - factor in swap size
+  - factor in number of positions
+  - factor in size of positions
+
+voting weight is computed based on LP positions, agnostically to liquidity ranges
+voting weight is only computed during votes on snapshot- snapshot will invoke `positionRegistry.computeVotingWeight()`
+liquidity provision timing attacks are somewhat mitigated by state snapshots at vote creation time, meaning voting weight calculation occurs only in context of the block where the vote is created. in theory attackers can still gain awareness of votes slated to go live ahead of time and open large ephemeral liquidity positions and remove after vote creation. however in that case they take on risk of impermanent loss and the vote creation action can be delayed to dissuade the attacker

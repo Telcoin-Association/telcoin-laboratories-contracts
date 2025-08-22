@@ -237,6 +237,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         if (liquidityDelta > 0) {
             pos.liquidity += uint128(liquidityDelta);
         } else {
+            // the case where `liquidityDelta == 0` is permitted, though it has no effect beyond gas spend
             uint128 delta = uint128(-liquidityDelta);
             require(pos.liquidity >= delta, "PositionRegistry: Insufficient liquidity");
             pos.liquidity -= delta;
