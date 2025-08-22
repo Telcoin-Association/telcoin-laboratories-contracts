@@ -128,8 +128,9 @@ Allows the voting calculator to treat Uniswap LP positions as if they were plain
 1. **Position Creation**
 
    - LP mints a Uniswap v4 position NFT via the PositionManager.
+   - Position is marked unsubscribed in registry until explicitly subscribed.
+   - LP then calls `positionManager.subscribe()`
    - TELxSubscriber receives `notifySubscribe()` and calls `registry.handleSubscribe()`.
-   - Position is marked unsubscribed until explicitly subscribed.
 
 2. **Liquidity Changes**
 
@@ -142,7 +143,8 @@ Allows the voting calculator to treat Uniswap LP positions as if they were plain
 
 4. **Rewards**
 
-   - Off-chain script consumes hook events + registry data to calculate eligible rewards.
+   - Off-chain script consumes hook events + registry data to calculate eligible rewards. This involves all active liquidity positions including their size as well as all swaps including their size and liquidity range.
+   - Rewards distributions calculated by offchain script on weekly basis (ideally in tandem with TANIP-1)
    - Script calls `addRewards()` to allocate TEL to providers.
    - Providers claim via `claim()`.
 
@@ -151,18 +153,22 @@ Allows the voting calculator to treat Uniswap LP positions as if they were plain
 
 ## Review Notes
 
-TEL contract position is stored in `telcoinPosition` but the position is just determined by sorting address numerically. Storing of TEL contract position requires manual tx from `SUPPORT_ROLE` which can provide incorrect params such as `TEL == address(0x0)` Is storing only necessary because uni-v4 contracts hash to `PoolId ~= bytes32`?
+Have not yet seen the offchain rewards derivation script but am told rewards are only issued to LP positions that are in range (ie actually providing liquidity to the swap).
 
-rewards only issued to LP positions that are in range (ie actually providing liquidity to the swap)
-rewards distributions calculated by offchain script on weekly basis (ideally in tandem with TANIP-1)
-derivation:
+Rewards ledger could benefit from a block record a la TANIP-1 to keep tabs on the `lastRewardsBlock`.
 
-- list of active positions
-- list of swaps in pool
-  - factor in swap size
-  - factor in number of positions
-  - factor in size of positions
+### Potential for spec improvement:
 
-voting weight is computed based on LP positions, agnostically to liquidity ranges
-voting weight is only computed during votes on snapshot- snapshot will invoke `positionRegistry.computeVotingWeight()`
-liquidity provision timing attacks are somewhat mitigated by state snapshots at vote creation time, meaning voting weight calculation occurs only in context of the block where the vote is created. in theory attackers can still gain awareness of votes slated to go live ahead of time and open large ephemeral liquidity positions and remove after vote creation. however in that case they take on risk of impermanent loss and the vote creation action can be delayed to dissuade the attacker
+- voting weight is computed based solely on the TEL side of LP positions, agnostically to liquidity ranges. This means that the TELx rewards work differently from Uni V4 fees which align economic incentives for deeper liquidity positions which span a narrower range.
+
+  - As a result of this program's deviation from economically incentivizing deeper liquidity, LP rewards will mostly accrue to the widest positions with the largest liquidity units. This may be the desired outcome of the spec but is worth discussing
+
+- voting weight determination relies solely on the pool's current tick (ie onchain price), which is thus subject to liquidity conditions at snapshot time (vote instantiation). This may be unreliable, especially in low liquidity conditions. An oracle or trusted external price aggregator feed could be desirable if there are no liquidity guarantees.
+
+- liquidity provision timing attacks to alter voting weight are possible in theory, though somewhat mitigated by the timing of state snapshots (made at vote creation time).
+
+  - Voting weight calculation occurs in context of the block where the vote is created, so in order to capitalize an attacker must somehow gain awareness of votes slated to go live ahead of time. If so, the attacker can open large ephemeral liquidity positions and remove them after vote creation to effectively increase their weight.
+  - In such an attack however they take on risk of impermanent loss so long as their position is open, which could potentially be substantial losses of capital not worth the extra voting weight gained via attack. Further, if large liquidity positions are opened in suspicious context, the vote creation action can be simply delayed by the TelX council to dissuade the attacker by subjecting them to indefinite periods of impermanent loss. This may be an acceptable nuance of the spec
+
+- TEL contract position is stored in `telcoinPosition` but the position is just determined by sorting address numerically.
+  - Storing of TEL contract position requires manual tx from `SUPPORT_ROLE` which can provide incorrect params such as `TEL == address(0x0)`. This could instead be performed as part of a `beforeInitialize` v4 hook call to `TELxIncentiveHook` during `PoolManager::initialize()`

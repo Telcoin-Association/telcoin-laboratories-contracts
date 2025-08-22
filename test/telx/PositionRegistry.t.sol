@@ -263,23 +263,55 @@ contract PositionRegistryTest is
         assertEq(votingWeight, expectedWeight);
     }
 
-    function computeVotingWeightStateless(uint160 sqrtPriceX96, int24 tickLower, int24 tickUpper, uint128 liquidity) internal pure returns (uint256) {
-        (uint256 amount0, uint256 amount1) = getAmountsForLiquidity(
-            sqrtPriceX96, TickMath.getSqrtPriceAtTick(tickLower), TickMath.getSqrtPriceAtTick(tickUpper), liquidity
-        );
-        uint256 priceX96 = FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 2 ** 96);
-        return amount1 + FullMath.mulDiv(amount0, priceX96, 2 ** 96);
+    function test_decreaseLiquidity(int24 range, uint128 liquidity, uint128 liquidityToRemove) public {
+        (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
+        range = boundRange(currentTick, range);
+        liquidity = boundLiquidity(liquidity);
+        // bound liquidityToRemove to be no more than the initial liquidity
+        liquidityToRemove = uint128(bound(liquidityToRemove, 0, liquidity));
+
+        // mint initial position
+        uint256 tokenId = positionMngr.nextTokenId();
+        (int24 tickLower, int24 tickUpper) = mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
+
+        vm.prank(holder); // LP must be the one to call subscribe
+        positionMngr.subscribe(tokenId, address(telXSubscriber), "");
+
+        // capture state before updating liquidity position
+        uint256 usdcBefore = usdc.balanceOf(holder);
+        uint256 telBefore = tel.balanceOf(holder);
+        uint128 liquidityBefore = positionMngr.getPositionLiquidity(tokenId);
+
+        vm.expectEmit(true, true, true, true);
+        emit IPositionRegistry.PositionUpdated(tokenId, holder, poolKey.toId(), tickLower, tickUpper, liquidityBefore - liquidityToRemove);
+        decreaseLiquidity(holder, tokenId, liquidityToRemove, 0, 0);
+
+        // confirm the decreased liquidity is accurately reflected in the pool
+        uint256 returnedLiquidity = positionMngr.getPositionLiquidity(tokenId);
+        assertEq(returnedLiquidity, liquidityBefore - liquidityToRemove);
+        // ensure expected transfers to lp have been made (includes `liquidityToRemove == 0`)
+        assertGe(usdc.balanceOf(holder), usdcBefore);
+        assertGe(tel.balanceOf(holder), telBefore);
+
+        // verify the positionRegistry reflects the updated position.
+        PositionRegistry.Position memory position = positionRegistry.getPosition(tokenId);
+        assertEq(position.provider, holder);
+        assertEq(position.liquidity, returnedLiquidity);
+        assertEq(position.tickLower, tickLower);
+        assertEq(position.tickUpper, tickUpper);
+        bytes32 id = PoolId.unwrap(position.poolId);
+        assertEq(id, keccak256(abi.encode(poolKey)));
+
+        // ensure voting weight is computed correctly
+        (uint160 sqrtPriceX96,,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
+        uint256 expectedWeight = computeVotingWeightStateless(sqrtPriceX96, tickLower, tickUpper, position.liquidity);
+ 
+        uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
+        assertEq(votingWeight, expectedWeight);
     }
 
+
     /**
- *
- *     function test_decreaseLiquidity()
- *     - **Objective:** Test reduction of liquidity from an existing position.
- *     - **Checkpoints:**
- *         - Ensure liquidity decrease is accurately reflected.
- *         - Check that the positionRegistry updates the position correctly.
- *         - Validate the `beforeRemoveLiquidity` hook's behavior.
- *
  *     function test_swap()
  *     - **Objective:** Simulate swaps and ensure the hook behaves correctly during and after swaps.
  *     - **Checkpoints:**
@@ -350,23 +382,22 @@ contract PositionRegistryTest is
         vm.stopPrank();
     }
 
+    // assumes approvals are already set
+    function decreaseLiquidity(address lp, uint256 tokenId, uint128 liquidityToRemove, uint128 amount0Min, uint128 amount1Min) internal {
+        bytes memory actions = abi.encodePacked(uint8(Actions.DECREASE_LIQUIDITY), uint8(Actions.TAKE_PAIR));
+        bytes[] memory params = new bytes[](2);
+        // DECREASE_LIQUIDITY
+        params[0] = abi.encode(tokenId, liquidityToRemove, amount0Min, amount1Min, "");
+        // TAKE_PAIR
+        params[1] = abi.encode(poolKey.currency0, poolKey.currency1, lp);
 
-    // function decreaseLiquidity(int24 range, uint128 liquidityToRemove, uint128 amount0Max, uint128 amount1Max, uint256 deadline) internal {
-    //     (int24 currentTick,,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
-    //     int24 tickLower = (currentTick - range) / tickSpacing * tickSpacing;
-    //     int24 tickUpper = (currentTick + range) / tickSpacing * tickSpacing;
-
-    //     vm.startPrank(holder);
-    //     approveTokens(usdc, amount0Max);
-    //     approveTokens(tel, amount1Max);
-
-    //     positionMngr.modifyLiquidities(
-    //         abi.encodePacked(uint8(Actions.DECREASE_LIQUIDITY)),
-    //         abi.encode(poolKey, tickLower, tickUpper, tokenId, liquidityToRemove, amount0Max, amount1Max, holder, ''),
-    //         deadline
-    //     );
-    //     vm.stopPrank();
-    // }
+        vm.startPrank(lp);
+        positionMngr.modifyLiquidities(
+            abi.encode(actions, params),
+            block.timestamp + 1 minutes
+        );
+        vm.stopPrank();
+    }
 
     // approves permit2 address and positionMngr to spend `amount` of `token`
     function approveTokens(IERC20 token, uint128 amount) internal {
@@ -379,15 +410,20 @@ contract PositionRegistryTest is
         require(r, "Token approval failed");
     }
 
+    // mimics the voting weight computation in PositionRegistry and exposes it for testing
+    function computeVotingWeightStateless(uint160 sqrtPriceX96, int24 tickLower, int24 tickUpper, uint128 liquidity) internal pure returns (uint256) {
+        (uint256 amount0, uint256 amount1) = getAmountsForLiquidity(
+            sqrtPriceX96, TickMath.getSqrtPriceAtTick(tickLower), TickMath.getSqrtPriceAtTick(tickUpper), liquidity
+        );
+        uint256 priceX96 = FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 2 ** 96);
+        return amount1 + FullMath.mulDiv(amount0, priceX96, 2 ** 96);
+    }
+
     function boundRange(int24 currentTick, int24 range) internal view returns (int24) {
         int24 maxRange = TickMath.MAX_TICK - currentTick;
         int24 minRange = currentTick - TickMath.MIN_TICK;
         int256 upperBound = minRange < maxRange ? minRange : maxRange;
         return int24(bound(range, tickSpacing, upperBound));
-
-        // bound the liquidity to avoid exceeding holder's onchain balance (3k USDC)
-        // liquidity = uint128(bound(liquidity, 1, type(uint24).max));
-        // return (range, liquidity);
     }
 
     function boundLiquidity(uint128 liquidity) internal pure returns (uint128) {

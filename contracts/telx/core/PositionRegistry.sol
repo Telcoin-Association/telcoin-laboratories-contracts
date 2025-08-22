@@ -100,7 +100,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     /**
      * @notice Returns the voting weight (in TEL) for a position at a given sqrtPriceX96
      * @dev Because voting weight is TEL-denominated, it fluctuates with price changes & impermanent loss
-     * The spec uses TEL denomination rather than liquidity units for backwards compatibility reasons
+     * The spec uses TEL denomination rather than liquidity units for backwards compatibility with
+     * Snapshot infra + preexisting integration modules like VotingWeightCalculator & UniswapAdaptor
      * @param tokenId The position identifier
      */
     function computeVotingWeight(uint256 tokenId) external view returns (uint256) {
