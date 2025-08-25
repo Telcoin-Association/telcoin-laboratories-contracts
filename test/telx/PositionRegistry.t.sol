@@ -8,6 +8,7 @@ import {TELxIncentiveHook} from "contracts/telx/core/TELxIncentiveHook.sol";
 import {TELxSubscriber} from "contracts/telx/core/TELxSubscriber.sol";
 import {IPositionManager} from "contracts/telx/interfaces/IPositionManager.sol";
 import {TELxIncentiveHookDeployable} from "contracts/telx/test/MockTELxIncentiveHook.sol";
+import {IV4Router} from "@uniswap/v4-periphery/src/interfaces/IV4Router.sol";
 import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PositionManager} from "@uniswap/v4-periphery/src/PositionManager.sol";
@@ -17,12 +18,16 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
+import {SqrtPriceMath} from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IWETH9} from "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol";
+import {IAllowanceTransfer} from "@uniswap/v4-periphery/lib/permit2/src/interfaces/IAllowanceTransfer.sol";
+import {IPositionDescriptor} from "@uniswap/v4-periphery/src/interfaces/IPositionDescriptor.sol";
 
 contract PositionRegistryTest is
     PositionRegistry(IERC20(address(0)), IPoolManager(address(0)), IPositionManager(address(0))),
@@ -36,6 +41,7 @@ contract PositionRegistryTest is
     IERC20 public tel;
     PoolManager public poolMngr;
     PositionManager public positionMngr;
+    UniversalRouter public router;
     PositionRegistry public positionRegistry;
     TELxIncentiveHook public telXIncentiveHook;
     TELxSubscriber public telXSubscriber;
@@ -49,8 +55,9 @@ contract PositionRegistryTest is
     address permit2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     // address encoding the enabled afterAddLiquidity, beforeRemoveLiquidity, and afterSwap hooks
     address public hookAddress = 0x0000000000000000000000000000000000000a40;
-
+    
     int24 tickSpacing = 60;
+    uint256 constant V4_SWAP = 0x10;
 
     function setUp() public {
         // sepolia fork setup
@@ -58,7 +65,10 @@ contract PositionRegistryTest is
         vm.selectFork(sepoliaFork);
         tel = IERC20(0x92bc9f0D42A3194Df2C5AB55c3bbDD82e6Fb2F92); // tel clone on sepolia
         poolMngr = PoolManager(0xE03A1074c86CFeDd5C142C4F04F1a1536e203543);
+        // for debugging: new PoolManager(0xE03A1074c86CFeDd5C142C4F04F1a1536e203543);
         positionMngr = PositionManager(payable(0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4));
+        // for debugging: new PositionManager(IPoolManager(address(poolMngr)), IAllowanceTransfer(permit2), type(uint128).max, IPositionDescriptor(0x12570561f184C7Bf46C7EcA7D937db49861C7e61), IWETH9(0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14));
+        router = UniversalRouter(0x3A9D48AB9751398BbFa63ad67599Bb04e4BdF98b);
 
         // create pool registry and hook on permissions-encoded address
         vm.startPrank(admin);
@@ -137,15 +147,13 @@ contract PositionRegistryTest is
     }
 
     function test_activeRouters() public {
-        // v4 universal router on sepolia
-        address router = 0x3A9D48AB9751398BbFa63ad67599Bb04e4BdF98b;
-        assertFalse(positionRegistry.activeRouters(router));
+        assertFalse(positionRegistry.activeRouters(address(router)));
         assertFalse(positionRegistry.activeRouters(address(0x0)));
 
         vm.prank(support);
-        positionRegistry.updateRegistry(router, true);
+        positionRegistry.updateRegistry(address(router), true);
 
-        assertTrue(positionRegistry.activeRouters(router));
+        assertTrue(positionRegistry.activeRouters(address(router)));
     }
 
     function test_mintPosition(int24 range, uint128 liquidity) public {
@@ -310,14 +318,45 @@ contract PositionRegistryTest is
         assertEq(votingWeight, expectedWeight);
     }
 
+    function test_swap(int24 range, uint128 liquidity, uint128 amountIn, bool zeroForOne) public {
+        (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
+        range = boundRange(currentTick, range);
+        liquidity = boundLiquidity(liquidity);
+
+        // mint initial position so there is liquidity in the pool
+        uint256 tokenId = positionMngr.nextTokenId();
+        (int24 tickLower, int24 tickUpper) = mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
+        
+        // identify amountIn bound based on not exceeding available liquidity
+        (uint160 sqrtPriceX96,,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
+        uint256 liquidityBound = calculateLiquidityBound(liquidity, sqrtPriceX96, tickLower, tickUpper, zeroForOne);
+
+        // identify amountIn bound based on not exceeding lesser of liquidityBound or holder balance
+        Currency inputCurrency;
+        (inputCurrency, amountIn) = boundAmountInByBalance(holder, amountIn, liquidityBound, zeroForOne);
+
+        // subscribe position and approve router (required for swaps)
+        vm.startPrank(holder);
+        positionMngr.subscribe(tokenId, address(telXSubscriber), "");
+        Permit2(permit2).approve(Currency.unwrap(inputCurrency), address(router), type(uint160).max, type(uint48).max);
+        vm.stopPrank();
+
+        // add v4 universal router to position registry
+        vm.prank(support);
+        positionRegistry.updateRegistry(address(router), true);
+
+        uint256 initialInputBal = inputCurrency.balanceOf(holder);
+        (, Currency outputCurrency) = inputAndOutputCurrencies(zeroForOne);
+        uint256 initialOutputBal = outputCurrency.balanceOf(holder);
+
+        uint256 amountOut = swapTokensExactInSingle(holder, amountIn, 0, zeroForOne);
+        
+        // verify swap execution and resulting balances
+        assertEq(inputCurrency.balanceOf(holder), initialInputBal - amountIn);
+        assertEq(outputCurrency.balanceOf(holder), initialOutputBal + amountOut);
+    }
 
     /**
- *     function test_swap()
- *     - **Objective:** Simulate swaps and ensure the hook behaves correctly during and after swaps.
- *     - **Checkpoints:**
- *         - Verify swap execution and resulting balances.
- *         - Confirm the `afterSwap` hook's impact.
- *         - Ensure the swap affects the pool state as expected.
  *
  *     function test_burnPosition()
  *     - **Objective:** Ensure a position can be fully withdrawn and removed.
@@ -340,6 +379,7 @@ contract PositionRegistryTest is
      * UTILS
      */
 
+    // performs approvals to permit2 and positionMngr so it can be skipped later
     function mintPosition(
         address lp,
         int24 currentTick,
@@ -352,8 +392,8 @@ contract PositionRegistryTest is
         tickUpper = (currentTick + range) / tickSpacing * tickSpacing;
 
         vm.startPrank(lp);
-        approveTokens(usdc, amount0Max);
-        approveTokens(tel, amount1Max);
+        approveTokensForMint(usdc, amount0Max);
+        approveTokensForMint(tel, amount1Max);
 
         bytes memory actions = abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR));
         bytes[] memory params = new bytes[](2);
@@ -399,15 +439,56 @@ contract PositionRegistryTest is
         vm.stopPrank();
     }
 
-    // approves permit2 address and positionMngr to spend `amount` of `token`
-    function approveTokens(IERC20 token, uint128 amount) internal {
+    // pre-mint LP approvals to permit2 address and positionMngr to spend `amount` of `token`
+    function approveTokensForMint(IERC20 token, uint128 amount) internal {
         token.approve(permit2, amount);
-        (bool r,) = permit2.call(
-            abi.encodeWithSignature(
-                "approve(address,address,uint160,uint48)", token, address(positionMngr), amount, type(uint48).max
-            )
+        Permit2(permit2).approve(address(token), address(positionMngr), type(uint160).max, type(uint48).max);
+    }
+
+    // assumes previous approval to permit2::approve for router address on behalf of swapper 
+    function swapTokensExactInSingle(
+        address swapper,
+        uint128 amountIn,
+        uint128 minAmountOut,
+        bool zeroForOne
+    ) public returns (uint256 amountOut) {
+        (Currency inputCurrency, Currency outputCurrency) = inputAndOutputCurrencies(zeroForOne);
+
+        bytes memory commands = abi.encodePacked(uint8(V4_SWAP));
+        bytes memory actions = abi.encodePacked(
+            uint8(Actions.SWAP_EXACT_IN_SINGLE),
+            uint8(Actions.SETTLE_ALL),
+            uint8(Actions.TAKE_ALL)
         );
-        require(r, "Token approval failed");
+        bytes[] memory params = new bytes[](3);
+        // SWAP_EXACT_IN_SINGLE
+        params[0] = abi.encode(
+            IV4Router.ExactInputSingleParams({
+                poolKey: poolKey,
+                zeroForOne: zeroForOne,
+                amountIn: amountIn,
+                amountOutMinimum: minAmountOut,
+                hookData: ""
+            })
+        );
+        // SETTLE_ALL
+        params[1] = abi.encode(inputCurrency, amountIn);
+        // TAKE_ALL
+        params[2] = abi.encode(outputCurrency, minAmountOut);
+
+        // combine actions and params into inputs
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(actions, params);
+
+        uint256 initialBal = outputCurrency.balanceOf(swapper);
+
+        vm.startPrank(swapper);
+        router.execute(commands, inputs, block.timestamp + 1 minutes);
+        vm.stopPrank();
+
+        uint256 finalBal = outputCurrency.balanceOf(swapper);
+
+        return finalBal - initialBal;
     }
 
     // mimics the voting weight computation in PositionRegistry and exposes it for testing
@@ -417,6 +498,16 @@ contract PositionRegistryTest is
         );
         uint256 priceX96 = FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 2 ** 96);
         return amount1 + FullMath.mulDiv(amount0, priceX96, 2 ** 96);
+    }
+
+    function inputAndOutputCurrencies(bool zeroForOne) internal view returns (Currency inputCurrency, Currency outputCurrency) {
+        if (zeroForOne) {
+            inputCurrency = poolKey.currency0;
+            outputCurrency = poolKey.currency1;
+        } else {
+            inputCurrency = poolKey.currency1;
+            outputCurrency = poolKey.currency0;
+        }
     }
 
     function boundRange(int24 currentTick, int24 range) internal view returns (int24) {
@@ -430,4 +521,59 @@ contract PositionRegistryTest is
         // bound the liquidity to avoid exceeding holder's onchain balance (3k USDC)
         return uint128(bound(liquidity, 1, type(uint24).max));
     }
+
+    // calculates the max swappable amount based on available liquidity
+    function calculateLiquidityBound(uint128 liquidity, uint160 sqrtPriceX96, int24 tickLower, int24 tickUpper, bool zeroForOne) internal pure returns (uint256) {        
+        // calculate the price which exceeds the position's range
+        uint160 sqrtPriceLimitX96 = zeroForOne 
+            ? TickMath.getSqrtPriceAtTick(tickLower) // downward bound
+            : TickMath.getSqrtPriceAtTick(tickUpper); // upward bound
+        
+        // calculate max swappable amount based on liquidity
+        uint256 liquidityBoundAmountIn;
+        if (zeroForOne) {
+            // swapping token0 for token1, price decreases
+            liquidityBoundAmountIn = SqrtPriceMath.getAmount0Delta(
+                sqrtPriceLimitX96,
+                sqrtPriceX96,
+                liquidity,
+                true // roundUp for input amount
+            );
+        } else {
+            // swapping token1 for token0, price increases
+            liquidityBoundAmountIn = SqrtPriceMath.getAmount1Delta(
+                sqrtPriceX96,
+                sqrtPriceLimitX96,
+                liquidity,
+                true // roundUp for input amount
+            );
+        }
+
+        return liquidityBoundAmountIn;
+    }
+
+    function boundAmountInByBalance(address lp, uint128 amountIn, uint256 liquidityBound, bool zeroForOne) internal view returns (Currency, uint128) {
+        // identify amountIn bound based on not exceeding holder balance
+        (Currency inputCurrency, ) = inputAndOutputCurrencies(zeroForOne);
+        uint256 swappableBalance = inputCurrency.balanceOf(lp);
+        uint256 finalBound = swappableBalance < liquidityBound ? swappableBalance : liquidityBound;
+        
+        // bound amountIn to be nonzero and no more than the lesser of the two bounds
+        amountIn = uint128(bound(amountIn, 1, finalBound));
+
+        return (inputCurrency, amountIn);
+    }
+}
+
+// interface used to interact with the Uniswap V4 Universal Router without requiring extra dependencies
+interface UniversalRouter {
+    function execute(
+        bytes memory commands,
+        bytes[] memory inputs,
+        uint256 deadline
+    ) external payable;
+}
+
+interface Permit2 {
+    function approve(address token, address spender, uint160 amount, uint48 expiration) external;
 }
