@@ -207,7 +207,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         Position storage pos = positions[tokenId];
 
-        address tokenOwner = IPositionManager(positionManager).ownerOf(tokenId);
+        address tokenOwner; 
+        try IPositionManager(positionManager).ownerOf(tokenId) returns (address lp) {
+            tokenOwner = lp;
+        } catch {}
 
         // If the position does not exist, we expect the owner to call `subscribe`
         if (pos.provider == address(0)) {

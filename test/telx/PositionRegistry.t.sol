@@ -318,6 +318,51 @@ contract PositionRegistryTest is
         assertEq(votingWeight, expectedWeight);
     }
 
+    function test_burnPosition(int24 range, uint128 liquidity) public {
+        (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
+        range = boundRange(currentTick, range);
+        liquidity = boundLiquidity(liquidity);
+
+        // capture state before burning liquidity position
+        uint256 usdcBefore = usdc.balanceOf(holder);
+        uint256 telBefore = tel.balanceOf(holder);
+
+        // mint initial position
+        uint256 tokenId = positionMngr.nextTokenId();
+        (int24 tickLower, int24 tickUpper) = mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
+
+        vm.prank(holder); // LP must be the one to call subscribe
+        positionMngr.subscribe(tokenId, address(telXSubscriber), "");
+
+        vm.expectEmit(true, true, true, true);
+        emit IPositionRegistry.PositionRemoved(tokenId, holder, poolKey.toId(), tickLower, tickUpper);
+        burnPosition(holder, tokenId, 0, 0);
+
+        // confirm the decreased liquidity is accurately reflected in the pool
+        uint256 noLiquidity = positionMngr.getPositionLiquidity(tokenId);
+        assertEq(noLiquidity, 0);
+        // ensure expected transfers to restore lp balance have been made
+        assertApproxEqAbs(usdc.balanceOf(holder), usdcBefore, 1, "balance deviation above v4 rounding precision");
+        assertApproxEqAbs(tel.balanceOf(holder), telBefore, 1, "balance deviation above v4 rounding precision");
+
+        // verify the positionRegistry reflects the burned position.
+        PositionRegistry.Position memory noPosition = positionRegistry.getPosition(tokenId);
+        assertEq(noPosition.provider, address(0x0));
+        assertEq(noPosition.liquidity, 0);
+        assertEq(noPosition.tickLower, 0);
+        assertEq(noPosition.tickUpper, 0);
+        bytes32 id = PoolId.unwrap(noPosition.poolId);
+        assertEq(id, bytes32(0x0));
+
+        // sanity check unsubscribed and subscribed storage mappings
+        assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0);
+        assertTrue(positionRegistry.getTokenIdsByProvider(holder).length == 0);
+
+        // ensure voting weight is zero 
+        uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
+        assertEq(votingWeight, 0);
+    }
+
     function test_swap(int24 range, uint128 liquidity, uint128 amountIn, bool zeroForOne) public {
         (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
         range = boundRange(currentTick, range);
@@ -357,25 +402,6 @@ contract PositionRegistryTest is
     }
 
     /**
- *
- *     function test_burnPosition()
- *     - **Objective:** Ensure a position can be fully withdrawn and removed.
- *     - **Checkpoints:**
- *         - Confirm the position is removed from the pool.
- *         - Check if the position is deregistered from `positionRegistry`.
- *         - Ensure all balances are settled correctly.
-
-        function test_transferPosition()
- *     - **Objective:** Test the transfer of a position to another user.
- *     - **Checkpoints:**
- *         - Ensure the position is transferred without losing its state.
- *         - Validate that the new owner can subscribe to the position.
- *         - Check if the previous owner is unsubscribed correctly.
- *         - Ensure the `notifySubscribe` function in `TELxSubscriber` is called.
- *         - Confirm the position's voting weight is updated correctly.
- */
-
-    /**
      * UTILS
      */
 
@@ -401,6 +427,23 @@ contract PositionRegistryTest is
         params[0] = abi.encode(poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, lp, "");
         // SETTLE_PAIR
         params[1] = abi.encode(poolKey.currency0, poolKey.currency1);
+        positionMngr.modifyLiquidities(abi.encode(actions, params), block.timestamp + 1 minutes);
+        vm.stopPrank();
+    }
+
+    function burnPosition(
+        address lp,
+        uint256 tokenId,
+        uint128 amount0Min,
+        uint128 amount1Min
+    ) internal {
+        bytes memory actions = abi.encodePacked(uint8(Actions.BURN_POSITION), uint8(Actions.TAKE_PAIR));
+        bytes[] memory params = new bytes[](2);
+        // BURN_POSITION
+        params[0] = abi.encode(tokenId, amount0Min, amount1Min, "");
+        // TAKE_PAIR
+        params[1] = abi.encode(poolKey.currency0, poolKey.currency1, lp);
+        vm.startPrank(lp);
         positionMngr.modifyLiquidities(abi.encode(actions, params), block.timestamp + 1 minutes);
         vm.stopPrank();
     }
