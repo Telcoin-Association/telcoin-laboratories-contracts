@@ -62,6 +62,7 @@ interface IPositionRegistry {
     ) external;
 
     function handleSubscribe(uint256 tokenId) external;
+    function handleUnsubscribe(uint256 tokenId) external;
 
     function computeVotingWeight(
         uint256 tokenId

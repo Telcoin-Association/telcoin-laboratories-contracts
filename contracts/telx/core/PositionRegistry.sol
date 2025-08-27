@@ -294,10 +294,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Transfers a position's ownership to a new address using the NFT tokenId.
-     * @dev Must be called by an address with the SUBSCRIBER_ROLE.
-     *      Reads the existing position metadata, removes it from the old provider, and reassigns it to the new owner.
-     *      Keeps liquidity unchanged and emits appropriate events.
+     * @notice Registers a position's ownership using the NFT tokenId.
+     * @dev Must be invoked during hooks by an address with SUBSCRIBER_ROLE, such as TELxSubscriber
+     *      Reads the existing position metadata, and updates LP position ownership if necessary
+     * @dev LPs must call `PositionManager::subscribe()` to graduate unsubscribed (new) positions to active tracking
      * @param tokenId The NFT tokenId corresponding to the original position.
      */
     function handleSubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
@@ -305,9 +305,9 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         address newOwner = IPositionManager(positionManager).ownerOf(tokenId);
 
         (PoolKey memory poolKey, PositionInfo info) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
-        PoolId poolId = PoolId.wrap(PoolId.unwrap(poolKey.toId()));
+        PoolId poolId = poolKey.toId();
 
-        // Skip if not a TEL pool
+        // Skip if not a known TEL pool registered by `SUPPORT_ROLE`
         if (telcoinPosition[poolId] == 0) {
             return;
         }
@@ -317,21 +317,22 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         // No change in ownership
         // Liquidity should be updated via addOrUpdatePosition actions anyway due to the hook.
         if (pos.provider == newOwner) {
+            //todo: this represents case where subscribe is called again on an already subscribed position
+            // if handleUnsubscribe updates transferred positions, `pos.provider == newOwner` is unnecessary
+            // and can be changed to `pos.provider != address(0)` to no-op re-subscriptions
             return;
         }
 
-        // First time seeing this tokenId,
-        // Emit the event but let the add logic go though
-        // to set the initial liquidity balance.
         if (pos.provider == address(0)) {
+            // new position; emit the event for offchain availability & remove from unsubscribed state
             _removeUnsubscribedPosition(tokenId, newOwner);
             emit Subscribed(tokenId, newOwner);
-        } else {
-            // Ownership has changed — remove the position from the old owner
+        } else { //todo: logic in this branch should be handled by handleUnsubscribe()
+            // known position (subscribed) ownership change; remove the position from the old LP
             _removePosition(tokenId, pos.provider, poolId, pos.tickLower, pos.tickUpper);
         }
 
-        // Add under new owner
+        // add position state to new owner's tracked state
         uint128 liquidity = IPositionManager(positionManager).getPositionLiquidity(tokenId);
         positions[tokenId] = Position({
             provider: newOwner,
@@ -345,6 +346,64 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             providerTokenIds[newOwner].push(tokenId);
             emit PositionUpdated(tokenId, newOwner, poolId, info.tickLower(), info.tickUpper(), liquidity);
         }
+    }
+
+    /**
+     * @notice Deregisters a position to a new address using the NFT tokenId.
+     * @dev Must be invoked during hooks by an address with SUBSCRIBER_ROLE, such as TELxSubscriber
+     *.     Invoked during v4 unsubscription hooks during LP token transfers 
+     *      Reads the existing position metadata, removes it from the old provider, and reassigns it to the new owner.
+     * @param tokenId The NFT tokenId corresponding to the original position.
+     */
+    function handleUnsubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
+        //todo: double check this is not invoked during burns
+        require(tokenId != 0, "PositionRegistry: Invalid tokenId");
+        address newOwner = IPositionManager(positionManager).ownerOf(tokenId);
+
+        (PoolKey memory poolKey, PositionInfo info) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
+        PoolId poolId = poolKey.toId();
+
+        // Skip if not a known TEL pool registered by `SUPPORT_ROLE`
+        if (telcoinPosition[poolId] == 0) {
+            return;
+        }
+
+        Position storage pos = positions[tokenId];
+
+        // no change in ownership implies this is a self transfer
+        if (pos.provider == newOwner) {
+            return;
+        }
+
+
+        // Position's tokenId is either new or has not been subscribed yet
+        // if known position and is being transferred, update subscribed state (remove from old owner and add to new owner)
+        // if known position not yet subscribed, remove from unsubscribed and graduate to subscribed state
+        // if (pos.provider == address(0)) {
+                // todo: consider what happens when an unsubscribed position is transferred
+                // this function will be called, but the position is still unsubscribed
+                // update unsubscribedTokenIds mapping and return? (_removeUnsubscribedPosition )
+        //     _removeUnsubscribedPosition(tokenId, newOwner);
+        //     emit Subscribed(tokenId, newOwner);
+        // } else {
+        //     // Ownership has changed — remove the position from the old owner
+        //     _removePosition(tokenId, pos.provider, poolId, pos.tickLower, pos.tickUpper);
+        // }
+
+        // // Add under new owner
+        // uint128 liquidity = IPositionManager(positionManager).getPositionLiquidity(tokenId);
+        // positions[tokenId] = Position({
+        //     provider: newOwner,
+        //     poolId: poolId,
+        //     tickLower: info.tickLower(),
+        //     tickUpper: info.tickUpper(),
+        //     liquidity: liquidity
+        // });
+
+        // if (providerTokenIds[newOwner].length <= MAX_POSITIONS) {
+        //     providerTokenIds[newOwner].push(tokenId);
+        //     emit PositionUpdated(tokenId, newOwner, poolId, info.tickLower(), info.tickUpper(), liquidity);
+        // }
     }
 
     /**

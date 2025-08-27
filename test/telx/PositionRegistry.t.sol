@@ -318,6 +318,7 @@ contract PositionRegistryTest is
         assertEq(votingWeight, expectedWeight);
     }
 
+    // note that BURN_POSITION uses decreaseLiquidity and ERC20::_burn so unsubscription flow is not invoked
     function test_burnPosition(int24 range, uint128 liquidity) public {
         (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
         range = boundRange(currentTick, range);
@@ -362,6 +363,72 @@ contract PositionRegistryTest is
         uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
         assertEq(votingWeight, 0);
     }
+
+    // note that position transfers use `PositionManager::transferFrom`, triggering unsubscription flow unlike burns
+    function test_transferPosition(int24 range, uint128 liquidity) public {
+        (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
+        range = boundRange(currentTick, range);
+        liquidity = boundLiquidity(liquidity);
+
+        // mint initial position
+        uint256 tokenId = positionMngr.nextTokenId();
+        (int24 tickLower, int24 tickUpper) = mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
+
+        vm.prank(holder); // LP must be the one to call subscribe
+        positionMngr.subscribe(tokenId, address(telXSubscriber), "");
+
+        uint256 liquidityBefore = positionMngr.getPositionLiquidity(tokenId);
+        uint256 votingWeightBefore = positionRegistry.computeVotingWeight(tokenId);
+
+        vm.prank(holder);
+        (bool r,) = address(positionMngr).call(abi.encodeWithSignature("transferFrom(address,address,uint256)", holder, support, tokenId));
+        require(r);
+
+        // liquidity and voting weight should be unchanged despite owner change
+        uint256 liquidityAfter = positionMngr.getPositionLiquidity(tokenId);
+        assertEq(liquidityAfter, liquidityBefore);
+        uint256 votingWeightAfter = positionRegistry.computeVotingWeight(tokenId);
+        assertEq(votingWeightAfter, votingWeightBefore);
+
+        // transfer should remove existing position from old owner
+        PositionRegistry.Position memory noPosition = positionRegistry.getPosition(tokenId);
+        assertEq(noPosition.provider, address(0x0));
+        assertEq(noPosition.liquidity, 0);
+        assertEq(noPosition.tickLower, 0);
+        assertEq(noPosition.tickUpper, 0);
+        bytes32 id = PoolId.unwrap(noPosition.poolId);
+        assertEq(id, bytes32(0x0));
+
+        // transfer should add unsubscribed position to new owner
+        assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(support).length == 1);
+        // holders info is wiped
+        assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0);
+        assertTrue(positionRegistry.getTokenIdsByProvider(holder).length == 0);
+
+        // transferred positions should not be registered until subscribed
+        assertTrue(positionRegistry.getTokenIdsByProvider(support).length == 0);
+        vm.prank(support);
+        positionMngr.subscribe(tokenId, address(telXSubscriber), "");
+        assertTrue(positionRegistry.getTokenIdsByProvider(support).length == 1);
+
+        // after subscribing the position should be reregistered
+        PositionRegistry.Position memory position = positionRegistry.getPosition(tokenId);
+        assertEq(position.provider, support);
+        assertEq(position.liquidity, liquidityAfter);
+        assertEq(position.tickLower, tickLower);
+        assertEq(position.tickUpper, tickUpper);
+        bytes32 newId = PoolId.unwrap(position.poolId);
+        assertEq(newId, keccak256(abi.encode(poolKey)));
+    }
+    /**
+ *     - **Objective:** Test the transfer of a position to another user.
+ *     - **Checkpoints:**
+ *         - Ensure the position is transferred without losing its state.
+ *         - Check if the previous owner is unsubscribed correctly.
+ *         - Validate that the new owner can subscribe to the position.
+ *         - Ensure the `notifySubscribe` function in `TELxSubscriber` is called.
+ *         - Confirm the position's voting weight is updated correctly.
+ */
 
     function test_swap(int24 range, uint128 liquidity, uint128 amountIn, bool zeroForOne) public {
         (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
