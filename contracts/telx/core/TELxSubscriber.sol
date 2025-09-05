@@ -31,10 +31,6 @@ contract TELxSubscriber is ISubscriber {
         positionManager = _positionManager;
     }
 
-    // todo: none of this is necessary if all positions are stored/updated by registry during regular hooks
-    // todo: check liquidity increases vs mints in `beforeAddLiquidity` -> registry.newPosition() || registry.updatePosition
-    // todo: check liquidity decreases vs burns in `afterRemoveLiquidity` -> registry.burnPosition() || registry.updatePosition
-
     /// @notice Notifies registry that an LP token is being subscribed for the first time
     /// @dev Only callable by the PositionManager to trigger internal state update in the PositionRegistry
     /// @param tokenId The NFT tokenId representing a Uniswap LP position
@@ -55,7 +51,8 @@ contract TELxSubscriber is ISubscriber {
         int256,
         BalanceDelta
     ) external pure override onlyPositionManager {
-        //todo: update liquidity in PositionRegistry
+        //todo: update liquidity and fee tracking in PositionRegistry. 
+        //todo: must accommodate liquidity increases or fee collection
         //todo: must accomodate unsubscribed vs subscribed position state
         // registry.handleModifyLiquidity(tokenId);
     }
@@ -69,7 +66,7 @@ contract TELxSubscriber is ISubscriber {
         uint256,
         BalanceDelta
     ) external pure override onlyPositionManager {
-        //todo: update PositionRegistry state by deleting position
+        //todo: update PositionRegistry state by deleting position. tokenIDs not reused so full delete
         //todo: must accomodate unsubscribed () vs subscribed (delete) position state
         // registry.handleBurn(tokenId);
     }

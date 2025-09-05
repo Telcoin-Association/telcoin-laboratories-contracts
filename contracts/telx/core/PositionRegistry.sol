@@ -126,6 +126,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         uint8 index = telcoinPosition[pos.poolId];
 
+        // todo: this should be total value of liquidity position, not just TEL side of position
         if (index == 1) {
             return amount0 + FullMath.mulDiv(amount1, 2 ** 96, priceX96);
         } else if (index == 2) {
@@ -301,6 +302,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @param tokenId The NFT tokenId corresponding to the original position.
      */
     function handleSubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
+        // todo: make call to stakingPlugin() to check for stake and only LPs that are staked in TELx will return voting weight and qualify for rewards
         require(tokenId != 0, "PositionRegistry: Invalid tokenId");
         address newOwner = IPositionManager(positionManager).ownerOf(tokenId);
 

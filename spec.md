@@ -129,39 +129,37 @@ Allows the voting calculator to treat Uniswap LP positions as if they were plain
 
    - LP mints a Uniswap v4 position NFT via the PositionManager.
    - Position is marked unsubscribed in registry until explicitly subscribed.
-   - LP then calls `positionManager.subscribe()`
-   - TELxSubscriber receives `notifySubscribe()` and calls `registry.handleSubscribe()`.
 
-2. **Liquidity Changes**
+2. **Subscription as opt-in**
+
+   - After creating a position, LP calls `positionManager.subscribe()` which is the action required for LPs to opt-in to the program and begin qualifying for voting weight and rewards.
+   - TELxSubscriber receives `notifySubscribe()` and calls `registry.handleSubscribe()`.
+   - Additionally, only users who stake on Telex qualify for rewards and voting power through the hook implementation
+
+3. **Liquidity Changes**
 
    - When liquidity is added or removed in a TEL pool, TELxIncentiveHook's `beforeAddLiquidity` / `beforeRemoveLiquidity` triggers `registry.addOrUpdatePosition()`.
 
-3. **Swap Events**
+4. **Swap Events**
 
    - Every swap in a TEL pool calls `afterSwap` in the hook.
    - Emits `SwapOccurredWithTick` for off-chain reward logic.
 
-4. **Rewards**
+5. **Rewards**
 
-   - Off-chain script consumes hook events + registry data to calculate eligible rewards. This involves all active liquidity positions including their size as well as all swaps including their size and liquidity range.
+   - Off-chain script consumes hook events + registry data to calculate eligible rewards. This is based on v4 fees earned, which involve all active liquidity positions including their size as well as all swaps including their size and liquidity range.
    - Rewards distributions calculated by offchain script on weekly basis (ideally in tandem with TANIP-1)
    - Script calls `addRewards()` to allocate TEL to providers.
    - Providers claim via `claim()`.
 
-5. **Voting**
+6. **Voting**
    - Snapshot calls VotingWeightCalculator → UniswapAdaptor → PositionRegistry to get TEL-equivalent LP weight.
+   - The snapshot call to calculate voting weight will return zero if positions are not staked on Telex
+   - Voting weight calculation is based on the total value of the liquidity position (both sides) and include the full range of positions whether they are in range or not.
 
-## Review Notes
-
-Have not yet seen the offchain rewards derivation script but am told rewards are only issued to LP positions that are in range (ie actually providing liquidity to the swap).
-
-Rewards ledger could benefit from a block record a la TANIP-1 to keep tabs on the `lastRewardsBlock`.
-
-### Potential for spec improvement:
+## Known Limitations:
 
 - voting weight is computed based solely on the TEL side of LP positions, agnostically to liquidity ranges. This means that the TELx rewards work differently from Uni V4 fees which align economic incentives for deeper liquidity positions which span a narrower range.
-
-  - As a result of this program's deviation from economically incentivizing deeper liquidity, LP rewards will mostly accrue to the widest positions with the largest liquidity units. This may be the desired outcome of the spec but is worth discussing
 
 - voting weight determination relies solely on the pool's current tick (ie onchain price), which is thus subject to liquidity conditions at snapshot time (vote instantiation). This may be unreliable, especially in low liquidity conditions. An oracle or trusted external price aggregator feed could be desirable if there are no liquidity guarantees.
 
@@ -171,4 +169,12 @@ Rewards ledger could benefit from a block record a la TANIP-1 to keep tabs on th
   - In such an attack however they take on risk of impermanent loss so long as their position is open, which could potentially be substantial losses of capital not worth the extra voting weight gained via attack. Further, if large liquidity positions are opened in suspicious context, the vote creation action can be simply delayed by the TelX council to dissuade the attacker by subjecting them to indefinite periods of impermanent loss. This may be an acceptable nuance of the spec
 
 - TEL contract position is stored in `telcoinPosition` but the position is just determined by sorting address numerically.
+
   - Storing of TEL contract position requires manual tx from `SUPPORT_ROLE` which can provide incorrect params such as `TEL == address(0x0)`. This could instead be performed as part of a `beforeInitialize` v4 hook call to `TELxIncentiveHook` during `PoolManager::initialize()`
+
+todo:
+subscribe() checks that LP is staked on TELx plugin: make call to stakingPlugin to check for stake
+voting weight calculation uses total value of position not just TEL side (but still denominated in a TEL amount based on TEL price- requires conversion of the non-TEL side's value to TEL terms)
+voting weight call from snapshot should return zero if positions are not staked on TELx (check TELx staking plugin)
+fees should be tracked in the v4 hook itself on each modifyLiquidity, this makes fee data more visible & available for rewards script
+hook's rewards ledger could benefit from a block record a la TANIP-1 to keep tabs on the `lastRewardsBlock`. This could further be linked to the fee tracking, but since fee tracking is lazily updated it might not be worthwhile
