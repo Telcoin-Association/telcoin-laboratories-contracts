@@ -9,7 +9,7 @@ import {IPositionManager} from "../interfaces/IPositionManager.sol";
 
 /**
  * @title TELxSubscriber
- * @author Amir M. Shirif
+ * @author Robriks 📯️📯️📯️.eth
  * @notice Implements ISubscriber to receive Uniswap v4 position transfer events
  * @dev https://docs.uniswap.org/contracts/v4/quickstart/subscriber
  */
@@ -38,22 +38,20 @@ contract TELxSubscriber is ISubscriber {
         registry.handleSubscribe(tokenId);
     }
 
-    /// @notice Notifies registry during unsubscription flow, ie LP token transfers
-    /// @dev Effectively renders LP tokens untransferrable
+    /// @notice Notifies registry during unsubscriptions and LP token transfers
+    /// @dev Deletes registry's stored subscription, requiring LPs to resubscribe in the case of transfers
     function notifyUnsubscribe(uint256 tokenId) external override onlyPositionManager {
         registry.handleUnsubscribe(tokenId);
     }
 
-    /// @notice No-op for liquidity modification events
-    /// @dev Required to satisfy ISubscriber but unused in this implementation
+    /// @notice Notifies registry of liquidity modification
+    /// @dev Updates registry's stored subscription with a fee checkpoint
     function notifyModifyLiquidity(
         uint256,
         int256,
         BalanceDelta
-    ) external pure override onlyPositionManager {
-        //todo: update liquidity and fee tracking in PositionRegistry. 
-        //todo: must accommodate liquidity increases or fee collection
-        //todo: must accomodate unsubscribed vs subscribed position state
+    ) external override onlyPositionManager {
+        //todo: update fee tracking in PositionRegistry
         // registry.handleModifyLiquidity(tokenId);
     }
 
@@ -65,9 +63,8 @@ contract TELxSubscriber is ISubscriber {
         PositionInfo,
         uint256,
         BalanceDelta
-    ) external pure override onlyPositionManager {
-        //todo: update PositionRegistry state by deleting position. tokenIDs not reused so full delete
-        //todo: must accomodate unsubscribed () vs subscribed (delete) position state
+    ) external override onlyPositionManager {
+        //todo: update PositionRegistry state by deleting subscription. tokenIDs not reused so full delete
         // registry.handleBurn(tokenId);
     }
 }

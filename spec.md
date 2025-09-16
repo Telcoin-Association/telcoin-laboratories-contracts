@@ -173,7 +173,10 @@ Allows the voting calculator to treat Uniswap LP positions as if they were plain
   - Storing of TEL contract position requires manual tx from `SUPPORT_ROLE` which can provide incorrect params such as `TEL == address(0x0)`. This could instead be performed as part of a `beforeInitialize` v4 hook call to `TELxIncentiveHook` during `PoolManager::initialize()`
 
 todo:
+positions MUST be created via the PositionManager to enforce salt == tokenId; positions not created this way are not accepted
+subscribe can be called by approved in adition to token owner; transfers of the token result in an unsubscription so new owners must re subscribe
 subscribe() checks that LP is staked on TELx plugin: make call to stakingPlugin to check for stake
+rewards script must also factor in TELx stake since the hook will not be able to track stake changes onchain
 voting weight calculation uses total value of position not just TEL side (but still denominated in a TEL amount based on TEL price- requires conversion of the non-TEL side's value to TEL terms)
 voting weight call from snapshot should return zero if positions are not staked on TELx (check TELx staking plugin)
 fees should be tracked in the v4 hook itself on each modifyLiquidity, this makes fee data more visible & available for rewards script

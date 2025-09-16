@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {Checkpoints} from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 import {IPositionRegistry, PoolId} from "../interfaces/IPositionRegistry.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
@@ -12,20 +13,29 @@ import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPositionManager, PoolKey, PositionInfo} from "../interfaces/IPositionManager.sol";
 
+// todo: refactor, reauthor:
+// this contract doesn't need to store unsubscribedTokenIds or positions at all; fetch from positionManager
+// this contract should store participating tokenIds, written at subscribe time
+// this contract should store fee tracking information (tokenId => fees), written at modifyLiquidity and addRewards time
+//   - checkpointing
+// offchain script can then pull fee tracking info
+
 /**
  * @title Position Registry
- * @author Amir M. Shirif
- * @notice Tracks Uniswap V4 LP positions and manages off-chain reward distribution.
- * @dev This contract is designed to work with a Uniswap V4 hook to emit on-chain events, which are processed by an off-chain reward calculation system.
+ * @author Robriks 📯️📯️📯️.eth
+ //todo: name of telx incentives program below
+ * @notice Tracks Uniswap V4 LP fees for positions subscribed to the TELxIncentives program and manages off-chain reward distribution.
+ * @dev Emits events during Uniswap V4 hook actions and stores fee checkpoints for consumption by an off-chain reward calculation system.
  */
 contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     using SafeERC20 for IERC20;
+    using Checkpoints for Checkpoints.Trace224;
 
     bytes32 public constant UNI_HOOK_ROLE = keccak256("UNI_HOOK_ROLE");
     bytes32 public constant SUPPORT_ROLE = keccak256("SUPPORT_ROLE");
     bytes32 public constant SUBSCRIBER_ROLE = keccak256("SUBSCRIBER_ROLE");
 
-    uint256 constant MAX_POSITIONS = 100;
+    uint256 constant MAX_POSITIONS = 100; //todo: this can be increased due to refactor efficiency
 
     mapping(address => uint256[]) public providerTokenIds;
     mapping(address => uint256[]) public unsubscribedTokenIds;
@@ -33,6 +43,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     mapping(uint256 => Position) public positions;
     mapping(PoolId => uint8) public telcoinPosition;
     mapping(address => bool) public routers;
+
+    //todo: refactored state
+    uint256 currentPeriod;
+    /// @notice The current set of active participating positions subscribed to TELxIncentives
+    uint256[] public subscriptions;
+    /// @notice History of positions' fee information: `tokenId => {block, telDenominatedFees}`
+    /// @dev Since Trace224 array is unbounded it can grow beyond EVM memory limits
+    /// do not load into EVM memory; consume offchain instead
+    mapping(uint256 => Checkpoints.Trace224) private feeRecords;
+    //todo: view function to fetch feeRecords
+    /// @notice Maps period numbers to their end block
+    mapping(uint256 => uint32) public periodEndBlock;
 
     IERC20 public immutable telcoin;
     IPoolManager public immutable poolManager;
@@ -105,9 +127,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @param tokenId The position identifier
      */
     function computeVotingWeight(uint256 tokenId) external view returns (uint256) {
+        // todo: from here until getAmountsForLiquidity can be replaced with the getAmountsForLiquidity(tokenId)
         Position storage pos = positions[tokenId];
         if (pos.liquidity == 0) return 0;
 
+        // todo: this should be replaced by a call to getPoolAndPositionInfo()
         if (pos.provider != IPositionManager(positionManager).ownerOf(tokenId)) {
             return 0;
         }
@@ -126,7 +150,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         uint8 index = telcoinPosition[pos.poolId];
 
-        // todo: this should be total value of liquidity position, not just TEL side of position
         if (index == 1) {
             return amount0 + FullMath.mulDiv(amount1, 2 ** 96, priceX96);
         } else if (index == 2) {
@@ -136,10 +159,12 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         return 0;
     }
 
+    //todo: add external view function getAmountsForLiquidity(tokenId) returns both token amounts at current tick
+
     /**
      * @notice Computes the amounts of token0 and token1 for given liquidity and prices
      * @dev Used for Uniswap V3/V4 style liquidity math
-     */
+     */ //todo: _getAmountsForLiquidity()
     function getAmountsForLiquidity(
         uint160 sqrtPriceX96,
         uint160 sqrtPriceAX96,
@@ -171,6 +196,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @param location The token index for TEL.
      */
     function updateTelPosition(PoolId poolId, uint8 location) external onlyRole(SUPPORT_ROLE) {
+        //todo: this should be done with initialize hook
         require(location >= 0 && location <= 2, "PositionRegistry: Invalid location");
         telcoinPosition[poolId] = location;
         emit TelPositionUpdated(poolId, location);
@@ -197,6 +223,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         external
         onlyRole(UNI_HOOK_ROLE)
     {
+        //todo: this function should instead write a fee tracking checkpoint (modifyLiquidity time)
+        // it should check that the tokenId's owner is still staked on TELx plugin
+        // it does not need to check that the tokenId is still subscribed (because of handleUnsubscribe during unsubscribes or transfers)
+        // it should identify fees being collected and store it using an internal setter which is also used during addRewards()
+
         // Does not fail on invalid poolId, just skips update
         if (telcoinPosition[poolId] == 0) {
             return;
@@ -304,6 +335,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     function handleSubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
         // todo: make call to stakingPlugin() to check for stake and only LPs that are staked in TELx will return voting weight and qualify for rewards
         require(tokenId != 0, "PositionRegistry: Invalid tokenId");
+        // todo: approved can also call this not just owner; are there conditions where reverting here causes problem
         address newOwner = IPositionManager(positionManager).ownerOf(tokenId);
 
         (PoolKey memory poolKey, PositionInfo info) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
@@ -351,9 +383,9 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Deregisters a position to a new address using the NFT tokenId.
+     * @notice Deregisters a position.
      * @dev Must be invoked during hooks by an address with SUBSCRIBER_ROLE, such as TELxSubscriber
-     *.     Invoked during v4 unsubscription hooks during LP token transfers 
+     *      Invoked during v4 unsubscription hooks during LP token transfers 
      *      Reads the existing position metadata, removes it from the old provider, and reassigns it to the new owner.
      * @param tokenId The NFT tokenId corresponding to the original position.
      */
@@ -372,40 +404,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         Position storage pos = positions[tokenId];
 
-        // no change in ownership implies this is a self transfer
+        // no change in ownership implies this is a self transfer or a direct call to unsubscribe()
         if (pos.provider == newOwner) {
             return;
         }
-
-
-        // Position's tokenId is either new or has not been subscribed yet
-        // if known position and is being transferred, update subscribed state (remove from old owner and add to new owner)
-        // if known position not yet subscribed, remove from unsubscribed and graduate to subscribed state
-        // if (pos.provider == address(0)) {
-                // todo: consider what happens when an unsubscribed position is transferred
-                // this function will be called, but the position is still unsubscribed
-                // update unsubscribedTokenIds mapping and return? (_removeUnsubscribedPosition )
-        //     _removeUnsubscribedPosition(tokenId, newOwner);
-        //     emit Subscribed(tokenId, newOwner);
-        // } else {
-        //     // Ownership has changed — remove the position from the old owner
-        //     _removePosition(tokenId, pos.provider, poolId, pos.tickLower, pos.tickUpper);
-        // }
-
-        // // Add under new owner
-        // uint128 liquidity = IPositionManager(positionManager).getPositionLiquidity(tokenId);
-        // positions[tokenId] = Position({
-        //     provider: newOwner,
-        //     poolId: poolId,
-        //     tickLower: info.tickLower(),
-        //     tickUpper: info.tickUpper(),
-        //     liquidity: liquidity
-        // });
-
-        // if (providerTokenIds[newOwner].length <= MAX_POSITIONS) {
-        //     providerTokenIds[newOwner].push(tokenId);
-        //     emit PositionUpdated(tokenId, newOwner, poolId, info.tickLower(), info.tickUpper(), liquidity);
-        // }
     }
 
     /**
