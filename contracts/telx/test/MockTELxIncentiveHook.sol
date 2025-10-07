@@ -117,7 +117,7 @@ contract MockTELxIncentiveHook is BaseHook {
     }
 
     function _resolveUser(address sender) internal view returns (address) {
-        if (registry.activeRouters(sender)) {
+        if (registry.isActiveRouter(sender)) {
             try IMsgSender(sender).msgSender() returns (address user) {
                 return user;
             } catch {

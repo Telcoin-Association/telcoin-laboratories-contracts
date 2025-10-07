@@ -6,24 +6,26 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Checkpoints} from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 import {IPositionRegistry, PoolId} from "../interfaces/IPositionRegistry.sol";
+import {IMsgSender} from "../interfaces/IMsgSender.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IPositionManager, PoolKey, PositionInfo} from "../interfaces/IPositionManager.sol";
 
 // todo: refactor, reauthor:
 // this contract doesn't need to store unsubscribedTokenIds or positions at all; fetch from positionManager
 // this contract should store participating tokenIds, written at subscribe time
-// this contract should store fee tracking information (tokenId => fees), written at modifyLiquidity and addRewards time
+// this contract should store fee tracking information (tokenId => fees), written at modifyLiquidity and addRewards time 
 //   - checkpointing
-// offchain script can then pull fee tracking info
+// offchain script can then pull fee tracking info and calculate final checkpoint subperiod
+// during addRewards, final checkpoint should be written to align all subscribed positions checkpoints at period endBlock
 
 /**
  * @title Position Registry
  * @author Robriks 📯️📯️📯️.eth
- //todo: name of telx incentives program below
  * @notice Tracks Uniswap V4 LP fees for positions subscribed to the TELxIncentives program and manages off-chain reward distribution.
  * @dev Emits events during Uniswap V4 hook actions and stores fee checkpoints for consumption by an off-chain reward calculation system.
  */
@@ -41,7 +43,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     mapping(address => uint256[]) public unsubscribedTokenIds;
     mapping(address => uint256) public unclaimedRewards;
     mapping(uint256 => Position) public positions;
-    mapping(PoolId => uint8) public telcoinPosition;
+    mapping(PoolId => PoolKey) public initializedPoolKeys;
     mapping(address => bool) public routers;
 
     //todo: refactored state
@@ -72,13 +74,19 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Returns whether a given PoolId is associated with a TEL position.
-     * @dev A PoolId is considered valid if a TEL token exists at index 1 or 2.
+     * @notice Returns whether a given PoolId is known by this contract
+     * @dev A PoolId is considered valid if it has been initialized with a currency pair.
      * @param id The unique identifier for the Uniswap V4 pool.
-     * @return True if the pool has a non-zero TEL token position mapping.
+     * @return True if the pool has a non-zero currency0 or currency1 address.
      */
-    function validPool(PoolId id) external view override returns (bool) {
-        return telcoinPosition[id] != 0;
+    function validPool(PoolId id) public view override returns (bool) {
+        address currency0 = Currency.unwrap(initializedPoolKeys[id].currency0);
+        address currency1 = Currency.unwrap(initializedPoolKeys[id].currency1);
+        if (currency0 != address(0x0) || currency1 != address(0x0)) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -108,7 +116,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @param router The address of the router to query.
      * @return True if the router is listed as trusted.
      */
-    function activeRouters(address router) external view override returns (bool) {
+    function isActiveRouter(address router) public view override returns (bool) {
         return routers[router];
     }
 
@@ -148,11 +156,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         uint256 priceX96 = FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 2 ** 96);
 
-        uint8 index = telcoinPosition[pos.poolId];
+        // todo: refactor to currency0 and currency1, incorporating price quote/calculation for stablecoin (nonTEL) pools
+        PoolKey memory key = initializedPoolKeys[pos.poolId];
+        address currency0 = Currency.unwrap(key.currency0);
+        address currency1 = Currency.unwrap(key.currency1);
+        uint8 telIndex = currency0 == address(telcoin) ? 0 : currency1 == address(telcoin) ? 1 : 2;
+        if (telIndex == 2) {
+            //todo this is a nonTEL pool; we need to get price of both token0 and token1 in TEL via quote
+        }
 
-        if (index == 1) {
+        if (telIndex == 0) {
             return amount0 + FullMath.mulDiv(amount1, 2 ** 96, priceX96);
-        } else if (index == 2) {
+        } else if (telIndex == 1) {
             return amount1 + FullMath.mulDiv(amount0, priceX96, 2 ** 96);
         }
 
@@ -190,16 +205,15 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     /**
      * @notice Updates the stored index of TEL in a specific Uniswap V4 pool.
-     * @dev Only callable by an address with SUPPORT_ROLE.
-     *      Index must be 1 (token0) or 2 (token1).
-     * @param poolId The unique identifier for the pool.
-     * @param location The token index for TEL.
+     * @dev Only callable by the TELxIncentiveHook which possesses `UNI_HOOK_ROLE`
+     * @dev Must be initiated by an admin as `tx.origin`
      */
-    function updateTelPosition(PoolId poolId, uint8 location) external onlyRole(SUPPORT_ROLE) {
-        //todo: this should be done with initialize hook
-        require(location >= 0 && location <= 2, "PositionRegistry: Invalid location");
-        telcoinPosition[poolId] = location;
-        emit TelPositionUpdated(poolId, location);
+    function initialize(address sender, PoolKey calldata key) external onlyRole(UNI_HOOK_ROLE) {
+        require(hasRole(DEFAULT_ADMIN_ROLE, _resolveUser(sender)), "PositionRegistry: Only admin can initialize pools with this hook");
+        require(!validPool(key.toId()), "PositionRegistry: Pool already initialized");
+        initializedPoolKeys[key.toId()] = key;
+
+        emit PoolAdded(key);
     }
 
     /**
@@ -224,12 +238,12 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         onlyRole(UNI_HOOK_ROLE)
     {
         //todo: this function should instead write a fee tracking checkpoint (modifyLiquidity time)
-        // it should check that the tokenId's owner is still staked on TELx plugin
+        // if (isSubscribed) it should check that the tokenId's owner is still staked on TELx plugin
         // it does not need to check that the tokenId is still subscribed (because of handleUnsubscribe during unsubscribes or transfers)
         // it should identify fees being collected and store it using an internal setter which is also used during addRewards()
 
         // Does not fail on invalid poolId, just skips update
-        if (telcoinPosition[poolId] == 0) {
+        if (!validPool(poolId)) {
             return;
         }
 
@@ -342,7 +356,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         PoolId poolId = poolKey.toId();
 
         // Skip if not a known TEL pool registered by `SUPPORT_ROLE`
-        if (telcoinPosition[poolId] == 0) {
+        if (!validPool(poolId)) {
             return;
         }
 
@@ -398,7 +412,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         PoolId poolId = poolKey.toId();
 
         // Skip if not a known TEL pool registered by `SUPPORT_ROLE`
-        if (telcoinPosition[poolId] == 0) {
+        if (!validPool(poolId)) {
             return;
         }
 
@@ -448,8 +462,28 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         emit RewardsClaimed(_msgSender(), reward);
     }
 
-    function removeUnsubscribedPosition(uint256 tokenId, address provider) external onlyRole(SUPPORT_ROLE) {
-        _removeUnsubscribedPosition(tokenId, provider);
+    //todo delete
+    // function removeUnsubscribedPosition(uint256 tokenId, address provider) external onlyRole(SUPPORT_ROLE) {
+    //     _removeUnsubscribedPosition(tokenId, provider);
+    // }
+
+    /**
+     * @notice Resolves the actual user address from the swap initiator
+     * @dev If the sender is a trusted router, attempts to call `msgSender()` on the router to get the original user (EOA or smart account).
+     *      Reverts if the router is trusted but does not implement the `msgSender()` function.
+     *      If the sender is not a trusted router, it is assumed to be the actual user and returned directly.
+     * @param sender Address passed to the hook by the PoolManager (typically a router or user)
+     * @return user Resolved user address — either the EOA from a router or the direct sender
+     */
+    function _resolveUser(address sender) internal view returns (address) {
+        if (isActiveRouter(sender)) {
+            try IMsgSender(sender).msgSender() returns (address user) {
+                return user;
+            } catch {
+                revert("Trusted router must implement msgSender()");
+            }
+        }
+        return sender;
     }
 
     /**

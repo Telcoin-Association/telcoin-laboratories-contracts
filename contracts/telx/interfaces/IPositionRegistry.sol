@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 
 interface IPositionRegistry {
     /// @notice Struct to represent a tracked LP position
@@ -42,11 +43,13 @@ interface IPositionRegistry {
     event RouterRegistryUpdated(address indexed router, bool listed);
 
     /// @notice Emitted when the TEL token position is updated for a pool.
-    event TelPositionUpdated(PoolId indexed poolId, uint8 location);
+    event PoolAdded(PoolKey indexed poolKey);
 
     /// @notice Emitted when a token is subscribed for the first time
     event Subscribed(uint256 indexed tokenId, address indexed owner);
 
+    function initialize(address sender, PoolKey calldata key) external;
+    
     function getTokenIdsByProvider(
         address provider
     ) external view returns (uint256[] memory);
@@ -68,7 +71,7 @@ interface IPositionRegistry {
         uint256 tokenId
     ) external view returns (uint256);
 
-    function activeRouters(address router) external view returns (bool);
+    function isActiveRouter(address router) external view returns (bool);
 
     function validPool(PoolId id) external view returns (bool);
 }

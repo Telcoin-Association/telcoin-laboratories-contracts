@@ -14,7 +14,7 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 /**
  * @title TELx Incentive Hook
- * @author Amir M. Shirif
+ * @author Robriks 📯️📯️📯️.eth
  * @notice Uniswap v4 hook that tracks LP activity and emits swap events for off-chain reward logic.
  * @dev This contract works in tandem with a PositionRegistry and an off-chain rewards script.
  */
@@ -61,14 +61,14 @@ contract TELxIncentiveHook is BaseHook {
     {
         return
             Hooks.Permissions({
-                beforeInitialize: false,
+                beforeInitialize: true,
                 afterInitialize: false,
                 beforeAddLiquidity: true,
                 afterAddLiquidity: false,
                 beforeRemoveLiquidity: true,
                 afterRemoveLiquidity: false,
                 beforeSwap: false,
-                afterSwap: true,
+                afterSwap: true, //todo false
                 beforeDonate: false,
                 afterDonate: false,
                 beforeSwapReturnDelta: false,
@@ -76,6 +76,21 @@ contract TELxIncentiveHook is BaseHook {
                 afterAddLiquidityReturnDelta: false,
                 afterRemoveLiquidityReturnDelta: false
             });
+    }
+
+    /**
+     * @notice Called before initializing a new pool
+     * @dev Passes the delta to the registry to record or update the LP’s position
+     * @param key The pool key (used to derive PoolId)
+     */
+    function _beforeInitialize(
+        address sender,
+        PoolKey calldata key,
+        uint160
+    ) internal virtual override returns (bytes4) {
+        registry.initialize(sender, key);
+
+        return BaseHook.beforeInitialize.selector;
     }
 
     /**
@@ -134,58 +149,5 @@ contract TELxIncentiveHook is BaseHook {
         );
 
         return BaseHook.beforeRemoveLiquidity.selector;
-    }
-
-    /**
-     * @notice Called after a swap executes in the pool
-     * @dev Captures tick for off-chain tracking — used to determine if LPs were in-range at time of swap
-     * @param sender Address that initiated the swap
-     * @param key Pool key
-     * @param delta Amounts of token0/token1 exchanged during the swap
-     * @return Selector for Uniswap V4 hook compliance, no BalanceDelta used by this hook
-     */
-    function _afterSwap(
-        address sender,
-        PoolKey calldata key,
-        IPoolManager.SwapParams calldata,
-        BalanceDelta delta,
-        bytes calldata
-    ) internal override returns (bytes4, int128) {
-        if (registry.validPool(key.toId())) {
-            // Extract current tick directly from pool storage using StateLibrary
-            (, int24 tick, , ) = StateLibrary.getSlot0(poolManager, key.toId());
-
-            address user = _resolveUser(sender);
-
-            // Emit swap event with tick so off-chain logic can check LP range activity
-            emit SwapOccurredWithTick(
-                key.toId(),
-                user,
-                delta.amount0(),
-                delta.amount1(),
-                tick
-            );
-        }
-
-        return (BaseHook.afterSwap.selector, 0);
-    }
-
-    /**
-     * @notice Resolves the actual user address from the swap initiator
-     * @dev If the sender is a trusted router (tracked in PositionRegistry), attempts to call `msgSender()` on the router to get the original user (EOA or smart account).
-     *      Reverts if the router is trusted but does not implement the `msgSender()` function.
-     *      If the sender is not a trusted router, it is assumed to be the actual user and returned directly.
-     * @param sender Address passed to the hook by the PoolManager (typically a router or user)
-     * @return user Resolved user address — either the EOA from a router or the direct sender
-     */
-    function _resolveUser(address sender) internal view returns (address) {
-        if (registry.activeRouters(sender)) {
-            try IMsgSender(sender).msgSender() returns (address user) {
-                return user;
-            } catch {
-                revert("Trusted router must implement msgSender()");
-            }
-        }
-        return sender;
     }
 }

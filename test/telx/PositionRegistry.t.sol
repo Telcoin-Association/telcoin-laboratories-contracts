@@ -53,8 +53,8 @@ contract PositionRegistryTest is
     address public admin = address(0xc0ffee);
     address public support = address(0xdeadbeef);
     address permit2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
-    // address encoding the enabled afterAddLiquidity, beforeRemoveLiquidity, and afterSwap hooks
-    address public hookAddress = 0x0000000000000000000000000000000000000a40;
+    // address encoding the enabled beforeInitialize, afterAddLiquidity, and beforeRemoveLiquidity hooks
+    address public hookAddress = 0x0000000000000000000000000000000000002a40;
     
     int24 tickSpacing = 60;
     uint256 constant V4_SWAP = 0x10;
@@ -98,7 +98,11 @@ contract PositionRegistryTest is
             hooks: IHooks(hookAddress)
         });
         int24 tick = TickMath.getTickAtSqrtPrice(sqrtPriceX96);
-        vm.expectEmit(true, true, true, true);
+
+        // position registry should correctly be informed of the currency position
+        vm.expectEmit(address(positionRegistry));
+        emit IPositionRegistry.PoolAdded(poolKey);
+        vm.expectEmit(address(poolMngr));
         emit IPoolManager.Initialize(
             poolKey.toId(),
             poolKey.currency0,
@@ -109,15 +113,17 @@ contract PositionRegistryTest is
             sqrtPriceX96,
             tick
         );
-        assertEq(poolMngr.initialize(poolKey, sqrtPriceX96), tick);
-
-        // position registry must be informed of the TEL position
-        vm.expectEmit(true, true, true, true);
-        emit IPositionRegistry.TelPositionUpdated(poolKey.toId(), uint8(2));
-        vm.prank(support);
-        positionRegistry.updateTelPosition(poolKey.toId(), uint8(2));
+        vm.prank(admin);
+        int24 returnedTick = poolMngr.initialize(poolKey, sqrtPriceX96);
+        assertEq(returnedTick, tick);
 
         assertTrue(positionRegistry.validPool(poolKey.toId()));
+        (Currency currency0, Currency currency1, uint24 fee, int24 spacing, IHooks hooks) = positionRegistry.initializedPoolKeys(poolKey.toId());
+        assertEq(Currency.unwrap(currency0), Currency.unwrap(poolKey.currency0));
+        assertEq(Currency.unwrap(currency1), Currency.unwrap(poolKey.currency1));
+        assertEq(fee, poolKey.fee);
+        assertEq(spacing, poolKey.tickSpacing);
+        assertEq(address(hooks), address(poolKey.hooks));
     }
 
     function test_setUp() public view {
@@ -132,28 +138,46 @@ contract PositionRegistryTest is
         assertTrue(positionRegistry.hasRole(positionRegistry.SUPPORT_ROLE(), support));
     }
 
-    function testRevert_updateTelPosition() public {
-        PoolKey memory zeroKey = PoolKey({
+    function test_initialize() public {
+        PoolKey memory dummyKey = PoolKey({
             currency0: Currency.wrap(0x0000000000000000000000000000000000000000),
-            currency1: Currency.wrap(0x0000000000000000000000000000000000000000),
+            currency1: Currency.wrap(0x1000000000000000000000000000000000000000),
             fee: 0,
-            tickSpacing: 0,
-            hooks: IHooks(address(0))
+            tickSpacing: 60,
+            hooks: IHooks(hookAddress)
         });
+        
+        // only admin can call initialize
         vm.expectRevert();
         vm.prank(holder);
-        positionRegistry.updateTelPosition(zeroKey.toId(), uint8(0));
-        assertFalse(positionRegistry.validPool(zeroKey.toId()));
+        poolMngr.initialize(dummyKey, uint160(1e27));
+        assertFalse(positionRegistry.validPool(dummyKey.toId()));
+
+        // success case
+        vm.prank(admin);
+        poolMngr.initialize(dummyKey, uint160(1e27));
+    }
+
+    function testRevert_alreadyInitialized() public {        
+        assertTrue(positionRegistry.validPool(poolKey.toId()));
+
+        // revert for already initialized pools
+        vm.expectRevert();
+        vm.prank(admin);
+        poolMngr.initialize(poolKey, uint160(1e27));
+        
+        // initialized pool unchanged
+        assertTrue(positionRegistry.validPool(poolKey.toId()));
     }
 
     function test_activeRouters() public {
-        assertFalse(positionRegistry.activeRouters(address(router)));
-        assertFalse(positionRegistry.activeRouters(address(0x0)));
+        assertFalse(positionRegistry.isActiveRouter(address(router)));
+        assertFalse(positionRegistry.isActiveRouter(address(0x0)));
 
         vm.prank(support);
         positionRegistry.updateRegistry(address(router), true);
 
-        assertTrue(positionRegistry.activeRouters(address(router)));
+        assertTrue(positionRegistry.isActiveRouter(address(router)));
     }
 
     function test_mintPosition(int24 range, uint128 liquidity) public {
