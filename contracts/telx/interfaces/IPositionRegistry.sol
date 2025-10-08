@@ -3,15 +3,34 @@ pragma solidity ^0.8.24;
 
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {Checkpoints} from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 
 interface IPositionRegistry {
+    /// @notice Checkpoint structure for fee growth data
+    struct FeeGrowthCheckpoint {
+        uint128 feeGrowthInside0X128;
+        uint128 feeGrowthInside1X128;
+    }
+
+    /// @notice Checkpoint metadata for better searchability offchain
+    struct CheckpointMetadata {
+        uint32 firstCheckpoint;
+        uint32 lastCheckpoint;
+        uint32 totalCheckpoints;
+    }
+
     /// @notice Struct to represent a tracked LP position
     struct Position {
         address owner;
         PoolId poolId;
         int24 tickLower;
         int24 tickUpper;
-        uint128 liquidity;
+        uint128 liquidity; //todo can be deleted
+        /// @notice History of positions' liquidity checkpoints: `tokenId => {block, telDenominatedFees}`
+        /// @dev Since Trace224 array is unbounded it can grow beyond EVM memory limits
+        /// do not load into EVM memory; consume offchain instead and fall back to loading slots if needed
+        Checkpoints.Trace224 liquidityModifications;
+        mapping(uint32 => FeeGrowthCheckpoint) feeGrowthCheckpoints;
     }
 
     /// @notice Emitted when a position is added or its liquidity is increased
