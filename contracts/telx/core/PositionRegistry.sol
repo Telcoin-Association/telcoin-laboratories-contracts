@@ -38,25 +38,28 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     bytes32 public constant SUBSCRIBER_ROLE = keccak256("SUBSCRIBER_ROLE");
 
     uint256 constant MAX_POSITIONS = 100; //todo: this can be increased due to refactor efficiency
+    /// @dev Marks positions either burned or not created via PositionManager
+    address constant UNTRACKED = address(type(uint160).max);
 
-    mapping(address => uint256[]) public providerTokenIds;
+    mapping(address => uint256[]) public ownerTokenIds; //todo delete
     mapping(address => uint256[]) public unsubscribedTokenIds;
     mapping(address => uint256) public unclaimedRewards;
-    mapping(uint256 => Position) public positions;
     mapping(PoolId => PoolKey) public initializedPoolKeys;
     mapping(address => bool) public routers;
 
     //todo: refactored state
-    uint256 currentPeriod;
-    /// @notice The current set of active participating positions subscribed to TELxIncentives
+    /// @notice Mapping to track all positions associated with supported pools
+    mapping(uint256 => Position) public positions;
+    /// @notice The current set of active positions participating in TELxIncentives program via subscription
     uint256[] public subscriptions;
     /// @notice History of positions' fee information: `tokenId => {block, telDenominatedFees}`
     /// @dev Since Trace224 array is unbounded it can grow beyond EVM memory limits
-    /// do not load into EVM memory; consume offchain instead
+    /// do not load into EVM memory; consume offchain instead and fall back to loading slots if needed
     mapping(uint256 => Checkpoints.Trace224) private feeRecords;
     //todo: view function to fetch feeRecords
     /// @notice Maps period numbers to their end block
     mapping(uint256 => uint32) public periodEndBlock;
+    uint256 currentPeriod;
 
     IERC20 public immutable telcoin;
     IPoolManager public immutable poolManager;
@@ -97,17 +100,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Returns positionIds for a Provider
+     * @notice Returns tokenIds for an owner that have been subscribed
      */
-    function getTokenIdsByProvider(address provider) external view override returns (uint256[] memory) {
-        return providerTokenIds[provider];
-    }
-
-    /**
-     * @notice Returns positionIds for a Provider that have not been subscribed
-     */
-    function getUnsubscribedTokenIdsByProvider(address provider) external view override returns (uint256[] memory) {
-        return unsubscribedTokenIds[provider];
+    function getSubscribedTokenIdsByOwner(address owner) external view override returns (uint256[] memory) {
+        return ownerTokenIds[owner]; //todo function to loop through subscribedTokenIds and filter by owner address
     }
 
     /**
@@ -140,7 +136,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         if (pos.liquidity == 0) return 0;
 
         // todo: this should be replaced by a call to getPoolAndPositionInfo()
-        if (pos.provider != IPositionManager(positionManager).ownerOf(tokenId)) {
+        if (pos.owner != IPositionManager(positionManager).ownerOf(tokenId)) {
             return 0;
         }
 
@@ -237,72 +233,99 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         external
         onlyRole(UNI_HOOK_ROLE)
     {
-        //todo: this function should instead write a fee tracking checkpoint (modifyLiquidity time)
-        // if (isSubscribed) it should check that the tokenId's owner is still staked on TELx plugin
-        // it does not need to check that the tokenId is still subscribed (because of handleUnsubscribe during unsubscribes or transfers)
-        // it should identify fees being collected and store it using an internal setter which is also used during addRewards()
-
         // Does not fail on invalid poolId, just skips update
         if (!validPool(poolId)) {
             return;
         }
 
-        require(tokenId != 0, "PositionRegistry: Only NFT-backed positions supported");
-
-        require(liquidityDelta != type(int128).min, "PositionRegistry: Invalid liquidity delta");
+        require(liquidityDelta != type(int128).min, "PositionRegistry: Invalid liquidity delta"); //todo: remove assertion
 
         Position storage pos = positions[tokenId];
 
-        address tokenOwner; 
-        try IPositionManager(positionManager).ownerOf(tokenId) returns (address lp) {
-            tokenOwner = lp;
-        } catch {}
-
-        // If the position does not exist, we expect the owner to call `subscribe`
-        if (pos.provider == address(0)) {
-            if (
-                unsubscribedTokenIds[tokenOwner].length <= MAX_POSITIONS
-                    && providerTokenIds[tokenOwner].length <= MAX_POSITIONS
-            ) {
-                unsubscribedTokenIds[tokenOwner].push(tokenId);
+        bool isNew;
+        address tokenOwner;
+        uint128 newLiquidity;
+        if (pos.owner == UNTRACKED) {
+            return;
+        } else if (pos.owner == address(0)) {
+            // new position
+            isNew = true;
+            try positionManager.ownerOf(tokenId) returns (address lp) {
+                tokenOwner = lp;
+            } catch {
+                // the position was not created via PositionManager
+                _setUntracked(tokenId);
+                return;
             }
-            return;
-        }
 
-        // The token is being burned
-        // You can get to a liquidity 0 state without burning the token
-        // using DECREASE operations but the token will still exist and have
-        // an owner.
-        if (tokenOwner == address(0)) {
-            _removePosition(tokenId, pos.provider, poolId, pos.tickLower, pos.tickUpper);
-            return;
-        }
-
-        // If the position does exist, we need to make sure the owner didn't change. Otherwise
-        // we require the new owner to also call `subscribe`
-        if (pos.provider != tokenOwner) {
-            return;
-        }
-
-        if (liquidityDelta > 0) {
-            pos.liquidity += uint128(liquidityDelta);
+            require(liquidityDelta >= 0, "NEGATIVE LIQ NEW POSITION"); //todo: remove assertion
+            newLiquidity = uint128(liquidityDelta);
         } else {
-            // the case where `liquidityDelta == 0` is permitted, though it has no effect beyond gas spend
-            uint128 delta = uint128(-liquidityDelta);
-            require(pos.liquidity >= delta, "PositionRegistry: Insufficient liquidity");
-            pos.liquidity -= delta;
+            // known position
+            try positionManager.ownerOf(tokenId) returns (address lp) {
+                tokenOwner = lp;
+            } catch {
+                // token is being burned and if subscribed will be unsubscribed
+                _setUntracked(tokenId);
+                // _addCheckpoint(); //todo
+                return;
+            }
+
+            if (liquidityDelta > 0) {
+                newLiquidity = pos.liquidity + uint128(liquidityDelta);
+            } else {
+                // the case where `liquidityDelta == 0` is permitted for fee collection
+                uint128 delta = uint128(-liquidityDelta);
+                require(pos.liquidity >= delta, "PositionRegistry: Insufficient liquidity"); //todo: remove assertion
+                newLiquidity = pos.liquidity - delta;
+            }
         }
 
-        emit PositionUpdated(tokenId, pos.provider, poolId, pos.tickLower, pos.tickUpper, uint128(pos.liquidity));
+        (PoolKey memory poolKey, PositionInfo info) = positionManager.getPoolAndPositionInfo(tokenId);
+        
+        require(PoolId.unwrap(poolKey.toId()) == PoolId.unwrap(poolId), "PositionRegistry: PoolId mismatch"); //todo: remove assertion
+        if (!isNew) { //todo: remove assertion
+            require(pos.tickLower == info.tickLower(), "PositionRegistry: tickLower mismatch"); //todo: remove assertion
+            require(pos.tickUpper == info.tickUpper(), "PositionRegistry: tickUpper mismatch"); //todo: remove assertion
+        }
+        
+        // record in positions mapping and checkpoints list, await LP opt-in via `subscribe`
+        _updatePosition(tokenId, tokenOwner, poolId, info.tickLower(), info.tickUpper(), newLiquidity, isNew);
+        //todo: this function should write a fee tracking checkpoint (modifyLiquidity time)
+        // _addCheckPoint();
+
+        // todo: internal fn to identify fees being collected and store it; fn must also be used during addRewards()
+    }
+
+    function _setUntracked(uint256 tokenId) internal {
+        positions[tokenId].owner = UNTRACKED;
+    }
+
+    function _updatePosition(uint256 tokenId, address newOwner, PoolId poolId, int24 tickLower, int24 tickUpper, uint128 newLiquidity, bool isNew) internal {
+        if (isNew) {
+            positions[tokenId] = Position({
+                owner: newOwner,
+                poolId: poolId,
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidity: newLiquidity
+            });
+        } else {
+            //todo: maybe optimization: if position is known + subscribed AND liquidity is lowered to zero, "unsubscribe" it from this contract's perspective
+            positions[tokenId].owner = newOwner;
+            positions[tokenId].liquidity = newLiquidity;
+        }
+
+        emit PositionUpdated(tokenId, newOwner, poolId, tickLower, tickUpper, uint128(newLiquidity));
     }
 
     /**
-     * @notice Internally removes a position from both the provider and global registries.
+     * @notice Internally removes a position from both the owner and global registries.
      * @param tokenId The identifier of the position to remove.
-     * @param provider The address of the LP whose position is now subscribed.
+     * @param owner The address of the LP whose position is now subscribed.
      */
-    function _removeUnsubscribedPosition(uint256 tokenId, address provider) internal {
-        uint256[] storage list = unsubscribedTokenIds[provider];
+    function _removeUnsubscribedPosition(uint256 tokenId, address owner) internal {
+        uint256[] storage list = unsubscribedTokenIds[owner];
         for (uint256 j = 0; j < list.length; j++) {
             if (list[j] == tokenId) {
                 list[j] = list[list.length - 1];
@@ -313,21 +336,21 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Internally removes a position from both the provider and global registries.
-     * @dev Deletes the position mapping, removes from providerPositions arrays.
+     * @notice Internally removes a position from both the owner and global registries.
+     * @dev Deletes the position mapping, removes from ownerPositions arrays.
      *      Emits a PositionRemoved event.
      * @param tokenId The identifier of the position to remove.
-     * @param provider The address of the LP whose position is being removed.
+     * @param owner The address of the LP whose position is being removed.
      * @param poolId The pool associated with the position.
      * @param tickLower The lower tick boundary of the position.
      * @param tickUpper The upper tick boundary of the position.
      */
-    function _removePosition(uint256 tokenId, address provider, PoolId poolId, int24 tickLower, int24 tickUpper)
+    function _removePosition(uint256 tokenId, address owner, PoolId poolId, int24 tickLower, int24 tickUpper)
         internal
     {
         delete positions[tokenId];
 
-        uint256[] storage list = providerTokenIds[provider];
+        uint256[] storage list = ownerTokenIds[owner];
         for (uint256 j = 0; j < list.length; j++) {
             if (list[j] == tokenId) {
                 list[j] = list[list.length - 1];
@@ -336,7 +359,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             }
         }
 
-        emit PositionRemoved(tokenId, provider, poolId, tickLower, tickUpper);
+        emit PositionRemoved(tokenId, owner, poolId, tickLower, tickUpper);
     }
 
     /**
@@ -355,43 +378,49 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         (PoolKey memory poolKey, PositionInfo info) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
         PoolId poolId = poolKey.toId();
 
-        // Skip if not a known TEL pool registered by `SUPPORT_ROLE`
+        // Skip if not a known TEL pool
         if (!validPool(poolId)) {
             return;
         }
 
         Position storage pos = positions[tokenId];
+        // if ( todo: max positions handling
+        //     subscribedTokenIds[tokenOwner].length <= MAX_POSITIONS
+        // ) {
+        //     subscribedTokenIds[tokenOwner].push(tokenId);
+        // }
+        // return;
 
         // No change in ownership
         // Liquidity should be updated via addOrUpdatePosition actions anyway due to the hook.
-        if (pos.provider == newOwner) {
+        if (pos.owner == newOwner) {
             //todo: this represents case where subscribe is called again on an already subscribed position
-            // if handleUnsubscribe updates transferred positions, `pos.provider == newOwner` is unnecessary
-            // and can be changed to `pos.provider != address(0)` to no-op re-subscriptions
+            // if handleUnsubscribe updates transferred positions, `pos.owner == newOwner` is unnecessary
+            // and can be changed to `pos.owner != address(0)` to no-op re-subscriptions
             return;
         }
 
-        if (pos.provider == address(0)) {
+        if (pos.owner == address(0)) {
             // new position; emit the event for offchain availability & remove from unsubscribed state
             _removeUnsubscribedPosition(tokenId, newOwner);
             emit Subscribed(tokenId, newOwner);
-        } else { //todo: logic in this branch should be handled by handleUnsubscribe()
+        } else { //todo: logic in this branch should be handled by handleUnsubscribe() bc it represents ownership transfer
             // known position (subscribed) ownership change; remove the position from the old LP
-            _removePosition(tokenId, pos.provider, poolId, pos.tickLower, pos.tickUpper);
+            _removePosition(tokenId, pos.owner, poolId, pos.tickLower, pos.tickUpper);
         }
 
         // add position state to new owner's tracked state
         uint128 liquidity = IPositionManager(positionManager).getPositionLiquidity(tokenId);
         positions[tokenId] = Position({
-            provider: newOwner,
+            owner: newOwner,
             poolId: poolId,
             tickLower: info.tickLower(),
             tickUpper: info.tickUpper(),
             liquidity: liquidity
         });
 
-        if (providerTokenIds[newOwner].length <= MAX_POSITIONS) {
-            providerTokenIds[newOwner].push(tokenId);
+        if (ownerTokenIds[newOwner].length <= MAX_POSITIONS) {
+            ownerTokenIds[newOwner].push(tokenId);
             emit PositionUpdated(tokenId, newOwner, poolId, info.tickLower(), info.tickUpper(), liquidity);
         }
     }
@@ -400,11 +429,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @notice Deregisters a position.
      * @dev Must be invoked during hooks by an address with SUBSCRIBER_ROLE, such as TELxSubscriber
      *      Invoked during v4 unsubscription hooks during LP token transfers 
-     *      Reads the existing position metadata, removes it from the old provider, and reassigns it to the new owner.
+     *      Reads the existing position metadata, removes it from the old owner, and reassigns it to the new owner.
      * @param tokenId The NFT tokenId corresponding to the original position.
      */
     function handleUnsubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
-        //todo: double check this is not invoked during burns
         require(tokenId != 0, "PositionRegistry: Invalid tokenId");
         address newOwner = IPositionManager(positionManager).ownerOf(tokenId);
 
@@ -419,31 +447,35 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         Position storage pos = positions[tokenId];
 
         // no change in ownership implies this is a self transfer or a direct call to unsubscribe()
-        if (pos.provider == newOwner) {
+        if (pos.owner == newOwner) {
             return;
         }
     }
 
+    //todo: _handleBurn should update position and add final checkpoint
+    function handleBurn(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {}
+
+
     /**
      * @notice Adds batch rewards for many users in a specific block round
-     * @param providers LP addresses
+     * @param lps LP addresses
      * @param amounts Reward values per address
      * @param totalAmount Sum of all `amounts`
      */
-    function addRewards(address[] calldata providers, uint256[] calldata amounts, uint256 totalAmount)
+    function addRewards(address[] calldata lps, uint256[] calldata amounts, uint256 totalAmount)
         external
         nonReentrant
         onlyRole(SUPPORT_ROLE)
     {
-        require(providers.length == amounts.length, "PositionRegistry: Length mismatch");
+        require(lps.length == amounts.length, "PositionRegistry: Length mismatch");
 
         telcoin.safeTransferFrom(_msgSender(), address(this), totalAmount);
 
         uint256 total = 0;
-        for (uint256 i = 0; i < providers.length; i++) {
-            unclaimedRewards[providers[i]] += amounts[i];
+        for (uint256 i = 0; i < lps.length; i++) {
+            unclaimedRewards[lps[i]] += amounts[i];
             total += amounts[i];
-            emit RewardsAdded(providers[i], amounts[i]);
+            emit RewardsAdded(lps[i], amounts[i]);
         }
 
         require(total == totalAmount, "PositionRegistry: Total amount mismatch");
@@ -461,11 +493,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         emit RewardsClaimed(_msgSender(), reward);
     }
-
-    //todo delete
-    // function removeUnsubscribedPosition(uint256 tokenId, address provider) external onlyRole(SUPPORT_ROLE) {
-    //     _removeUnsubscribedPosition(tokenId, provider);
-    // }
 
     /**
      * @notice Resolves the actual user address from the swap initiator

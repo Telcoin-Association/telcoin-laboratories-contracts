@@ -7,7 +7,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 interface IPositionRegistry {
     /// @notice Struct to represent a tracked LP position
     struct Position {
-        address provider;
+        address owner;
         PoolId poolId;
         int24 tickLower;
         int24 tickUpper;
@@ -17,7 +17,7 @@ interface IPositionRegistry {
     /// @notice Emitted when a position is added or its liquidity is increased
     event PositionUpdated(
         uint256 indexed tokenId,
-        address indexed provider,
+        address indexed owner,
         PoolId indexed poolId,
         int24 tickLower,
         int24 tickUpper,
@@ -27,17 +27,17 @@ interface IPositionRegistry {
     /// @notice Emitted when a position's liquidity reaches zero and is removed
     event PositionRemoved(
         uint256 indexed tokenId,
-        address indexed provider,
+        address indexed owner,
         PoolId indexed poolId,
         int24 tickLower,
         int24 tickUpper
     );
 
     /// @notice Emitted when reward tokens are added to a user
-    event RewardsAdded(address indexed provider, uint256 amount);
+    event RewardsAdded(address indexed owner, uint256 amount);
 
     /// @notice Emitted when a user successfully claims their reward
-    event RewardsClaimed(address indexed provider, uint256 amount);
+    event RewardsClaimed(address indexed owner, uint256 amount);
 
     /// @notice Emitted when a router's trust status is updated.
     event RouterRegistryUpdated(address indexed router, bool listed);
@@ -49,13 +49,9 @@ interface IPositionRegistry {
     event Subscribed(uint256 indexed tokenId, address indexed owner);
 
     function initialize(address sender, PoolKey calldata key) external;
-    
-    function getTokenIdsByProvider(
-        address provider
-    ) external view returns (uint256[] memory);
 
-    function getUnsubscribedTokenIdsByProvider(
-        address provider
+    function getSubscribedTokenIdsByOwner(
+        address owner
     ) external view returns (uint256[] memory);
 
     function addOrUpdatePosition(
@@ -66,6 +62,7 @@ interface IPositionRegistry {
 
     function handleSubscribe(uint256 tokenId) external;
     function handleUnsubscribe(uint256 tokenId) external;
+    function handleBurn(uint256 tokenId) external;
 
     function computeVotingWeight(
         uint256 tokenId

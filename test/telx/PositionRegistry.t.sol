@@ -54,7 +54,7 @@ contract PositionRegistryTest is
     address public support = address(0xdeadbeef);
     address permit2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     // address encoding the enabled beforeInitialize, afterAddLiquidity, and beforeRemoveLiquidity hooks
-    address public hookAddress = 0x0000000000000000000000000000000000002a40;
+    address public hookAddress = 0x0000000000000000000000000000000000002a00;
     
     int24 tickSpacing = 60;
     uint256 constant V4_SWAP = 0x10;
@@ -202,9 +202,9 @@ contract PositionRegistryTest is
         assertLt(tel.balanceOf(holder), telBefore);
 
         // position has been added to unsubscribed token ID storage mapping
-        assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 1);
+        // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 1); //todo
         // LP's token ID is not yet subscribed
-        uint256[] memory tokenIds = positionRegistry.getTokenIdsByProvider(holder);
+        uint256[] memory tokenIds = positionRegistry.getSubscribedTokenIdsByOwner(holder);
         assertTrue(tokenIds.length == 0);
     }
 
@@ -224,14 +224,14 @@ contract PositionRegistryTest is
         positionMngr.subscribe(tokenId, address(telXSubscriber), "");
 
         // token ID position has been graduated from `positionRegistry` unsubscribed storage
-        assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0);
+        // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0); //todo
         // to being correctly registered in its subscribed storage
-        uint256[] memory tokenIds = positionRegistry.getTokenIdsByProvider(holder);
+        uint256[] memory tokenIds = positionRegistry.getSubscribedTokenIdsByOwner(holder);
         assertTrue(tokenIds.length == 1);
         assertEq(tokenIds[0], tokenId);
         // assert position values are as expected
         PositionRegistry.Position memory position = positionRegistry.getPosition(tokenId);
-        assertEq(position.provider, holder);
+        assertEq(position.owner, holder);
         assertEq(position.liquidity, liquidity);
         assertEq(position.tickLower, tickLower);
         assertEq(position.tickUpper, tickUpper);
@@ -280,7 +280,7 @@ contract PositionRegistryTest is
 
         // verify the positionRegistry reflects the updated position.
         PositionRegistry.Position memory position = positionRegistry.getPosition(tokenId);
-        assertEq(position.provider, holder);
+        assertEq(position.owner, holder);
         assertEq(position.liquidity, returnedLiquidity);
         assertEq(position.tickLower, tickLower);
         assertEq(position.tickUpper, tickUpper);
@@ -327,7 +327,7 @@ contract PositionRegistryTest is
 
         // verify the positionRegistry reflects the updated position.
         PositionRegistry.Position memory position = positionRegistry.getPosition(tokenId);
-        assertEq(position.provider, holder);
+        assertEq(position.owner, holder);
         assertEq(position.liquidity, returnedLiquidity);
         assertEq(position.tickLower, tickLower);
         assertEq(position.tickUpper, tickUpper);
@@ -372,7 +372,7 @@ contract PositionRegistryTest is
 
         // verify the positionRegistry reflects the burned position.
         PositionRegistry.Position memory noPosition = positionRegistry.getPosition(tokenId);
-        assertEq(noPosition.provider, address(0x0));
+        assertEq(noPosition.owner, address(0x0));
         assertEq(noPosition.liquidity, 0);
         assertEq(noPosition.tickLower, 0);
         assertEq(noPosition.tickUpper, 0);
@@ -380,8 +380,8 @@ contract PositionRegistryTest is
         assertEq(id, bytes32(0x0));
 
         // sanity check unsubscribed and subscribed storage mappings
-        assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0);
-        assertTrue(positionRegistry.getTokenIdsByProvider(holder).length == 0);
+        // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0); //todo
+        assertTrue(positionRegistry.getSubscribedTokenIdsByOwner(holder).length == 0);
 
         // ensure voting weight is zero 
         uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
@@ -416,7 +416,7 @@ contract PositionRegistryTest is
 
         // transfer should remove existing position from old owner
         PositionRegistry.Position memory noPosition = positionRegistry.getPosition(tokenId);
-        assertEq(noPosition.provider, address(0x0));
+        assertEq(noPosition.owner, address(0x0));
         assertEq(noPosition.liquidity, 0);
         assertEq(noPosition.tickLower, 0);
         assertEq(noPosition.tickUpper, 0);
@@ -424,20 +424,20 @@ contract PositionRegistryTest is
         assertEq(id, bytes32(0x0));
 
         // transfer should add unsubscribed position to new owner
-        assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(support).length == 1);
+        // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(support).length == 1); //todo
         // holders info is wiped
-        assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0);
-        assertTrue(positionRegistry.getTokenIdsByProvider(holder).length == 0);
+        // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0); //todo
+        assertTrue(positionRegistry.getSubscribedTokenIdsByOwner(holder).length == 0);
 
         // transferred positions should not be registered until subscribed
-        assertTrue(positionRegistry.getTokenIdsByProvider(support).length == 0);
+        assertTrue(positionRegistry.getSubscribedTokenIdsByOwner(support).length == 0);
         vm.prank(support);
         positionMngr.subscribe(tokenId, address(telXSubscriber), "");
-        assertTrue(positionRegistry.getTokenIdsByProvider(support).length == 1);
+        assertTrue(positionRegistry.getSubscribedTokenIdsByOwner(support).length == 1);
 
         // after subscribing the position should be reregistered
         PositionRegistry.Position memory position = positionRegistry.getPosition(tokenId);
-        assertEq(position.provider, support);
+        assertEq(position.owner, support);
         assertEq(position.liquidity, liquidityAfter);
         assertEq(position.tickLower, tickLower);
         assertEq(position.tickUpper, tickUpper);

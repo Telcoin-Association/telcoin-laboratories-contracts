@@ -68,7 +68,7 @@ contract TELxIncentiveHook is BaseHook {
                 beforeRemoveLiquidity: true,
                 afterRemoveLiquidity: false,
                 beforeSwap: false,
-                afterSwap: true, //todo false
+                afterSwap: false,
                 beforeDonate: false,
                 afterDonate: false,
                 beforeSwapReturnDelta: false,
