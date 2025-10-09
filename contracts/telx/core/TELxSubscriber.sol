@@ -5,7 +5,7 @@ import {ISubscriber} from "@uniswap/v4-periphery/src/interfaces/ISubscriber.sol"
 import {IPositionRegistry} from "../interfaces/IPositionRegistry.sol";
 import {PositionInfo} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import {IPositionManager} from "../interfaces/IPositionManager.sol";
+import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
 /**
  * @title TELxSubscriber

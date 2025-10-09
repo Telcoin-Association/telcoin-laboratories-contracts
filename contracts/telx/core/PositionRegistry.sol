@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Checkpoints} from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
@@ -16,8 +17,7 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
-
-import {IPositionManager, PoolKey, PositionInfo} from "../interfaces/IPositionManager.sol";
+import {IPositionManager, PoolKey, PositionInfo} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
 // todo: refactor, reauthor:
 // this contract should store participating tokenIds, written at subscribe time
@@ -241,7 +241,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             require(liquidityDelta >= 0, "NEGATIVE LIQ NEW POSITION"); //todo: remove assertion
             newLiquidity = uint128(liquidityDelta);
 
-            try positionManager.ownerOf(tokenId) returns (address lp) {
+            try IERC721(address(positionManager)).ownerOf(tokenId) returns (address lp) {
                 tokenOwner = lp;
             } catch {
                 // the position was not created via PositionManager
@@ -259,7 +259,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
                 newLiquidity = _getLiquidityLast(tokenId) - delta;
             }
 
-            try positionManager.ownerOf(tokenId) returns (address lp) {
+            try IERC721(address(positionManager)).ownerOf(tokenId) returns (address lp) {
                 tokenOwner = lp;
             } catch {
                 // token is being burned and if subscribed will be unsubscribed
@@ -409,7 +409,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         require(pos.owner != UNTRACKED, "PositionRegistry: Only positions created via PositionManager can be subscribed");
 
         // todo: approved can also call this not just owner; are there conditions where reverting here causes problem
-        address newOwner = IPositionManager(positionManager).ownerOf(tokenId);
+        address newOwner = IERC721(address(positionManager)).ownerOf(tokenId);
 
         (PoolKey memory poolKey, /*PositionInfo info*/) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
         PoolId poolId = poolKey.toId();
@@ -455,7 +455,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      */
     function handleUnsubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
         require(tokenId != 0, "PositionRegistry: Invalid tokenId");
-        address newOwner = IPositionManager(positionManager).ownerOf(tokenId); //todo: can this fail?
+        address newOwner = IERC721(address(positionManager)).ownerOf(tokenId); //todo: can this fail?
 
         (PoolKey memory poolKey, /*PositionInfo info*/) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
         PoolId poolId = poolKey.toId();
