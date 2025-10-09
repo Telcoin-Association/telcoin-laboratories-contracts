@@ -14,6 +14,7 @@ import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
+import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 
 import {IPositionManager, PoolKey, PositionInfo} from "../interfaces/IPositionManager.sol";
@@ -133,30 +134,19 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @param tokenId The position identifier
      */
     function computeVotingWeight(uint256 tokenId) external view returns (uint256) {
-        // todo: from here until getAmountsForLiquidity can be replaced with the getAmountsForLiquidity(tokenId)
-        Position storage pos = positions[tokenId];
+        //todo MUST REQUIRE SUBSCRIBED, which excludes transferred positions (which are unsubscribed)
+
         uint128 liquidity = _getLiquidityLast(tokenId);
         if (liquidity == 0) return 0;
 
-        // todo: this should be replaced by a call to getPoolAndPositionInfo()
-        if (pos.owner != IPositionManager(positionManager).ownerOf(tokenId)) {
-            return 0;
-        }
-
-        PoolId poolId = positions[tokenId].poolId;
-        (uint160 sqrtPriceX96,,,) = StateLibrary.getSlot0(poolManager, poolId);
-
-        (uint256 amount0, uint256 amount1) = getAmountsForLiquidity(
-            sqrtPriceX96,
-            TickMath.getSqrtPriceAtTick(pos.tickLower),
-            TickMath.getSqrtPriceAtTick(pos.tickUpper),
-            liquidity
-        );
+        Position storage pos = positions[tokenId];
+        PoolId poolId = pos.poolId;
+        (uint256 amount0, uint256 amount1, uint160 sqrtPriceX96) = getAmountsForLiquidity(poolId, liquidity, pos.tickLower, pos.tickUpper);
 
         uint256 priceX96 = FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 2 ** 96);
 
         // todo: refactor to currency0 and currency1, incorporating price quote/calculation for stablecoin (nonTEL) pools
-        PoolKey memory key = initializedPoolKeys[pos.poolId];
+        PoolKey memory key = initializedPoolKeys[poolId];
         address currency0 = Currency.unwrap(key.currency0);
         address currency1 = Currency.unwrap(key.currency1);
         uint8 telIndex = currency0 == address(telcoin) ? 0 : currency1 == address(telcoin) ? 1 : 2;
@@ -173,33 +163,27 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         return 0;
     }
 
-    //todo: add external view function getAmountsForLiquidity(tokenId) returns both token amounts at current tick
+    //todo: delete extraneous interfaces in external
 
     /**
-     * @notice Computes the amounts of token0 and token1 for given liquidity and prices
-     * @dev Used for Uniswap V3/V4 style liquidity math
-     */ //todo: _getAmountsForLiquidity()
+     * @notice Computes currency0 & currency1 amounts for given liquidity at current tick price
+     * @dev Exposes Uniswap V3/V4 concentrated liquidity math publicly for TELx frontend use
+     */
     function getAmountsForLiquidity(
-        uint160 sqrtPriceX96,
-        uint160 sqrtPriceAX96,
-        uint160 sqrtPriceBX96,
-        uint128 liquidity
-    ) internal pure returns (uint256 amount0, uint256 amount1) {
-        if (sqrtPriceAX96 > sqrtPriceBX96) {
-            (sqrtPriceAX96, sqrtPriceBX96) = (sqrtPriceBX96, sqrtPriceAX96);
-        }
+        PoolId poolId,
+        uint128 liquidity,
+        int24 tickLower,
+        int24 tickUpper
+    ) public view returns (uint256 amount0, uint256 amount1, uint160 sqrtPriceX96) {
+        (sqrtPriceX96,,,) = stateView.getSlot0(poolId);
+        (amount0, amount1) = LiquidityAmounts.getAmountsForLiquidity(
+            sqrtPriceX96, 
+            TickMath.getSqrtPriceAtTick(tickLower),
+            TickMath.getSqrtPriceAtTick(tickUpper),
+            liquidity
+        );
 
-        if (sqrtPriceX96 <= sqrtPriceAX96) {
-            uint256 intermediate = FullMath.mulDiv(liquidity, sqrtPriceBX96 - sqrtPriceAX96, sqrtPriceBX96);
-            amount0 = FullMath.mulDiv(intermediate, 1 << 96, sqrtPriceAX96);
-        } else if (sqrtPriceX96 < sqrtPriceBX96) {
-            uint256 intermediate = FullMath.mulDiv(liquidity, sqrtPriceBX96 - sqrtPriceX96, sqrtPriceBX96);
-            amount0 = FullMath.mulDiv(intermediate, 1 << 96, sqrtPriceX96);
-
-            amount1 = FullMath.mulDiv(liquidity, sqrtPriceX96 - sqrtPriceAX96, FixedPoint96.Q96);
-        } else {
-            amount1 = FullMath.mulDiv(liquidity, sqrtPriceBX96 - sqrtPriceAX96, FixedPoint96.Q96);
-        }
+        return (amount0, amount1, sqrtPriceX96);
     }
 
     /**
@@ -427,7 +411,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         // todo: approved can also call this not just owner; are there conditions where reverting here causes problem
         address newOwner = IPositionManager(positionManager).ownerOf(tokenId);
 
-        (PoolKey memory poolKey, PositionInfo info) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
+        (PoolKey memory poolKey, /*PositionInfo info*/) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
         PoolId poolId = poolKey.toId();
 
         // Skip if not a known TEL pool
@@ -473,7 +457,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         require(tokenId != 0, "PositionRegistry: Invalid tokenId");
         address newOwner = IPositionManager(positionManager).ownerOf(tokenId); //todo: can this fail?
 
-        (PoolKey memory poolKey, PositionInfo info) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
+        (PoolKey memory poolKey, /*PositionInfo info*/) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
         PoolId poolId = poolKey.toId();
 
         // Skip if not a known initialized TEL pool

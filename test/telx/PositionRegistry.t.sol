@@ -629,9 +629,9 @@ contract PositionRegistryTest is
     }
 
     // mimics the voting weight computation in PositionRegistry and exposes it for testing
-    function computeVotingWeightStateless(uint160 sqrtPriceX96, int24 tickLower, int24 tickUpper, uint128 liquidity) internal pure returns (uint256) {
-        (uint256 amount0, uint256 amount1) = getAmountsForLiquidity(
-            sqrtPriceX96, TickMath.getSqrtPriceAtTick(tickLower), TickMath.getSqrtPriceAtTick(tickUpper), liquidity
+    function computeVotingWeightStateless(PoolId poolId, int24 tickLower, int24 tickUpper, uint128 liquidity) internal view returns (uint256) {
+        (uint256 amount0, uint256 amount1, uint160 sqrtPriceX96) = getAmountsForLiquidity(
+            poolId, liquidity, tickLower, tickUpper
         );
         uint256 priceX96 = FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 2 ** 96);
         return amount1 + FullMath.mulDiv(amount0, priceX96, 2 ** 96);
