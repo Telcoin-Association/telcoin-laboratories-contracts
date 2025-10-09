@@ -32,7 +32,7 @@ interface IPositionRegistry {
         mapping(uint32 => FeeGrowthCheckpoint) feeGrowthCheckpoints;
     }
 
-    /// @notice Emitted when a position is added or its liquidity is increased
+    /// @notice Emitted when a position is added or its liquidity is modified
     event PositionUpdated(
         uint256 indexed tokenId,
         address indexed owner,
@@ -42,18 +42,6 @@ interface IPositionRegistry {
         uint128 liquidity
     );
 
-    /// @notice Emitted when a position's liquidity reaches zero and is removed
-    event PositionRemoved(
-        uint256 indexed tokenId,
-        address indexed owner,
-        PoolId indexed poolId,
-        int24 tickLower,
-        int24 tickUpper
-    );
-
-    /// @notice Emitted when reward tokens are added to a user
-    event RewardsAdded(address indexed owner, uint256 amount);
-
     /// @notice Emitted when a user successfully claims their reward
     event RewardsClaimed(address indexed owner, uint256 amount);
 
@@ -61,7 +49,7 @@ interface IPositionRegistry {
     event RouterRegistryUpdated(address indexed router, bool listed);
 
     /// @notice Emitted when the TEL token position is updated for a pool.
-    event PoolAdded(PoolKey indexed poolKey);
+    event PoolInitialized(PoolKey indexed poolKey);
 
     /// @notice Emitted at each liquidity modification for offchain consumption
     event Checkpoint(
@@ -71,12 +59,18 @@ interface IPositionRegistry {
         uint256 feeGrowthInside1X128
     );
 
-    /// @notice Emitted when a token is subscribed for the first time
+    /// @notice Emitted when a token is subscribed
     event Subscribed(uint256 indexed tokenId, address indexed owner);
+
+    /// @notice Emitted when a subscription is removed
+    event Unsubscribed(
+        uint256 indexed tokenId,
+        address indexed owner
+    );
 
     function initialize(address sender, PoolKey calldata key) external;
 
-    function getSubscribedTokenIdsByOwner(
+    function getSubscriptions(
         address owner
     ) external view returns (uint256[] memory);
 

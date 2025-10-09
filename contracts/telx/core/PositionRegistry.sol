@@ -20,7 +20,6 @@ import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {IPositionManager, PoolKey, PositionInfo} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
 // todo: refactor, reauthor:
-// this contract should store participating tokenIds, written at subscribe time
 // this contract should store fee tracking information (tokenId => fees), written at modifyLiquidity and addRewards time 
 //   - checkpointing
 // offchain script can then pull fee tracking info and calculate final checkpoint subperiod
@@ -41,7 +40,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     bytes32 public constant SUPPORT_ROLE = keccak256("SUPPORT_ROLE");
     bytes32 public constant SUBSCRIBER_ROLE = keccak256("SUBSCRIBER_ROLE");
 
-    uint256 constant MAX_POSITIONS = 100; //todo: this can be increased due to refactor efficiency
+    uint256 constant MAX_SUBSCRIPTIONS = 100; //todo: this can be increased due to refactor efficiency
+    uint256 constant MAX_SUBSCRIBED = 100; //todo: this can be increased due to refactor efficiency
     /// @dev Marks positions either burned or not created via PositionManager
     address constant UNTRACKED = address(type(uint160).max);
 
@@ -51,12 +51,12 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     
     /// @notice Mapping to track all positions associated with supported pools
     mapping(uint256 => Position) public positions;
-    mapping(address => uint256[]) public ownerPositions;
     mapping(uint256 => CheckpointMetadata) public positionMetadata;
     
-    /// @notice The current set of active positions participating in TELxIncentives program via subscription
-    uint256[] public subscriptions;
-    mapping(address => uint256[]) public subscribedTokenIds;
+    /// @notice The current set of active subscriptions participating in the TELxIncentives program
+    address[] public subscribed;
+    mapping(address => uint256[]) public subscriptions;
+
     mapping(address => uint256) public unclaimedRewards;
     
     //todo: view function to fetch liquidityModifications
@@ -105,8 +105,9 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     /**
      * @notice Returns tokenIds for an owner that have been subscribed
      */
-    function getSubscribedTokenIdsByOwner(address owner) external view override returns (uint256[] memory) {
-        return ownerPositions[owner]; //todo function to loop through subscribedTokenIds and filter by owner address
+    function getSubscriptions(address owner) external view override returns (uint256[] memory) {
+        //todo: check if owner is present within subscribed array? 
+        return subscriptions[owner];
     }
 
     /**
@@ -163,8 +164,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         return 0;
     }
 
-    //todo: delete extraneous interfaces in external
-
     /**
      * @notice Computes currency0 & currency1 amounts for given liquidity at current tick price
      * @dev Exposes Uniswap V3/V4 concentrated liquidity math publicly for TELx frontend use
@@ -196,7 +195,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         require(!validPool(key.toId()), "PositionRegistry: Pool already initialized");
         initializedPoolKeys[key.toId()] = key;
 
-        emit PoolAdded(key);
+        emit PoolInitialized(key);
     }
 
     /**
@@ -262,9 +261,9 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             try IERC721(address(positionManager)).ownerOf(tokenId) returns (address lp) {
                 tokenOwner = lp;
             } catch {
-                // token is being burned and if subscribed will be unsubscribed
-                _setUntracked(tokenId);
-                _addCheckpoint(tokenId, uint32(block.number), newLiquidity);
+                // token is being burned; if subscribed retain ownership for subsequent untracking
+                if (!isSubscribed(tokenId)) _setUntracked(tokenId);
+                _writeCheckpoint(tokenId, uint32(block.number), newLiquidity);
                 return;
             }
         }
@@ -279,15 +278,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         
         // record in positions mapping and checkpoints list, await LP opt-in via `subscribe`
         _updatePosition(tokenId, tokenOwner, poolId, info.tickLower(), info.tickUpper(), newLiquidity, isNew);
-        _addCheckpoint(tokenId, uint32(block.number), newLiquidity);
+        _writeCheckpoint(tokenId, uint32(block.number), newLiquidity);
 
         // todo: internal fn to identify fees being collected and store it? or do offchain
         // if so fn must also be used during addRewards()
-
-        //todo: must ENSURE ownerPositions ALWAYS IN SYNC
-        if (ownerPositions[tokenOwner].length <= MAX_POSITIONS) {
-            ownerPositions[tokenOwner].push(tokenId);
-        }
     }
 
     /// @dev Return the last recorded liquidity for a position
@@ -330,7 +324,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         emit PositionUpdated(tokenId, newOwner, poolId, tickLower, tickUpper, uint128(newLiquidity));
     }
 
-    function _addCheckpoint(uint256 tokenId, uint32 checkpointBlock, uint128 newLiquidity) internal {
+    function _writeCheckpoint(uint256 tokenId, uint32 checkpointBlock, uint128 newLiquidity) internal {
         Position storage pos = positions[tokenId];
         pos.liquidityModifications.push(checkpointBlock, newLiquidity);
 
@@ -357,130 +351,112 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         emit Checkpoint(tokenId, checkpointIndex, feeGrowthInside0X128, feeGrowthInside1X128);
     }
 
-    /**
-     * @notice Internally removes a position from both the owner and global registries.
-     * @param tokenId The identifier of the position to remove.
-     * @param owner The address of the LP whose position is now subscribed.
-     */
-    function _removeSubscribedPosition(uint256 tokenId, address owner) internal {
-        uint256[] storage list = subscribedTokenIds[owner]; //todo: this also needs to remove from subscriptions array
-        for (uint256 j = 0; j < list.length; j++) {
-            if (list[j] == tokenId) {
-                list[j] = list[list.length - 1];
-                list.pop();
-                break;
-            }
-        }
-    }
+    /// @dev Returns whether `tokenId` is currently subscribed
+    function isSubscribed(uint256 tokenId) public view returns (bool) {
+        Position storage pos = positions[tokenId];
+        if (pos.owner == address(0x0) || pos.owner == UNTRACKED) return false;
 
-    /**
-     * @notice Removes a position from the owner registries.
-     * @dev Emits a PositionRemoved event.
-     * @param tokenId The identifier of the position to remove.
-     * @param owner The address of the LP whose position is being removed.
-     * @param poolId The pool associated with the position.
-     * @param tickLower The lower tick boundary of the position.
-     * @param tickUpper The upper tick boundary of the position.
-     */
-    function _removeOwnerPosition(uint256 tokenId, address owner, PoolId poolId, int24 tickLower, int24 tickUpper)
-        internal
-    {
-        uint256[] storage list = ownerPositions[owner];
-        for (uint256 j = 0; j < list.length; j++) {
-            if (list[j] == tokenId) {
-                list[j] = list[list.length - 1];
-                list.pop();
-                break;
+        uint256[] storage subscribedIds = subscriptions[pos.owner];
+        uint256 len = subscribedIds.length;
+        for (uint256 i; i < len; ++i) {
+            if (subscribedIds[i] == tokenId) {
+                return true;
             }
         }
 
-        emit PositionRemoved(tokenId, owner, poolId, tickLower, tickUpper); //todo: do we even want this?
+        return false;
     }
 
     /**
      * @notice Registers a position's ownership using the NFT tokenId.
      * @dev Must be invoked during hooks by an address with SUBSCRIBER_ROLE, such as TELxSubscriber
-     *      Reads the existing position metadata, and updates LP position ownership if necessary
-     * @dev LPs must call `PositionManager::subscribe()` to graduate unsubscribed (new) positions to active tracking
-     * @param tokenId The NFT tokenId corresponding to the original position.
+     * @dev LP position ownership has been guaranteed but may need to be updated if appropriate
+     * @dev LPs must subscribe to become eligible for TELx incentives
      */
     function handleSubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
         Position storage pos = positions[tokenId];
+        require(validPool(pos.poolId), "PositionRegistry: Invalid pool");
         require(pos.owner != UNTRACKED, "PositionRegistry: Only positions created via PositionManager can be subscribed");
 
-        // todo: approved can also call this not just owner; are there conditions where reverting here causes problem
-        address newOwner = IERC721(address(positionManager)).ownerOf(tokenId);
+        // approved may also initiate subscribe flow but the token owner is counted for subscription anyway
+        address tokenOwner = IERC721(address(positionManager)).ownerOf(tokenId);
+        require(subscriptions[tokenOwner].length <= MAX_SUBSCRIPTIONS && subscribed.length <= MAX_SUBSCRIBED, "PositionRegistry: Exceeds max subscriptions");
+        // `pos.owner` may be stale since ownership ledger is only updated during liquidity modifications
+        if (pos.owner != tokenOwner) _updatePosition(tokenId, tokenOwner, pos.poolId, pos.tickLower, pos.tickUpper, _getLiquidityLast(tokenId), false);
 
-        (PoolKey memory poolKey, /*PositionInfo info*/) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
-        PoolId poolId = poolKey.toId();
+        // todo: following assertion only necessary if multiple pools are supported by single registry
+        (PoolKey memory poolKey, ) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
+        require(PoolId.unwrap(poolKey.toId()) == PoolId.unwrap(pos.poolId), "PositionRegistry: PoolId mismatch");
 
-        // Skip if not a known TEL pool
-        if (!validPool(poolId)) {
-            return;
+        bool isDuplicate;
+        for (uint256 i; i < subscribed.length; ++i) {
+            if (subscribed[i] == tokenOwner) {
+                isDuplicate = true;
+                break;
+            }
         }
 
-        // if ( todo: max subscribed positions handling
-        //     subscribedTokenIds[tokenOwner].length <= MAX_POSITIONS
-        // ) {
-        //     subscribedTokenIds[tokenOwner].push(tokenId);
-        // }
-        // return;
+        if (!isDuplicate) subscribed.push(tokenOwner);
+        subscriptions[tokenOwner].push(tokenId);
 
-        //todo implement isSubscribed(), simply search subscribedTokenIds[newOwner] for tokenId?
-        // if (isSubscribed(tokenId)) {
-        //     // no-op resubscriptions
-        //     //todo: is it even possible to resubscribe?
-        //     return;
-        // }
-
-        if (pos.owner == address(0x0)) {
-            //todo: should be impossible since positions will already be recorded
-            revert("PositionRegistry: Subscribing unknown position");
-        } else {
-            // new subscription; update state and emit event for offchain availability
-            subscriptions.push(tokenId);
-
-            emit Subscribed(tokenId, newOwner);
-        }
-
-        //todo: should we also track all an owner's *SUBSCRIBED* positions? maybe this should replace ownerPositions
+        emit Subscribed(tokenId, tokenOwner);
     }
 
     /**
-     * @notice Deregisters a position.
-     * @dev Must be invoked during hooks by an address with SUBSCRIBER_ROLE, such as TELxSubscriber
-     *      Invoked during v4 unsubscription hooks during LP token transfers 
-     *      Reads the existing position metadata, removes it from the old owner, and reassigns it to the new owner.
-     * @param tokenId The NFT tokenId corresponding to the original position.
+     * @notice Deregisters a subscription, requiring re-subscription to re-join the program
+     * @dev Invoked during v4 unsubscription hooks by TELxSubscriber
+     * @dev Removes `tokenId` from `subscription` ledger and from the `subscribed` array
      */
     function handleUnsubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
-        require(tokenId != 0, "PositionRegistry: Invalid tokenId");
-        address newOwner = IERC721(address(positionManager)).ownerOf(tokenId); //todo: can this fail?
-
-        (PoolKey memory poolKey, /*PositionInfo info*/) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
-        PoolId poolId = poolKey.toId();
-
-        // Skip if not a known initialized TEL pool
-        if (!validPool(poolId)) {
-            return;
-        }
-
         Position storage pos = positions[tokenId];
-
-        _removeSubscribedPosition(tokenId, pos.owner);
-
-        // no change in ownership implicates self transfer or a direct call to unsubscribe()
-        if (pos.owner == newOwner) {
-            return;
-        } else {
-            _removeOwnerPosition(tokenId, pos.owner, poolId, pos.tickLower, pos.tickUpper);
-        }
+        _removeSubscription(tokenId, pos.owner);
     }
 
-    //todo: _handleBurn should update position
-    //todo: should it also add final checkpoint? probably already handled by beforeRemoveLiquidity
-    function handleBurn(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {}
+    /**
+     * @notice Permanently deregisters a subscription and untracks its position
+     * @dev Invoked during v4 burn hooks by TELxSubscriber
+     * @dev Removes `tokenId` from `subscription` ledger and from the `subscribed` array
+     * and marks the position as untracked to be permanently ignored
+     */
+    function handleBurn(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
+        Position storage pos = positions[tokenId];
+        // ownership information is retained during `beforeRemoveLiquidity` hook in burn contexts
+        _removeSubscription(tokenId, pos.owner);
+        _setUntracked(tokenId);
+    }
 
+    /**
+     * @notice Delete `tokenId` from `subscriptions` map as well as `subscribed` array if appropriate
+     * @param tokenId The identifier of the position to remove.
+     * @param owner The address of the LP whose position is being removed.
+     */
+    function _removeSubscription(uint256 tokenId, address owner)
+        internal
+    {
+        uint256[] storage list = subscriptions[owner];
+        uint256 len = list.length;
+        for (uint256 i; i < len; ++i) {
+            if (list[i] == tokenId) {
+                list[i] = list[len - 1];
+                list.pop();
+                break;
+            }
+        }
+
+        if (len == 1) {
+            // owner has no more subscriptions, remove from subscribed array
+            uint256 subscribedLen = subscribed.length;
+            for (uint256 i; i < subscribedLen; i++) {
+                if (subscribed[i] == owner) {
+                    subscribed[i] = subscribed[subscribedLen - 1];
+                    subscribed.pop();
+                    break;
+                }
+            }
+        }
+
+        emit Unsubscribed(tokenId, owner);
+    }
 
     /**
      * @notice Adds batch rewards for many users in a specific block round
@@ -499,12 +475,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         uint256 total = 0;
         for (uint256 i = 0; i < lps.length; i++) {
-            // _addCheckpoint(tokenId, uint32(block.number), newLiquidity); //todo: align all subscribed positions at period end
+            // _writeCheckpoint(tokenId, uint32(block.number), newLiquidity); //todo: align all subscribed positions at period end
 
             unclaimedRewards[lps[i]] += amounts[i];
             total += amounts[i];
-
-            emit RewardsAdded(lps[i], amounts[i]);
         }
 
         require(total == totalAmount, "PositionRegistry: Total amount mismatch");

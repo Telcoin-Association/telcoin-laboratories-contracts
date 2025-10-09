@@ -104,7 +104,7 @@ contract PositionRegistryTest is
 
         // position registry should correctly be informed of the currency position
         vm.expectEmit(address(positionRegistry));
-        emit IPositionRegistry.PoolAdded(poolKey);
+        emit IPositionRegistry.PoolInitialized(poolKey);
         vm.expectEmit(address(poolMngr));
         emit IPoolManager.Initialize(
             poolKey.toId(),
@@ -207,7 +207,7 @@ contract PositionRegistryTest is
         // position has been added to unsubscribed token ID storage mapping
         // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 1); //todo
         // LP's token ID is not yet subscribed
-        uint256[] memory tokenIds = positionRegistry.getSubscribedTokenIdsByOwner(holder);
+        uint256[] memory tokenIds = positionRegistry.getSubscriptions(holder);
         assertTrue(tokenIds.length == 0);
     }
 
@@ -229,7 +229,7 @@ contract PositionRegistryTest is
         // token ID position has been graduated from `positionRegistry` unsubscribed storage
         // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0); //todo
         // to being correctly registered in its subscribed storage
-        uint256[] memory tokenIds = positionRegistry.getSubscribedTokenIdsByOwner(holder);
+        uint256[] memory tokenIds = positionRegistry.getSubscriptions(holder);
         assertTrue(tokenIds.length == 1);
         assertEq(tokenIds[0], tokenId);
         // assert position values are as expected
@@ -363,7 +363,7 @@ contract PositionRegistryTest is
         positionMngr.subscribe(tokenId, address(telXSubscriber), "");
 
         vm.expectEmit(true, true, true, true);
-        emit IPositionRegistry.PositionRemoved(tokenId, holder, poolKey.toId(), tickLower, tickUpper);
+        emit IPositionRegistry.Unsubscribed(tokenId, holder);
         burnPosition(holder, tokenId, 0, 0);
 
         // confirm the decreased liquidity is accurately reflected in the pool
@@ -384,7 +384,7 @@ contract PositionRegistryTest is
 
         // // sanity check unsubscribed and subscribed storage mappings
         // // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0); //todo
-        // assertTrue(positionRegistry.getSubscribedTokenIdsByOwner(holder).length == 0);
+        // assertTrue(positionRegistry.getSubscriptions(holder).length == 0);
 
         // // ensure voting weight is zero 
         // uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
@@ -430,13 +430,13 @@ contract PositionRegistryTest is
         // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(support).length == 1); //todo
         // holders info is wiped
         // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0); //todo
-        assertTrue(positionRegistry.getSubscribedTokenIdsByOwner(holder).length == 0);
+        assertTrue(positionRegistry.getSubscriptions(holder).length == 0);
 
         // transferred positions should not be registered until subscribed
-        assertTrue(positionRegistry.getSubscribedTokenIdsByOwner(support).length == 0);
+        assertTrue(positionRegistry.getSubscriptions(support).length == 0);
         vm.prank(support);
         positionMngr.subscribe(tokenId, address(telXSubscriber), "");
-        assertTrue(positionRegistry.getSubscribedTokenIdsByOwner(support).length == 1);
+        assertTrue(positionRegistry.getSubscriptions(support).length == 1);
 
         // after subscribing the position should be reregistered //todo
         // PositionRegistry.Position memory position = positionRegistry.getPosition(tokenId);
