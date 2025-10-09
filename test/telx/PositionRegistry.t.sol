@@ -178,7 +178,7 @@ contract PositionRegistryTest is
         assertFalse(positionRegistry.isActiveRouter(address(0x0)));
 
         vm.prank(support);
-        positionRegistry.updateRegistry(address(router), true);
+        positionRegistry.updateRouter(address(router), true);
 
         assertTrue(positionRegistry.isActiveRouter(address(router)));
     }
@@ -482,7 +482,7 @@ contract PositionRegistryTest is
 
         // add v4 universal router to position registry
         vm.prank(support);
-        positionRegistry.updateRegistry(address(router), true);
+        positionRegistry.updateRouter(address(router), true);
 
         uint256 initialInputBal = inputCurrency.balanceOf(holder);
         (, Currency outputCurrency) = inputAndOutputCurrencies(zeroForOne);

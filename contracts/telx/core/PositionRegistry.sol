@@ -5,6 +5,7 @@ import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Checkpoints} from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IPositionRegistry, PoolId} from "../interfaces/IPositionRegistry.sol";
 import {IMsgSender} from "../interfaces/IMsgSender.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -58,7 +59,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     mapping(address => uint256) public unclaimedRewards;
     
     //todo: view function to fetch liquidityModifications
-    //todo: remove liquidity from Position struct and add function to getLiquidityLast() from last checkpoint
     //todo: should this contract support multiple poolIds or be deployed per-pool? must be enforced
     
     /// @notice Maps period numbers to their end block
@@ -126,16 +126,17 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Returns the voting weight (in TEL) for a position at a given sqrtPriceX96
+     * @notice Returns the voting weight (in TEL) for a position at the current block's `sqrtPriceX96`
      * @dev Because voting weight is TEL-denominated, it fluctuates with price changes & impermanent loss
-     * The spec uses TEL denomination rather than liquidity units for backwards compatibility with
-     * Snapshot infra + preexisting integration modules like VotingWeightCalculator & UniswapAdaptor
+     * Uses TEL denomination rather than liquidity units for backwards compatibility w/ Snapshot's 
+     * `erc20-balance-of-with-delegation` schema & preexisting integrations like VotingWeightCalculator
      * @param tokenId The position identifier
      */
     function computeVotingWeight(uint256 tokenId) external view returns (uint256) {
         // todo: from here until getAmountsForLiquidity can be replaced with the getAmountsForLiquidity(tokenId)
         Position storage pos = positions[tokenId];
-        if (pos.liquidity == 0) return 0;
+        uint128 liquidity = _getLiquidityLast(tokenId);
+        if (liquidity == 0) return 0;
 
         // todo: this should be replaced by a call to getPoolAndPositionInfo()
         if (pos.owner != IPositionManager(positionManager).ownerOf(tokenId)) {
@@ -149,7 +150,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             sqrtPriceX96,
             TickMath.getSqrtPriceAtTick(pos.tickLower),
             TickMath.getSqrtPriceAtTick(pos.tickUpper),
-            pos.liquidity
+            liquidity
         );
 
         uint256 priceX96 = FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 2 ** 96);
@@ -220,8 +221,9 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @param router The router address to update.
      * @param listed Whether the router should be marked as trusted.
      */
-    function updateRegistry(address router, bool listed) external onlyRole(SUPPORT_ROLE) {
+    function updateRouter(address router, bool listed) external onlyRole(SUPPORT_ROLE) {
         routers[router] = listed;
+
         emit RouterRegistryUpdated(router, listed);
     }
 
@@ -252,6 +254,9 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         } else if (pos.owner == address(0)) {
             // new position
             isNew = true;
+            require(liquidityDelta >= 0, "NEGATIVE LIQ NEW POSITION"); //todo: remove assertion
+            newLiquidity = uint128(liquidityDelta);
+
             try positionManager.ownerOf(tokenId) returns (address lp) {
                 tokenOwner = lp;
             } catch {
@@ -259,27 +264,24 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
                 _setUntracked(tokenId);
                 return;
             }
-
-            require(liquidityDelta >= 0, "NEGATIVE LIQ NEW POSITION"); //todo: remove assertion
-            newLiquidity = uint128(liquidityDelta);
         } else {
             // known position
+            if (liquidityDelta > 0) {
+                newLiquidity = _getLiquidityLast(tokenId) + uint128(liquidityDelta);
+            } else {
+                // the case where `liquidityDelta == 0` is permitted for fee collection
+                uint128 delta = uint128(-liquidityDelta);
+                require(_getLiquidityLast(tokenId) >= delta, "PositionRegistry: Insufficient liquidity"); //todo: remove assertion
+                newLiquidity = _getLiquidityLast(tokenId) - delta;
+            }
+
             try positionManager.ownerOf(tokenId) returns (address lp) {
                 tokenOwner = lp;
             } catch {
                 // token is being burned and if subscribed will be unsubscribed
                 _setUntracked(tokenId);
-                // _addCheckpoint(); //todo
+                _addCheckpoint(tokenId, uint32(block.number), newLiquidity);
                 return;
-            }
-
-            if (liquidityDelta > 0) {
-                newLiquidity = pos.liquidity + uint128(liquidityDelta);
-            } else {
-                // the case where `liquidityDelta == 0` is permitted for fee collection
-                uint128 delta = uint128(-liquidityDelta);
-                require(pos.liquidity >= delta, "PositionRegistry: Insufficient liquidity"); //todo: remove assertion
-                newLiquidity = pos.liquidity - delta;
             }
         }
 
@@ -293,8 +295,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         
         // record in positions mapping and checkpoints list, await LP opt-in via `subscribe`
         _updatePosition(tokenId, tokenOwner, poolId, info.tickLower(), info.tickUpper(), newLiquidity, isNew);
-        //todo: this function should write a fee tracking checkpoint (modifyLiquidity time)
-        // _addCheckPoint();
+        _addCheckpoint(tokenId, uint32(block.number), newLiquidity);
 
         // todo: internal fn to identify fees being collected and store it? or do offchain
         // if so fn must also be used during addRewards()
@@ -305,21 +306,41 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         }
     }
 
+    /// @dev Return the last recorded liquidity for a position
+    function _getLiquidityLast(uint256 tokenId) internal view returns (uint128) {
+        Position storage pos = positions[tokenId];
+        uint256 len = pos.liquidityModifications.length();
+        if (len == 0) return 0;
+
+        return SafeCast.toUint128(pos.liquidityModifications.latest());
+    }
+
+    /// @dev Mark a position as untracked because it was burned or not created via PositionManager
     function _setUntracked(uint256 tokenId) internal {
         positions[tokenId].owner = UNTRACKED;
     }
 
     function _updatePosition(uint256 tokenId, address newOwner, PoolId poolId, int24 tickLower, int24 tickUpper, uint128 newLiquidity, bool isNew) internal {
         if (isNew) {
+            require(positions[tokenId].owner == address(0x0), "PositionRegistry: Position already exists"); //todo: remove assertion
+            require(positions[tokenId].liquidityModifications.length() == 0, "PositionRegistry: Position already exists"); //todo: remove assertion
+            require(positions[tokenId].tickLower == 0, "PositionRegistry: Position already exists"); //todo: remove assertion
+            require(positions[tokenId].tickUpper == 0, "PositionRegistry: Position already exists"); //todo: remove assertion
+
             positions[tokenId].owner = newOwner;
             positions[tokenId].poolId = poolId;
             positions[tokenId].tickLower = tickLower;
             positions[tokenId].tickUpper = tickUpper;
-            positions[tokenId].liquidity = newLiquidity;
         } else {
             //todo: maybe optimization: if position is known + subscribed AND liquidity is lowered to zero, "unsubscribe" it from this contract's perspective
+            
+            require(positions[tokenId].owner != address(0x0), "PositionRegistry: Position already exists"); //todo: remove assertion
+            require(positions[tokenId].liquidityModifications.length() != 0, "PositionRegistry: Position already exists"); //todo: remove assertion
+            require(positions[tokenId].tickLower != 0, "PositionRegistry: Position already exists"); //todo: remove assertion
+            require(positions[tokenId].tickUpper != 0, "PositionRegistry: Position already exists"); //todo: remove assertion
+
             positions[tokenId].owner = newOwner;
-            positions[tokenId].liquidity = newLiquidity;
+            positions[tokenId].poolId = poolId;
         }
 
         emit PositionUpdated(tokenId, newOwner, poolId, tickLower, tickUpper, uint128(newLiquidity));
@@ -327,21 +348,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     function _addCheckpoint(uint256 tokenId, uint32 checkpointBlock, uint128 newLiquidity) internal {
         Position storage pos = positions[tokenId];
-        pos.liquidityModifications.push(
-            // Checkpoints.Checkpoint224( //todo
-                checkpointBlock, newLiquidity
-                // )
-        );
+        pos.liquidityModifications.push(checkpointBlock, newLiquidity);
 
-        // tick deinitialization happens after removing liquidity, so fee growth can be read safely in before context
+        // tick initialization occurs immediately before adding liquidity, so fee growth can be read safely before addition
+        // tick deinitialization occurs after removing liquidity, so fee growth can be read safely before removal
         (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128) = stateView.getFeeGrowthInside(
             pos.poolId,
             pos.tickLower,
             pos.tickUpper
         );
         pos.feeGrowthCheckpoints[checkpointBlock] = FeeGrowthCheckpoint({
-            feeGrowthInside0X128: uint128(feeGrowthInside0X128), //todo: safecast necessary? SafeCast.toUint128(feeGrowthInside0X128),
-            feeGrowthInside1X128: uint128(feeGrowthInside1X128) //todo: SafeCast.toUint128(feeGrowthInside1X128)
+            feeGrowthInside0X128: SafeCast.toUint128(feeGrowthInside0X128),
+            feeGrowthInside1X128: SafeCast.toUint128(feeGrowthInside1X128)
         });
 
         // update metadata for better searchability offchain
@@ -350,7 +368,9 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             metadata.firstCheckpoint = checkpointBlock;
         }
         metadata.lastCheckpoint = checkpointBlock;
-        metadata.totalCheckpoints++;
+        uint256 checkpointIndex = metadata.totalCheckpoints++;
+
+        emit Checkpoint(tokenId, checkpointIndex, feeGrowthInside0X128, feeGrowthInside1X128);
     }
 
     /**
@@ -359,7 +379,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @param owner The address of the LP whose position is now subscribed.
      */
     function _removeSubscribedPosition(uint256 tokenId, address owner) internal {
-        uint256[] storage list = subscribedTokenIds[owner];
+        uint256[] storage list = subscribedTokenIds[owner]; //todo: this also needs to remove from subscriptions array
         for (uint256 j = 0; j < list.length; j++) {
             if (list[j] == tokenId) {
                 list[j] = list[list.length - 1];
@@ -495,8 +515,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         uint256 total = 0;
         for (uint256 i = 0; i < lps.length; i++) {
+            // _addCheckpoint(tokenId, uint32(block.number), newLiquidity); //todo: align all subscribed positions at period end
+
             unclaimedRewards[lps[i]] += amounts[i];
             total += amounts[i];
+
             emit RewardsAdded(lps[i], amounts[i]);
         }
 

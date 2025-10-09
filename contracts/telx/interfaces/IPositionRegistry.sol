@@ -25,7 +25,6 @@ interface IPositionRegistry {
         PoolId poolId;
         int24 tickLower;
         int24 tickUpper;
-        uint128 liquidity; //todo can be deleted
         /// @notice History of positions' liquidity checkpoints: `tokenId => {block, telDenominatedFees}`
         /// @dev Since Trace224 array is unbounded it can grow beyond EVM memory limits
         /// do not load into EVM memory; consume offchain instead and fall back to loading slots if needed
@@ -63,6 +62,14 @@ interface IPositionRegistry {
 
     /// @notice Emitted when the TEL token position is updated for a pool.
     event PoolAdded(PoolKey indexed poolKey);
+
+    /// @notice Emitted at each liquidity modification for offchain consumption
+    event Checkpoint(
+        uint256 indexed tokenId,
+        uint256 indexed checkpointIndex,
+        uint256 feeGrowthInside0X128,
+        uint256 feeGrowthInside1X128
+    );
 
     /// @notice Emitted when a token is subscribed for the first time
     event Subscribed(uint256 indexed tokenId, address indexed owner);
