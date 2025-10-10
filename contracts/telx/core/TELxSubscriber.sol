@@ -33,7 +33,6 @@ contract TELxSubscriber is ISubscriber {
 
     /// @notice Notifies registry that an LP token is being subscribed for the first time
     /// @dev Only callable by the PositionManager to trigger internal state update in the PositionRegistry
-    /// @param tokenId The NFT tokenId representing a Uniswap LP position
     function notifySubscribe(uint256 tokenId, bytes memory) external override onlyPositionManager {
         registry.handleSubscribe(tokenId);
     }
@@ -55,16 +54,15 @@ contract TELxSubscriber is ISubscriber {
         // registry.handleModifyLiquidity(tokenId);
     }
 
-    /// @notice No-op for burn events
-    /// @dev Required to satisfy ISubscriber but unused in this implementation
+    /// @notice Notifies registry of position burn
+    /// @dev Deletes registry's stored subscription and permanently marks its position burned
     function notifyBurn(
-        uint256,
+        uint256 tokenId,
         address,
         PositionInfo,
         uint256,
         BalanceDelta
     ) external override onlyPositionManager {
-        //todo: update PositionRegistry state by deleting subscription. tokenIDs not reused so full delete
-        // registry.handleBurn(tokenId);
+        registry.handleBurn(tokenId);
     }
 }

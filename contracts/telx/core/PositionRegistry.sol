@@ -12,19 +12,18 @@ import {IMsgSender} from "../interfaces/IMsgSender.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
-import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
-import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {IPositionManager, PoolKey, PositionInfo} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
-// todo: refactor, reauthor:
-// this contract should store fee tracking information (tokenId => fees), written at modifyLiquidity and addRewards time 
+// this contract stores fee tracking information (tokenId => fees), written at modifyLiquidity and addRewards time 
+// the goal is to be able to reconstruct fee growth inside at any point in time for subscribed positions
+//todo: what is the best way to implement data storage so that getFeeGrowth(startBlock, endBlock) can be efficiently queried offchain?
 //   - checkpointing
 // offchain script can then pull fee tracking info and calculate final checkpoint subperiod
-// during addRewards, final checkpoint should be written to align all subscribed positions checkpoints at period endBlock
-// update spec.md -> README.md and incorporate google doc to current markdown
+// during addRewards, maybe final checkpoint should be written to align all subscribed positions checkpoints at period endBlock?
+// todo: update spec.md -> README.md and incorporate google doc to current markdown
 
 /**
  * @title Position Registry
@@ -45,8 +44,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     /// @dev Marks positions either burned or not created via PositionManager
     address constant UNTRACKED = address(type(uint160).max);
 
-    //todo: refactored state
-    mapping(address => bool) public routers; //todo: necessary? just set universal router as immutable
+    mapping(address => bool) public routers;
     mapping(PoolId => PoolKey) public initializedPoolKeys;
     
     /// @notice Mapping to track all positions associated with supported pools
@@ -60,7 +58,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     mapping(address => uint256) public unclaimedRewards;
     
     //todo: view function to fetch liquidityModifications
-    //todo: should this contract support multiple poolIds or be deployed per-pool? must be enforced
     
     /// @notice Maps period numbers to their end block
     mapping(uint256 => uint32) public periodEndBlock;
@@ -79,12 +76,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         stateView = stateView_;
     }
 
-    /**
-     * @notice Returns whether a given PoolId is known by this contract
-     * @dev A PoolId is considered valid if it has been initialized with a currency pair.
-     * @param id The unique identifier for the Uniswap V4 pool.
-     * @return True if the pool has a non-zero currency0 or currency1 address.
-     */
+    /// @inheritdoc IPositionRegistry
     function validPool(PoolId id) public view override returns (bool) {
         address currency0 = Currency.unwrap(initializedPoolKeys[id].currency0);
         address currency1 = Currency.unwrap(initializedPoolKeys[id].currency1);
@@ -95,47 +87,43 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         return false;
     }
 
-    // /**
-    //  * @notice Returns position metadata given its ID
-    //  */
-    // function getPosition(uint256 tokenId) external view returns (Position memory) {
-    //     return positions[tokenId];
-    // } //todo: delete
+    /// @inheritdoc IPositionRegistry
+    function getPosition(uint256 tokenId) external view returns (
+        address owner,
+        PoolId poolId,
+        int24 tickLower,
+        int24 tickUpper
+    ) {
+        Position storage pos = positions[tokenId];
+        return (pos.owner, pos.poolId, pos.tickLower, pos.tickUpper);
+    }
 
-    /**
-     * @notice Returns tokenIds for an owner that have been subscribed
-     */
+    /// @inheritdoc IPositionRegistry
+    function getLiquidityLast(uint256 tokenId) external view returns (uint128) {
+        return _getLiquidityLast(tokenId);
+    }
+
+    function _getLiquidityLast(uint256 tokenId) internal view returns (uint128) {
+        Position storage pos = positions[tokenId];
+        uint256 len = pos.liquidityModifications.length();
+        if (len == 0) return 0;
+
+        return SafeCast.toUint128(pos.liquidityModifications.latest());
+    }
+
+    /// @inheritdoc IPositionRegistry
     function getSubscriptions(address owner) external view override returns (uint256[] memory) {
-        //todo: check if owner is present within subscribed array? 
         return subscriptions[owner];
     }
 
-    /**
-     * @notice Returns whether a router is in the trusted routers list.
-     * @dev Used to determine if a router can be queried for the actual msg.sender.
-     * @param router The address of the router to query.
-     * @return True if the router is listed as trusted.
-     */
-    function isActiveRouter(address router) public view override returns (bool) {
-        return routers[router];
+    /// @inheritdoc IPositionRegistry
+    function getSubscribed() external view returns (address[] memory) {
+        return subscribed;
     }
 
-    /**
-     * @notice Gets unclaimed reward balance for a user
-     */
-    function getUnclaimedRewards(address user) external view returns (uint256) {
-        return unclaimedRewards[user];
-    }
-
-    /**
-     * @notice Returns the voting weight (in TEL) for a position at the current block's `sqrtPriceX96`
-     * @dev Because voting weight is TEL-denominated, it fluctuates with price changes & impermanent loss
-     * Uses TEL denomination rather than liquidity units for backwards compatibility w/ Snapshot's 
-     * `erc20-balance-of-with-delegation` schema & preexisting integrations like VotingWeightCalculator
-     * @param tokenId The position identifier
-     */
+    /// @inheritdoc IPositionRegistry
     function computeVotingWeight(uint256 tokenId) external view returns (uint256) {
-        //todo MUST REQUIRE SUBSCRIBED, which excludes transferred positions (which are unsubscribed)
+        if (!isSubscribed(tokenId)) return 0;
 
         uint128 liquidity = _getLiquidityLast(tokenId);
         if (liquidity == 0) return 0;
@@ -146,13 +134,13 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         uint256 priceX96 = FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 2 ** 96);
 
-        // todo: refactor to currency0 and currency1, incorporating price quote/calculation for stablecoin (nonTEL) pools
         PoolKey memory key = initializedPoolKeys[poolId];
         address currency0 = Currency.unwrap(key.currency0);
         address currency1 = Currency.unwrap(key.currency1);
         uint8 telIndex = currency0 == address(telcoin) ? 0 : currency1 == address(telcoin) ? 1 : 2;
         if (telIndex == 2) {
-            //todo this is a nonTEL pool; we need to get price of both token0 and token1 in TEL via quote
+            //todo this is a nonTEL pool; we need to get some kind of price of both currency0 and currency1 in TEL
+            // todo: incorporate price quote/calculation for stablecoin (nonTEL) pools using current price? VWAP? oracle?
         }
 
         if (telIndex == 0) {
@@ -164,10 +152,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         return 0;
     }
 
-    /**
-     * @notice Computes currency0 & currency1 amounts for given liquidity at current tick price
-     * @dev Exposes Uniswap V3/V4 concentrated liquidity math publicly for TELx frontend use
-     */
+    /// @inheritdoc IPositionRegistry
     function getAmountsForLiquidity(
         PoolId poolId,
         uint128 liquidity,
@@ -185,47 +170,17 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         return (amount0, amount1, sqrtPriceX96);
     }
 
-    /**
-     * @notice Updates the stored index of TEL in a specific Uniswap V4 pool.
-     * @dev Only callable by the TELxIncentiveHook which possesses `UNI_HOOK_ROLE`
-     * @dev Must be initiated by an admin as `tx.origin`
-     */
-    function initialize(address sender, PoolKey calldata key) external onlyRole(UNI_HOOK_ROLE) {
-        require(hasRole(DEFAULT_ADMIN_ROLE, _resolveUser(sender)), "PositionRegistry: Only admin can initialize pools with this hook");
-        require(!validPool(key.toId()), "PositionRegistry: Pool already initialized");
-        initializedPoolKeys[key.toId()] = key;
-
-        emit PoolInitialized(key);
-    }
-
-    /**
-     * @notice Adds or removes a router from the trusted routers registry.
-     * @dev Only callable by an address with SUPPORT_ROLE.
-     * @param router The router address to update.
-     * @param listed Whether the router should be marked as trusted.
-     */
-    function updateRouter(address router, bool listed) external onlyRole(SUPPORT_ROLE) {
-        routers[router] = listed;
-
-        emit RouterRegistryUpdated(router, listed);
-    }
-
-    /**
-     * @notice Called by Uniswap hook to add or remove tracked liquidity
-     * @param tokenId The identifier of the position to remove.
-     * @param poolId Target pool
-     * @param liquidityDelta Change in liquidity (positive = add, negative = remove)
-     */
+    /// @inheritdoc IPositionRegistry
     function addOrUpdatePosition(uint256 tokenId, PoolId poolId, int128 liquidityDelta)
         external
-        onlyRole(UNI_HOOK_ROLE) //todo this role thing is awkward, point at const?
+        onlyRole(UNI_HOOK_ROLE)
     {
         // Does not fail on invalid poolId, just skips update
         if (!validPool(poolId)) {
             return;
         }
 
-        require(liquidityDelta != type(int128).min, "PositionRegistry: Invalid liquidity delta"); //todo: remove assertion
+        require(liquidityDelta > type(int128).min, "PositionRegistry: Invalid liquidity delta"); //todo: remove assertion
 
         Position storage pos = positions[tokenId];
 
@@ -279,23 +234,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         // record in positions mapping and checkpoints list, await LP opt-in via `subscribe`
         _updatePosition(tokenId, tokenOwner, poolId, info.tickLower(), info.tickUpper(), newLiquidity, isNew);
         _writeCheckpoint(tokenId, uint32(block.number), newLiquidity);
-
-        // todo: internal fn to identify fees being collected and store it? or do offchain
-        // if so fn must also be used during addRewards()
-    }
-
-    /// @dev Return the last recorded liquidity for a position
-    function _getLiquidityLast(uint256 tokenId) internal view returns (uint128) {
-        Position storage pos = positions[tokenId];
-        uint256 len = pos.liquidityModifications.length();
-        if (len == 0) return 0;
-
-        return SafeCast.toUint128(pos.liquidityModifications.latest());
-    }
-
-    /// @dev Mark a position as untracked because it was burned or not created via PositionManager
-    function _setUntracked(uint256 tokenId) internal {
-        positions[tokenId].owner = UNTRACKED;
     }
 
     function _updatePosition(uint256 tokenId, address newOwner, PoolId poolId, int24 tickLower, int24 tickUpper, uint128 newLiquidity, bool isNew) internal {
@@ -314,8 +252,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             
             require(positions[tokenId].owner != address(0x0), "PositionRegistry: Position already exists"); //todo: remove assertion
             require(positions[tokenId].liquidityModifications.length() != 0, "PositionRegistry: Position already exists"); //todo: remove assertion
-            require(positions[tokenId].tickLower != 0, "PositionRegistry: Position already exists"); //todo: remove assertion
-            require(positions[tokenId].tickUpper != 0, "PositionRegistry: Position already exists"); //todo: remove assertion
 
             positions[tokenId].owner = newOwner;
             positions[tokenId].poolId = poolId;
@@ -326,6 +262,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     function _writeCheckpoint(uint256 tokenId, uint32 checkpointBlock, uint128 newLiquidity) internal {
         Position storage pos = positions[tokenId];
+        PoolId poolId = pos.poolId;
         pos.liquidityModifications.push(checkpointBlock, newLiquidity);
 
         // tick initialization occurs immediately before adding liquidity, so fee growth can be read safely before addition
@@ -348,10 +285,19 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         metadata.lastCheckpoint = checkpointBlock;
         uint256 checkpointIndex = metadata.totalCheckpoints++;
 
-        emit Checkpoint(tokenId, checkpointIndex, feeGrowthInside0X128, feeGrowthInside1X128);
+        emit Checkpoint(tokenId, poolId, checkpointIndex, feeGrowthInside0X128, feeGrowthInside1X128);
     }
 
-    /// @dev Returns whether `tokenId` is currently subscribed
+    /// @dev Mark a position as untracked because it was burned or not created via PositionManager
+    function _setUntracked(uint256 tokenId) internal {
+        positions[tokenId].owner = UNTRACKED;
+    }
+
+    /**
+     * Subscriptions
+     */
+
+    /// @inheritdoc IPositionRegistry
     function isSubscribed(uint256 tokenId) public view returns (bool) {
         Position storage pos = positions[tokenId];
         if (pos.owner == address(0x0) || pos.owner == UNTRACKED) return false;
@@ -367,12 +313,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         return false;
     }
 
-    /**
-     * @notice Registers a position's ownership using the NFT tokenId.
-     * @dev Must be invoked during hooks by an address with SUBSCRIBER_ROLE, such as TELxSubscriber
-     * @dev LP position ownership has been guaranteed but may need to be updated if appropriate
-     * @dev LPs must subscribe to become eligible for TELx incentives
-     */
+    /// @inheritdoc IPositionRegistry
     function handleSubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
         Position storage pos = positions[tokenId];
         require(validPool(pos.poolId), "PositionRegistry: Invalid pool");
@@ -383,10 +324,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         require(subscriptions[tokenOwner].length <= MAX_SUBSCRIPTIONS && subscribed.length <= MAX_SUBSCRIBED, "PositionRegistry: Exceeds max subscriptions");
         // `pos.owner` may be stale since ownership ledger is only updated during liquidity modifications
         if (pos.owner != tokenOwner) _updatePosition(tokenId, tokenOwner, pos.poolId, pos.tickLower, pos.tickUpper, _getLiquidityLast(tokenId), false);
-
-        // todo: following assertion only necessary if multiple pools are supported by single registry
-        (PoolKey memory poolKey, ) = IPositionManager(positionManager).getPoolAndPositionInfo(tokenId);
-        require(PoolId.unwrap(poolKey.toId()) == PoolId.unwrap(pos.poolId), "PositionRegistry: PoolId mismatch");
 
         bool isDuplicate;
         for (uint256 i; i < subscribed.length; ++i) {
@@ -402,22 +339,24 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         emit Subscribed(tokenId, tokenOwner);
     }
 
-    /**
-     * @notice Deregisters a subscription, requiring re-subscription to re-join the program
-     * @dev Invoked during v4 unsubscription hooks by TELxSubscriber
-     * @dev Removes `tokenId` from `subscription` ledger and from the `subscribed` array
-     */
+    /// @inheritdoc IPositionRegistry
     function handleUnsubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
         Position storage pos = positions[tokenId];
         _removeSubscription(tokenId, pos.owner);
     }
 
-    /**
-     * @notice Permanently deregisters a subscription and untracks its position
-     * @dev Invoked during v4 burn hooks by TELxSubscriber
-     * @dev Removes `tokenId` from `subscription` ledger and from the `subscribed` array
-     * and marks the position as untracked to be permanently ignored
-     */
+    /// @inheritdoc IPositionRegistry
+    /// @dev Identifies fees being collected and stores a fee-specific checkpoint so the fee tracking must be easily consumable offchain
+    /// @notice Only subscribed positions are eligible for rewards
+    function handleModifyLiquidity(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
+        // todo: internal fn to identify fees being collected and store it? or do offchain
+        // if so fn must also be used during addRewards()
+
+
+        //todo move natspec to interface
+    }
+
+    /// @inheritdoc IPositionRegistry
     function handleBurn(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
         Position storage pos = positions[tokenId];
         // ownership information is retained during `beforeRemoveLiquidity` hook in burn contexts
@@ -459,11 +398,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Adds batch rewards for many users in a specific block round
-     * @param lps LP addresses
-     * @param amounts Reward values per address
-     * @param totalAmount Sum of all `amounts`
+     * Rewards
      */
+
+    /// @inheritdoc IPositionRegistry
     function addRewards(address[] calldata lps, uint256[] calldata amounts, uint256 totalAmount)
         external
         nonReentrant
@@ -484,9 +422,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         require(total == totalAmount, "PositionRegistry: Total amount mismatch");
     }
 
-    /**
-     * @notice Allows users to claim their earned rewards
-     */
+    /// @inheritdoc IPositionRegistry
     function claim() external nonReentrant {
         uint256 reward = unclaimedRewards[_msgSender()];
         require(reward > 0, "PositionRegistry: No claimable rewards");
@@ -495,6 +431,41 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         telcoin.safeTransfer(_msgSender(), reward);
 
         emit RewardsClaimed(_msgSender(), reward);
+    }
+
+    /// @inheritdoc IPositionRegistry
+    function getUnclaimedRewards(address user) external view returns (uint256) {
+        return unclaimedRewards[user];
+    }
+
+    /**
+     * Administration
+     */
+
+    /// @inheritdoc IPositionRegistry
+    function initialize(address sender, PoolKey calldata key) external onlyRole(UNI_HOOK_ROLE) {
+        require(hasRole(DEFAULT_ADMIN_ROLE, _resolveUser(sender)), "PositionRegistry: Only admin can initialize pools with this hook");
+        require(!validPool(key.toId()), "PositionRegistry: Pool already initialized");
+        initializedPoolKeys[key.toId()] = key;
+
+        emit PoolInitialized(key);
+    }
+
+    /// @inheritdoc IPositionRegistry
+    function updateRouter(address router, bool listed) external onlyRole(SUPPORT_ROLE) {
+        routers[router] = listed;
+
+        emit RouterRegistryUpdated(router, listed);
+    }
+
+    /// @inheritdoc IPositionRegistry
+    function isActiveRouter(address router) public view override returns (bool) {
+        return routers[router];
+    }
+
+    /// @inheritdoc IPositionRegistry
+    function erc20Rescue(IERC20 token, address destination, uint256 amount) external onlyRole(SUPPORT_ROLE) {
+        token.safeTransfer(destination, amount);
     }
 
     /**
@@ -514,12 +485,5 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             }
         }
         return sender;
-    }
-
-    /**
-     * @notice Admin function to recover ERC20 tokens sent to contract in error
-     */
-    function erc20Rescue(IERC20 token, address destination, uint256 amount) external onlyRole(SUPPORT_ROLE) {
-        token.safeTransfer(destination, amount);
     }
 }
