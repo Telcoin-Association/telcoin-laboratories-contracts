@@ -22,7 +22,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {IPositionManager, PositionInfo} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
-import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
+import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IWETH9} from "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol";
@@ -132,9 +132,9 @@ contract PositionRegistryTest is
     function test_setUp() public view {
         assertEq(address(telXIncentiveHook.registry()), address(positionRegistry));
         Hooks.Permissions memory permissions = telXIncentiveHook.getHookPermissions();
+        assertTrue(permissions.beforeInitialize);
         assertTrue(permissions.beforeAddLiquidity);
         assertTrue(permissions.beforeRemoveLiquidity);
-        assertTrue(permissions.afterSwap);
 
         assertEq(address(positionRegistry.telcoin()), address(tel));
         assertTrue(positionRegistry.hasRole(positionRegistry.UNI_HOOK_ROLE(), address(telXIncentiveHook)));
@@ -204,8 +204,8 @@ contract PositionRegistryTest is
         assertLt(usdc.balanceOf(holder), usdcBefore);
         assertLt(tel.balanceOf(holder), telBefore);
 
-        // position has been added to unsubscribed token ID storage mapping
-        // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 1); //todo
+        // position has been picked up
+        assertEq(positionRegistry.getLiquidityLast(expectedTokenId), returnedLiquidity);
         // LP's token ID is not yet subscribed
         uint256[] memory tokenIds = positionRegistry.getSubscriptions(holder);
         assertTrue(tokenIds.length == 0);
@@ -222,31 +222,31 @@ contract PositionRegistryTest is
 
         // expect PositionUpdated event, which is emitted at subscribe time, not mint time
         vm.expectEmit(true, true, true, true);
-        emit IPositionRegistry.PositionUpdated(tokenId, holder, poolKey.toId(), tickLower, tickUpper, liquidity);
+        emit IPositionRegistry.Subscribed(tokenId, holder);
         vm.prank(holder); // LP must be the one to call subscribe
         positionMngr.subscribe(tokenId, address(telXSubscriber), "");
 
-        // token ID position has been graduated from `positionRegistry` unsubscribed storage
-        // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0); //todo
         // to being correctly registered in its subscribed storage
         uint256[] memory tokenIds = positionRegistry.getSubscriptions(holder);
         assertTrue(tokenIds.length == 1);
         assertEq(tokenIds[0], tokenId);
+        address[] memory subscribed = positionRegistry.getSubscribed();
+        assertEq(subscribed.length, 1);
+        assertEq(subscribed[0], holder);
         // assert position values are as expected
-        // PositionRegistry.Position memory position = positionRegistry.getPosition(tokenId); //todo
-        // assertEq(position.owner, holder); //todo
-        // assertEq(position.liquidity, liquidity); //todo
-        // assertEq(position.tickLower, tickLower); //todo
-        // assertEq(position.tickUpper, tickUpper); //todo
-        // bytes32 id = PoolId.unwrap(position.poolId); //todo
-        // assertEq(id, keccak256(abi.encode(poolKey))); //todo
+        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) = positionRegistry.getPosition(tokenId);
+        assertEq(owner, holder);
+        assertEq(tickLower, returnedTickLower);
+        assertEq(tickUpper, returnedTickUpper);
+        assertEq(PoolId.unwrap(poolId), keccak256(abi.encode(poolKey)));
+        uint128 liquidityLast = positionRegistry.getLiquidityLast(tokenId);
+        assertEq(liquidityLast, liquidity);
 
-        // ensure voting weight is computed correctly //todo
-        // (uint160 sqrtPriceX96,,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
-        // uint256 expectedWeight = computeVotingWeightStateless(sqrtPriceX96, tickLower, tickUpper, position.liquidity);
+        // ensure voting weight is computed correctly
+        uint256 expectedWeight = computeVotingWeightStateless(poolId, tickLower, tickUpper, liquidityLast);
         
-        // uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
-        // assertEq(votingWeight, expectedWeight);
+        uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
+        assertEq(votingWeight, expectedWeight);
     }
 
     function test_increaseLiquidity(int24 range, uint128 liquidity, uint128 additionalLiquidity) public {
@@ -281,21 +281,20 @@ contract PositionRegistryTest is
         assertLe(usdc.balanceOf(holder), usdcBefore);
         assertLe(tel.balanceOf(holder), telBefore);
 
-        // verify the positionRegistry reflects the updated position //todo
-        // PositionRegistry.Position memory position = positionRegistry.getPosition(tokenId);
-        // assertEq(position.owner, holder);
-        // assertEq(position.liquidity, returnedLiquidity);
-        // assertEq(position.tickLower, tickLower);
-        // assertEq(position.tickUpper, tickUpper);
-        // bytes32 id = PoolId.unwrap(position.poolId);
-        // assertEq(id, keccak256(abi.encode(poolKey)));
+        // verify the positionRegistry reflects the updated position
+        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) = positionRegistry.getPosition(tokenId);
+        assertEq(owner, holder);
+        assertEq(tickLower, returnedTickLower);
+        assertEq(tickUpper, returnedTickUpper);
+        assertEq(PoolId.unwrap(poolId), keccak256(abi.encode(poolKey)));
+        uint128 liquidityLast = positionRegistry.getLiquidityLast(tokenId);
+        assertEq(liquidityLast, returnedLiquidity);
 
-        // // ensure voting weight is computed correctly
-        // (uint160 sqrtPriceX96,,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
-        // uint256 expectedWeight = computeVotingWeightStateless(sqrtPriceX96, tickLower, tickUpper, position.liquidity);
+        // ensure voting weight is computed correctly
+        uint256 expectedWeight = computeVotingWeightStateless(poolId, tickLower, tickUpper, liquidityLast);
  
-        // uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
-        // assertEq(votingWeight, expectedWeight);
+        uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
+        assertEq(votingWeight, expectedWeight);
     }
 
     function test_decreaseLiquidity(int24 range, uint128 liquidity, uint128 liquidityToRemove) public {
@@ -328,21 +327,20 @@ contract PositionRegistryTest is
         assertGe(usdc.balanceOf(holder), usdcBefore);
         assertGe(tel.balanceOf(holder), telBefore);
 
-        // verify the positionRegistry reflects the updated position //todo
-        // PositionRegistry.Position memory position = positionRegistry.getPosition(tokenId);
-        // assertEq(position.owner, holder);
-        // assertEq(position.liquidity, returnedLiquidity);
-        // assertEq(position.tickLower, tickLower);
-        // assertEq(position.tickUpper, tickUpper);
-        // bytes32 id = PoolId.unwrap(position.poolId);
-        // assertEq(id, keccak256(abi.encode(poolKey)));
+        // verify the positionRegistry reflects the updated position
+        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) = positionRegistry.getPosition(tokenId);
+        assertEq(owner, holder);
+        assertEq(tickLower, returnedTickLower);
+        assertEq(tickUpper, returnedTickUpper);
+        assertEq(PoolId.unwrap(poolId), keccak256(abi.encode(poolKey)));
+        uint128 liquidityLast = positionRegistry.getLiquidityLast(tokenId);
+        assertEq(liquidityLast, returnedLiquidity);
 
-        // // ensure voting weight is computed correctly
-        // (uint160 sqrtPriceX96,,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
-        // uint256 expectedWeight = computeVotingWeightStateless(sqrtPriceX96, tickLower, tickUpper, position.liquidity);
+        // ensure voting weight is computed correctly
+        uint256 expectedWeight = computeVotingWeightStateless(poolId, tickLower, tickUpper, liquidityLast);
  
-        // uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
-        // assertEq(votingWeight, expectedWeight);
+        uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
+        assertEq(votingWeight, expectedWeight);
     }
 
     // note that BURN_POSITION uses decreaseLiquidity and ERC20::_burn so unsubscription flow is not invoked
@@ -373,22 +371,20 @@ contract PositionRegistryTest is
         assertApproxEqAbs(usdc.balanceOf(holder), usdcBefore, 1, "balance deviation above v4 rounding precision");
         assertApproxEqAbs(tel.balanceOf(holder), telBefore, 1, "balance deviation above v4 rounding precision");
 
-        // verify the positionRegistry reflects the burned position //todo
-        // PositionRegistry.Position memory noPosition = positionRegistry.getPosition(tokenId);
-        // assertEq(noPosition.owner, address(0x0));
-        // assertEq(noPosition.liquidity, 0);
-        // assertEq(noPosition.tickLower, 0);
-        // assertEq(noPosition.tickUpper, 0);
-        // bytes32 id = PoolId.unwrap(noPosition.poolId);
-        // assertEq(id, bytes32(0x0));
+        // verify the positionRegistry reflects the burned position
+        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) = positionRegistry.getPosition(tokenId);
+        assertEq(owner, UNTRACKED);
+        assertEq(positionRegistry.getLiquidityLast(tokenId), 0);
+        assertEq(returnedTickLower, tickLower);
+        assertEq(returnedTickUpper, tickUpper);
+        assertEq(PoolId.unwrap(poolId), keccak256(abi.encode(poolKey)));
 
-        // // sanity check unsubscribed and subscribed storage mappings
-        // // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0); //todo
-        // assertTrue(positionRegistry.getSubscriptions(holder).length == 0);
+        // sanity check unsubscribed and subscribed storage mappings
+        assertTrue(positionRegistry.getSubscriptions(holder).length == 0);
 
-        // // ensure voting weight is zero 
-        // uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
-        // assertEq(votingWeight, 0);
+        // ensure voting weight is zero 
+        uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
+        assertEq(votingWeight, 0);
     }
 
     // note that position transfers use `PositionManager::transferFrom`, triggering unsubscription flow unlike burns
@@ -405,57 +401,39 @@ contract PositionRegistryTest is
         positionMngr.subscribe(tokenId, address(telXSubscriber), "");
 
         uint256 liquidityBefore = positionMngr.getPositionLiquidity(tokenId);
-        uint256 votingWeightBefore = positionRegistry.computeVotingWeight(tokenId);
 
         vm.prank(holder);
         (bool r,) = address(positionMngr).call(abi.encodeWithSignature("transferFrom(address,address,uint256)", holder, support, tokenId));
         require(r);
 
-        // liquidity and voting weight should be unchanged despite owner change
+        // liquidity should be unchanged despite owner change
         uint256 liquidityAfter = positionMngr.getPositionLiquidity(tokenId);
         assertEq(liquidityAfter, liquidityBefore);
+        // voting weight should be 0 after unsubscription due to transfer
         uint256 votingWeightAfter = positionRegistry.computeVotingWeight(tokenId);
-        assertEq(votingWeightAfter, votingWeightBefore);
+        assertEq(votingWeightAfter, 0);
 
-        // transfer should remove existing position from old owner //todo
-        // PositionRegistry.Position memory noPosition = positionRegistry.getPosition(tokenId);
-        // assertEq(noPosition.owner, address(0x0));
-        // assertEq(noPosition.liquidity, 0);
-        // assertEq(noPosition.tickLower, 0);
-        // assertEq(noPosition.tickUpper, 0);
-        // bytes32 id = PoolId.unwrap(noPosition.poolId);
-        // assertEq(id, bytes32(0x0));
+        // after transfer position should remain unchanged
+        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) = positionRegistry.getPosition(tokenId);
+        assertEq(owner, holder);
+        assertEq(positionRegistry.getLiquidityLast(tokenId), liquidityAfter);
+        assertEq(tickLower, returnedTickLower);
+        assertEq(tickUpper, returnedTickUpper);
+        assertEq(PoolId.unwrap(poolId), keccak256(abi.encode(poolKey)));
 
-        // transfer should add unsubscribed position to new owner
-        // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(support).length == 1); //todo
-        // holders info is wiped
-        // assertTrue(positionRegistry.getUnsubscribedTokenIdsByProvider(holder).length == 0); //todo
-        assertTrue(positionRegistry.getSubscriptions(holder).length == 0);
-
-        // transferred positions should not be registered until subscribed
+        // transfer should remove existing position from subscription
+        assertEq(positionRegistry.getSubscriptions(holder).length, 0);
+        assertEq(positionRegistry.getSubscribed().length, 0);
+        // transferred positions should not be subscribed for new owner
         assertTrue(positionRegistry.getSubscriptions(support).length == 0);
+
         vm.prank(support);
         positionMngr.subscribe(tokenId, address(telXSubscriber), "");
+        // after subscribing the position should be reregistered
         assertTrue(positionRegistry.getSubscriptions(support).length == 1);
-
-        // after subscribing the position should be reregistered //todo
-        // PositionRegistry.Position memory position = positionRegistry.getPosition(tokenId);
-        // assertEq(position.owner, support);
-        // assertEq(position.liquidity, liquidityAfter);
-        // assertEq(position.tickLower, tickLower);
-        // assertEq(position.tickUpper, tickUpper);
-        // bytes32 newId = PoolId.unwrap(position.poolId);
-        // assertEq(newId, keccak256(abi.encode(poolKey)));
+        assertTrue(positionRegistry.getSubscribed().length == 1);
+        assertEq(positionRegistry.subscribed(0), support);
     }
-    /**
- *     - **Objective:** Test the transfer of a position to another user.
- *     - **Checkpoints:**
- *         - Ensure the position is transferred without losing its state.
- *         - Check if the previous owner is unsubscribed correctly.
- *         - Validate that the new owner can subscribe to the position.
- *         - Ensure the `notifySubscribe` function in `TELxSubscriber` is called.
- *         - Confirm the position's voting weight is updated correctly.
- */
 
     function test_swap(int24 range, uint128 liquidity, uint128 amountIn, bool zeroForOne) public {
         (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
@@ -630,9 +608,14 @@ contract PositionRegistryTest is
 
     // mimics the voting weight computation in PositionRegistry and exposes it for testing
     function computeVotingWeightStateless(PoolId poolId, int24 tickLower, int24 tickUpper, uint128 liquidity) internal view returns (uint256) {
-        (uint256 amount0, uint256 amount1, uint160 sqrtPriceX96) = getAmountsForLiquidity(
-            poolId, liquidity, tickLower, tickUpper
+        (uint160 sqrtPriceX96,,,) = st8View.getSlot0(poolId);
+        (uint256 amount0, uint256 amount1) = LiquidityAmounts.getAmountsForLiquidity(
+            sqrtPriceX96, 
+            TickMath.getSqrtPriceAtTick(tickLower),
+            TickMath.getSqrtPriceAtTick(tickUpper),
+            liquidity
         );
+
         uint256 priceX96 = FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 2 ** 96);
         return amount1 + FullMath.mulDiv(amount0, priceX96, 2 ** 96);
     }
