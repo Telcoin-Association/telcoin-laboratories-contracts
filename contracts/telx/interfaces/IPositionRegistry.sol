@@ -62,6 +62,9 @@ interface IPositionRegistry {
     /// @notice Emitted when the TEL token position is updated for a pool.
     event PoolInitialized(PoolKey indexed poolKey);
 
+    /// @notice Emitted when the weight configuration is updated
+    event WeightsConfigured(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight);
+
     /// @notice Emitted at each liquidity modification for offchain consumption
     event Checkpoint(
         uint256 indexed tokenId,
@@ -194,6 +197,10 @@ interface IPositionRegistry {
      * @notice Gets unclaimed reward balance for a user
      */
     function getUnclaimedRewards(address user) external view returns (uint256);
+
+    /// @notice Configures JIT | Active | Passive lifetimes and weights for offchain consumption
+    function configureWeights(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight) external;
+
     /**
      * @notice Admin function to recover ERC20 tokens sent to contract in error
      */

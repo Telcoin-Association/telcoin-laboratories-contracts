@@ -17,7 +17,7 @@ import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {IPositionManager, PoolKey, PositionInfo} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
-// todo: update spec.md -> README.md and incorporate google doc to current markdown
+// todo: update spec.md -> README.md and incorporate google doc to current markdown (update custom snapshot strategy spec too)
 // todo: add weight levers
 
 /**
@@ -39,6 +39,14 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     uint256 constant MAX_SUBSCRIPTIONS = 100;
     uint256 constant MAX_SUBSCRIBED = 1_000;
 
+    /// @dev JIT lifetime is always one block and passive weight is always 100%
+    uint256 public constant JIT_LIFETIME = 1;
+    uint256 public constant PASSIVE_WEIGHT = 100;
+    /// @notice Configurable levers for JIT | active | passive LP reward weighting
+    uint256 public MIN_PASSIVE_LIFETIME;
+    uint256 public JIT_WEIGHT;
+    uint256 public ACTIVE_WEIGHT;
+
     mapping(address => bool) public routers;
     mapping(PoolId => PoolKey) public initializedPoolKeys;
     
@@ -53,10 +61,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     mapping(address => bool) public isSubscribed;
 
     mapping(address => uint256) public unclaimedRewards;
-    
-    /// @notice Maps period numbers to their end block
-    mapping(uint256 => uint32) public periodEndBlock;
-    uint256 public currentPeriod;
 
     IERC20 public immutable telcoin;
     IPoolManager public immutable poolManager;
@@ -69,6 +73,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         poolManager = poolManager_;
         positionManager = positionManager_;
         stateView = stateView_;
+
+        // initial configuration uses ~1 day in 2s blocks, weights 0%/25%/100%
+        MIN_PASSIVE_LIFETIME = 43_200;
+        JIT_WEIGHT = 0;
+        ACTIVE_WEIGHT = 25;
     }
 
     /// @inheritdoc IPositionRegistry
@@ -396,6 +405,19 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         initializedPoolKeys[key.toId()] = key;
 
         emit PoolInitialized(key);
+    }
+
+    /// @inheritdoc IPositionRegistry
+    function configureWeights(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight)
+        external
+        onlyRole(SUPPORT_ROLE)
+    {
+        require(jitWeight <= 100 && activeWeight <= 100, "PositionRegistry: Weights must be between 0 and 100");
+        MIN_PASSIVE_LIFETIME = minPassiveLifetime;
+        JIT_WEIGHT = jitWeight;
+        ACTIVE_WEIGHT = activeWeight;
+
+        emit WeightsConfigured(minPassiveLifetime, jitWeight, activeWeight);
     }
 
     /// @inheritdoc IPositionRegistry
