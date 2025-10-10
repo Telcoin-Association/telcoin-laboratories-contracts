@@ -26,11 +26,21 @@ interface IPositionRegistry {
         PoolId poolId;
         int24 tickLower;
         int24 tickUpper;
-        /// @notice History of positions' liquidity checkpoints: `tokenId => {block, telDenominatedFees}`
+        /// @notice History of positions' liquidity + feeGrowth checkpoints
         /// @dev Since Trace224 array is unbounded it can grow beyond EVM memory limits
-        /// do not load into EVM memory; consume offchain instead and fall back to loading slots if needed
+        /// do not load into EVM memory; consume events offchain instead and fall back to loading slots if needed
         Checkpoints.Trace224 liquidityModifications;
         mapping(uint32 => FeeGrowthCheckpoint) feeGrowthCheckpoints;
+    }
+
+    /// @notice Struct to represent positions with more granular multipool data for external consumption
+    struct PositionDetails {
+        address owner;
+        PoolId poolId;
+        int24 tickLower;
+        int24 tickUpper;
+        uint128 liquidity;
+        PoolKey poolKey;
     }
 
     /// @notice Emitted when a position is added or its liquidity is modified
@@ -139,19 +149,11 @@ interface IPositionRegistry {
         int24 tickUpper
     );
 
+    /// @notice Returns position with more granular multipool data for external consumption
+    function getPositionDetails(uint256 tokenId) external view returns (PositionDetails memory);
+
     /// @notice Returns position's last recorded liquidity
     function getLiquidityLast(uint256 tokenId) external view returns (uint128);
-
-     /**
-     * @notice Returns the voting weight (in TEL) for a position at the current block's `sqrtPriceX96`
-     * @dev Because voting weight is TEL-denominated, it fluctuates with price changes & impermanent loss
-     * Uses TEL denomination rather than liquidity units for backwards compatibility w/ Snapshot's 
-     * `erc20-balance-of-with-delegation` schema & preexisting integrations like VotingWeightCalculator
-     * @param tokenId The position identifier
-     */
-    function computeVotingWeight(
-        uint256 tokenId
-    ) external view returns (uint256);
 
     /**
      * @notice Returns whether a router is in the trusted routers list.

@@ -18,7 +18,7 @@ import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {IPositionManager, PoolKey, PositionInfo} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
 // todo: update spec.md -> README.md and incorporate google doc to current markdown
-// todo: add weights
+// todo: add weight levers
 
 /**
  * @title Position Registry
@@ -36,6 +36,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     /// @dev Marks positions either burned or not created via PositionManager
     address constant UNTRACKED = address(type(uint160).max);
+    uint256 constant MAX_SUBSCRIPTIONS = 100;
+    uint256 constant MAX_SUBSCRIBED = 1_000;
 
     mapping(address => bool) public routers;
     mapping(PoolId => PoolKey) public initializedPoolKeys;
@@ -92,6 +94,20 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /// @inheritdoc IPositionRegistry
+    function getPositionDetails(uint256 tokenId) external view returns (PositionDetails memory) {
+        Position storage pos = positions[tokenId];
+        PoolId poolId = pos.poolId;
+        return PositionDetails({
+            owner: pos.owner,
+            poolId: poolId,
+            tickLower: pos.tickLower,
+            tickUpper: pos.tickUpper,
+            liquidity: _getLiquidityLast(tokenId),
+            poolKey: initializedPoolKeys[poolId]
+        });
+    }
+
+    /// @inheritdoc IPositionRegistry
     function getLiquidityLast(uint256 tokenId) external view returns (uint128) {
         return _getLiquidityLast(tokenId);
     }
@@ -112,37 +128,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     /// @inheritdoc IPositionRegistry
     function getSubscribed() external view returns (address[] memory) {
         return subscribed;
-    }
-
-    /// @inheritdoc IPositionRegistry
-    function computeVotingWeight(uint256 tokenId) external view returns (uint256) {
-        if (!isTokenSubscribed(tokenId)) return 0;
-
-        uint128 liquidity = _getLiquidityLast(tokenId);
-        if (liquidity == 0) return 0;
-
-        Position storage pos = positions[tokenId];
-        PoolId poolId = pos.poolId;
-        (uint256 amount0, uint256 amount1, uint160 sqrtPriceX96) = getAmountsForLiquidity(poolId, liquidity, pos.tickLower, pos.tickUpper);
-
-        uint256 priceX96 = FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 2 ** 96);
-
-        PoolKey memory key = initializedPoolKeys[poolId];
-        address currency0 = Currency.unwrap(key.currency0);
-        address currency1 = Currency.unwrap(key.currency1);
-        uint8 telIndex = currency0 == address(telcoin) ? 0 : currency1 == address(telcoin) ? 1 : 2;
-        if (telIndex == 2) {
-            //todo this is a nonTEL pool; we need to get some kind of price of both currency0 and currency1 in TEL
-            // todo: incorporate price quote/calculation for stablecoin (nonTEL) pools using current price? VWAP? oracle?
-        }
-
-        if (telIndex == 0) {
-            return amount0 + FullMath.mulDiv(amount1, 2 ** 96, priceX96);
-        } else if (telIndex == 1) {
-            return amount1 + FullMath.mulDiv(amount0, priceX96, 2 ** 96);
-        }
-
-        return 0;
     }
 
     /// @inheritdoc IPositionRegistry
@@ -297,8 +282,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         if (pos.owner != tokenOwner) _updatePosition(tokenId, tokenOwner, pos.poolId, pos.tickLower, pos.tickUpper, _getLiquidityLast(tokenId), false);
 
         uint256[] storage ownerSubscriptions = subscriptions[tokenOwner];
+        require(ownerSubscriptions.length < MAX_SUBSCRIPTIONS, "PositionRegistry: Max subscriptions reached");
         // only add to subscribed array on first subscription
         if (ownerSubscriptions.length == 0) {
+            require(subscribed.length < MAX_SUBSCRIBED, "PositionRegistry: Max subscribed reached");
+
             subscribed.push(tokenOwner);
             subscribedIndex[tokenOwner] = subscribed.length - 1;
             isSubscribed[tokenOwner] = true;

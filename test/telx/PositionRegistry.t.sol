@@ -241,12 +241,6 @@ contract PositionRegistryTest is
         assertEq(PoolId.unwrap(poolId), keccak256(abi.encode(poolKey)));
         uint128 liquidityLast = positionRegistry.getLiquidityLast(tokenId);
         assertEq(liquidityLast, liquidity);
-
-        // ensure voting weight is computed correctly
-        uint256 expectedWeight = computeVotingWeightStateless(poolId, tickLower, tickUpper, liquidityLast);
-        
-        uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
-        assertEq(votingWeight, expectedWeight);
     }
 
     function test_increaseLiquidity(int24 range, uint128 liquidity, uint128 additionalLiquidity) public {
@@ -289,12 +283,6 @@ contract PositionRegistryTest is
         assertEq(PoolId.unwrap(poolId), keccak256(abi.encode(poolKey)));
         uint128 liquidityLast = positionRegistry.getLiquidityLast(tokenId);
         assertEq(liquidityLast, returnedLiquidity);
-
-        // ensure voting weight is computed correctly
-        uint256 expectedWeight = computeVotingWeightStateless(poolId, tickLower, tickUpper, liquidityLast);
- 
-        uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
-        assertEq(votingWeight, expectedWeight);
     }
 
     function test_decreaseLiquidity(int24 range, uint128 liquidity, uint128 liquidityToRemove) public {
@@ -335,12 +323,6 @@ contract PositionRegistryTest is
         assertEq(PoolId.unwrap(poolId), keccak256(abi.encode(poolKey)));
         uint128 liquidityLast = positionRegistry.getLiquidityLast(tokenId);
         assertEq(liquidityLast, returnedLiquidity);
-
-        // ensure voting weight is computed correctly
-        uint256 expectedWeight = computeVotingWeightStateless(poolId, tickLower, tickUpper, liquidityLast);
- 
-        uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
-        assertEq(votingWeight, expectedWeight);
     }
 
     // note that BURN_POSITION uses decreaseLiquidity and ERC20::_burn so unsubscription flow is not invoked
@@ -381,10 +363,6 @@ contract PositionRegistryTest is
 
         // sanity check unsubscribed and subscribed storage mappings
         assertTrue(positionRegistry.getSubscriptions(holder).length == 0);
-
-        // ensure voting weight is zero 
-        uint256 votingWeight = positionRegistry.computeVotingWeight(tokenId);
-        assertEq(votingWeight, 0);
     }
 
     // note that position transfers use `PositionManager::transferFrom`, triggering unsubscription flow unlike burns
@@ -409,9 +387,6 @@ contract PositionRegistryTest is
         // liquidity should be unchanged despite owner change
         uint256 liquidityAfter = positionMngr.getPositionLiquidity(tokenId);
         assertEq(liquidityAfter, liquidityBefore);
-        // voting weight should be 0 after unsubscription due to transfer
-        uint256 votingWeightAfter = positionRegistry.computeVotingWeight(tokenId);
-        assertEq(votingWeightAfter, 0);
 
         // after transfer position should remain unchanged
         (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) = positionRegistry.getPosition(tokenId);
@@ -604,20 +579,6 @@ contract PositionRegistryTest is
         uint256 finalBal = outputCurrency.balanceOf(swapper);
 
         return finalBal - initialBal;
-    }
-
-    // mimics the voting weight computation in PositionRegistry and exposes it for testing
-    function computeVotingWeightStateless(PoolId poolId, int24 tickLower, int24 tickUpper, uint128 liquidity) internal view returns (uint256) {
-        (uint160 sqrtPriceX96,,,) = st8View.getSlot0(poolId);
-        (uint256 amount0, uint256 amount1) = LiquidityAmounts.getAmountsForLiquidity(
-            sqrtPriceX96, 
-            TickMath.getSqrtPriceAtTick(tickLower),
-            TickMath.getSqrtPriceAtTick(tickUpper),
-            liquidity
-        );
-
-        uint256 priceX96 = FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 2 ** 96);
-        return amount1 + FullMath.mulDiv(amount0, priceX96, 2 ** 96);
     }
 
     function inputAndOutputCurrencies(bool zeroForOne) internal view returns (Currency inputCurrency, Currency outputCurrency) {
