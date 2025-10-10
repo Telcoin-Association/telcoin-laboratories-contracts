@@ -9,8 +9,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 interface IPositionRegistry {
     /// @notice Checkpoint structure for fee growth data
     struct FeeGrowthCheckpoint {
-        uint128 feeGrowthInside0X128;
-        uint128 feeGrowthInside1X128;
+        uint256 feeGrowthInside0X128;
+        uint256 feeGrowthInside1X128;
     }
 
     /// @notice Checkpoint metadata for better searchability offchain
@@ -112,10 +112,6 @@ interface IPositionRegistry {
      */
     function handleUnsubscribe(uint256 tokenId) external;
 
-    /// @dev Identifies fees being collected and stores a fee-specific checkpoint so the fee tracking must be easily consumable offchain
-    /// @notice Only subscribed positions are eligible for rewards
-    function handleModifyLiquidity(uint256 tokenId) external;
-
     /**
      * @notice Permanently deregisters a subscription and untracks its position
      * @dev Invoked during v4 burn hooks by TELxSubscriber
@@ -172,7 +168,7 @@ interface IPositionRegistry {
     function validPool(PoolId id) external view returns (bool);
 
     /// @dev Returns whether `tokenId` is currently subscribed
-    function isSubscribed(uint256 tokenId) external view returns (bool);
+    function isTokenSubscribed(uint256 tokenId) external view returns (bool);
 
     /// @notice Returns the list of all addresses that have active subscriptions
     function getSubscribed() external view returns (address[] memory);

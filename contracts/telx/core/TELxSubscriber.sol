@@ -43,16 +43,12 @@ contract TELxSubscriber is ISubscriber {
         registry.handleUnsubscribe(tokenId);
     }
 
-    /// @notice Notifies registry of liquidity modification
-    /// @dev Updates registry's stored subscription with a fee checkpoint
+    /// @notice No-op as liquidity modifications are recorded for all positions
     function notifyModifyLiquidity(
-        uint256,
+        uint256 tokenId,
         int256,
         BalanceDelta
-    ) external override onlyPositionManager {
-        //todo: update fee tracking in PositionRegistry
-        // registry.handleModifyLiquidity(tokenId);
-    }
+    ) external override onlyPositionManager {}
 
     /// @notice Notifies registry of position burn
     /// @dev Deletes registry's stored subscription and permanently marks its position burned
