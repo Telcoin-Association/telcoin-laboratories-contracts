@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
-import { CouncilMember, TestTelcoin, TestProxy } from "../../typechain-types";
+import { CouncilMember, TestTelcoin, TestSablierV2Lockup } from "../../typechain-types";
 
 describe("CouncilMember", () => {
     let admin: SignerWithAddress;
@@ -10,12 +10,22 @@ describe("CouncilMember", () => {
     let holder: SignerWithAddress;
     let councilMember: CouncilMember;
     let telcoin: TestTelcoin;
-    let proxy: TestProxy;
+    let stream: TestSablierV2Lockup;
 
     let target: SignerWithAddress;
     let id: number = 0;
     let governanceRole: string = ethers.keccak256(ethers.toUtf8Bytes("GOVERNANCE_COUNCIL_ROLE"));
     let supportRole: string = ethers.keccak256(ethers.toUtf8Bytes("SUPPORT_ROLE"));
+
+    // calculate interface IDs
+    const calculateInterfaceId = (functionSignatures: string[]): string => {
+        let interfaceId = 0;
+        for (const sig of functionSignatures) {
+            const hash = ethers.keccak256(ethers.toUtf8Bytes(sig));
+            interfaceId ^= parseInt(hash.slice(0, 10));
+        }
+        return '0x' + interfaceId.toString(16).padStart(8, '0');
+    };
 
     beforeEach(async () => {
         [admin, support, member, holder, target] = await ethers.getSigners();
@@ -23,13 +33,13 @@ describe("CouncilMember", () => {
         const TestTelcoinFactory = await ethers.getContractFactory("TestTelcoin", admin);
         telcoin = await TestTelcoinFactory.deploy(admin.address);
 
-        const TestStreamFactory = await ethers.getContractFactory("TestProxy", admin);
-        proxy = await TestStreamFactory.deploy(await telcoin.getAddress());
+        const TestSablierV2LockupFactory = await ethers.getContractFactory("TestSablierV2Lockup", admin);
+        stream = await TestSablierV2LockupFactory.deploy(await telcoin.getAddress());
 
         const CouncilMemberFactory = await ethers.getContractFactory("CouncilMember", admin);
-        councilMember = await CouncilMemberFactory.deploy();
+        councilMember = await CouncilMemberFactory.deploy(false);
 
-        await councilMember.initialize(await telcoin.getAddress(), "Test Council", "TC", await proxy.getAddress(), target.address, target.address, id);
+        await councilMember.initialize(await telcoin.getAddress(), "Test Council", "TC", stream.getAddress(), id);
         await councilMember.grantRole(governanceRole, admin.address);
         await councilMember.grantRole(supportRole, support.address);
     });
@@ -48,14 +58,6 @@ describe("CouncilMember", () => {
                 expect(await councilMember.TELCOIN()).to.equal(await telcoin.getAddress());
             });
 
-            it("proxy address", async () => {
-                expect(await councilMember._proxy()).to.equal(await proxy.getAddress());
-            });
-
-            it("target address", async () => {
-                expect(await councilMember._target()).to.equal(target.address);
-            });
-
             it("id", async () => {
                 expect(await councilMember._id()).to.equal(id);
             });
@@ -69,45 +71,28 @@ describe("CouncilMember", () => {
             });
 
             it("has AccessControlEnumerableUpgradeable interface", async () => {
-                expect(await councilMember.supportsInterface('0x5bfad1a8')).to.equal(true);
+                // IAccessControlEnumerable interface from OpenZeppelin v5
+                const interfaceId = calculateInterfaceId([
+                    'getRoleMember(bytes32,uint256)',
+                    'getRoleMemberCount(bytes32)'
+                ]);
+                expect(await councilMember.supportsInterface(interfaceId)).to.equal(true);
+                // expect(await councilMember.supportsInterface('0x5bfad1a8')).to.equal(true);
             });
 
             it("has ERC721EnumerableUpgradeable interface", async () => {
-                expect(await councilMember.supportsInterface('0x79f154c4')).to.equal(true);
+                // IERC721Enumerable interface
+                const interfaceId = calculateInterfaceId([
+                    'totalSupply()',
+                    'tokenOfOwnerByIndex(address,uint256)',
+                    'tokenByIndex(uint256)'
+                ]);
+                expect(await councilMember.supportsInterface(interfaceId)).to.equal(true);
+                // expect(await councilMember.supportsInterface('0x79f154c4')).to.equal(true);
             });
         });
 
         describe("Setters", () => {
-            describe("updateStream", () => {
-                describe("Failure", () => {
-                    it("updateStream should fail when caller does not have role", async () => {
-                        await expect(councilMember.connect(support).updateProxy(support.address)).to.be.reverted;
-                    });
-                });
-
-                describe("Success", () => {
-                    it("updateStream", async () => {
-                        expect(await councilMember.updateProxy(support.address)).emit(councilMember, 'ProxyUpdated').withArgs(support.address);
-                        expect(await councilMember._proxy()).to.equal(support.address);
-                    });
-                });
-            })
-
-            describe("updateTarget", () => {
-                describe("Failure", () => {
-                    it("updateTarget should fail when caller does not have role", async () => {
-                        await expect(councilMember.connect(support).updateTarget(support.address)).to.be.reverted;
-                    });
-                });
-
-                describe("Success", () => {
-                    it("updateTarget", async () => {
-                        await expect(councilMember.updateTarget(support.address)).emit(councilMember, 'TargetUpdated').withArgs(support.address);
-                        expect(await councilMember._target()).to.equal(support.address);
-                    });
-                });
-            })
-
             describe("updateLockup", () => {
                 describe("Failure", () => {
                     it("updateLockup should fail when caller does not have role", async () => {
@@ -142,7 +127,7 @@ describe("CouncilMember", () => {
 
     describe("mutative", () => {
         beforeEach(async () => {
-            telcoin.transfer(await proxy.getAddress(), 100000);
+            telcoin.transfer(await stream.getAddress(), 100000);
         });
 
         describe("mint", () => {
@@ -178,10 +163,10 @@ describe("CouncilMember", () => {
 
         describe("burn", () => {
             beforeEach(async () => {
-                telcoin.transfer(await proxy.getAddress(), 100000);
+                telcoin.transfer(await stream.getAddress(), 100000);
                 expect(await councilMember.mint(member.address)).to.not.reverted;
                 expect(await councilMember.mint(support.address)).to.not.reverted;
-                expect(await councilMember.mint(await proxy.getAddress())).to.not.reverted;
+                expect(await councilMember.mint(await stream.getAddress())).to.not.reverted;
             });
 
             describe("Failure", () => {
@@ -201,13 +186,13 @@ describe("CouncilMember", () => {
 
         describe("Extended burn", () => {
             beforeEach(async () => {
-                telcoin.transfer(await proxy.getAddress(), 100000);
+                telcoin.transfer(await stream.getAddress(), 100000);
                 await councilMember.mint(member.address)
                 await councilMember.mint(support.address)
-                await councilMember.mint(await proxy.getAddress())
+                await councilMember.mint(await stream.getAddress())
                 await councilMember.mint(member.address)
                 await councilMember.mint(support.address)
-                await councilMember.mint(await proxy.getAddress())
+                await councilMember.mint(await stream.getAddress())
             });
 
             it("the correct removal is made", async () => {
@@ -254,21 +239,21 @@ describe("CouncilMember", () => {
 
             it("the correct removal is made", async () => {
                 expect(await councilMember.totalSupply()).to.equal(6);
-                expect(await councilMember.balanceOf(await proxy.getAddress())).to.equal(2);
+                expect(await councilMember.balanceOf(await stream.getAddress())).to.equal(2);
                 expect(await councilMember.tokenIdToBalanceIndex(5)).to.equal(5);
                 expect(await councilMember.balanceIndexToTokenId(5)).to.equal(5);
 
-                await expect(councilMember.burn(2, support.address)).emit(councilMember, "Transfer").withArgs(await proxy.getAddress(), "0x0000000000000000000000000000000000000000", 2);
+                await expect(councilMember.burn(2, support.address)).emit(councilMember, "Transfer").withArgs(await stream.getAddress(), "0x0000000000000000000000000000000000000000", 2);
 
                 expect(await councilMember.totalSupply()).to.equal(5);
-                expect(await councilMember.balanceOf(await proxy.getAddress())).to.equal(1);
+                expect(await councilMember.balanceOf(await stream.getAddress())).to.equal(1);
                 expect(await councilMember.tokenIdToBalanceIndex(5)).to.equal(2);
                 expect(await councilMember.balanceIndexToTokenId(2)).to.equal(5);
 
-                await councilMember.mint(await proxy.getAddress())
+                await councilMember.mint(await stream.getAddress())
 
                 expect(await councilMember.totalSupply()).to.equal(6);
-                expect(await councilMember.balanceOf(await proxy.getAddress())).to.equal(2);
+                expect(await councilMember.balanceOf(await stream.getAddress())).to.equal(2);
                 expect(await councilMember.tokenIdToBalanceIndex(6)).to.equal(5);
                 expect(await councilMember.balanceIndexToTokenId(5)).to.equal(6);
             });
@@ -317,21 +302,21 @@ describe("CouncilMember", () => {
 
             it("the correct removal is made", async () => {
                 expect(await councilMember.totalSupply()).to.equal(6);
-                expect(await councilMember.balanceOf(await proxy.getAddress())).to.equal(2);
+                expect(await councilMember.balanceOf(await stream.getAddress())).to.equal(2);
                 expect(await councilMember.tokenIdToBalanceIndex(5)).to.equal(5);
                 expect(await councilMember.balanceIndexToTokenId(0)).to.equal(0);
 
-                await expect(councilMember.burn(5, support.address)).emit(councilMember, "Transfer").withArgs(await proxy.getAddress(), "0x0000000000000000000000000000000000000000", 5);
+                await expect(councilMember.burn(5, support.address)).emit(councilMember, "Transfer").withArgs(await stream.getAddress(), "0x0000000000000000000000000000000000000000", 5);
 
                 expect(await councilMember.totalSupply()).to.equal(5);
-                expect(await councilMember.balanceOf(await proxy.getAddress())).to.equal(1);
+                expect(await councilMember.balanceOf(await stream.getAddress())).to.equal(1);
                 expect(await councilMember.tokenIdToBalanceIndex(5)).to.equal("115792089237316195423570985008687907853269984665640564039457584007913129639935");
                 expect(await councilMember.balanceIndexToTokenId(0)).to.equal(0);
 
-                await councilMember.mint(await proxy.getAddress())
+                await councilMember.mint(await stream.getAddress())
 
                 expect(await councilMember.totalSupply()).to.equal(6);
-                expect(await councilMember.balanceOf(await proxy.getAddress())).to.equal(2);
+                expect(await councilMember.balanceOf(await stream.getAddress())).to.equal(2);
                 expect(await councilMember.tokenIdToBalanceIndex(6)).to.equal(5);
                 expect(await councilMember.balanceIndexToTokenId(5)).to.equal(6);
             });
@@ -357,7 +342,7 @@ describe("CouncilMember", () => {
 
     describe("tokenomics", () => {
         beforeEach(async () => {
-            telcoin.transfer(await proxy.getAddress(), 100000);
+            telcoin.transfer(await stream.getAddress(), 100000);
         });
 
         describe("mint", () => {
@@ -440,27 +425,27 @@ describe("CouncilMember", () => {
         describe("claim", () => {
             it("claiming rewards", async () => {
                 await expect(councilMember.mint(member.address));
-                await expect(councilMember.connect(member).claim(0, 100)).to.not.reverted;
+                await expect(councilMember.connect(member).claim(0)).to.not.reverted;
                 expect(await councilMember.balances(0)).to.equal(0);
 
                 await expect(councilMember.mint(support.address)).to.not.reverted;
-                await expect(councilMember.connect(member).claim(0, 200)).to.be.revertedWith("CouncilMember: withdrawal amount is higher than balance");
-                await expect(councilMember.connect(member).claim(0, 100)).to.not.reverted;
-                expect(await councilMember.balances(0)).to.equal(50);
+                // await expect(councilMember.connect(member).claim(0)).to.be.revertedWith("CouncilMember: withdrawal amount is higher than balance");
+                await expect(councilMember.connect(member).claim(0)).to.not.reverted;
+                expect(await councilMember.balances(0)).to.equal(0);
                 expect(await councilMember.balances(1)).to.equal(50);
 
                 await expect(councilMember.mint(member.address)).to.not.reverted;
-                expect(await councilMember.balances(0)).to.equal(100);
+                expect(await councilMember.balances(0)).to.equal(50);
                 expect(await councilMember.balances(1)).to.equal(100);
                 expect(await councilMember.balances(2)).to.equal(0);
-                await expect(councilMember.connect(member).claim(0, 100)).to.not.reverted;
-                expect(await councilMember.balances(0)).to.equal(33);
+                await expect(councilMember.connect(member).claim(0)).to.not.reverted;
+                expect(await councilMember.balances(0)).to.equal(0);
                 expect(await councilMember.balances(1)).to.equal(133);
                 expect(await councilMember.balances(2)).to.equal(33);
 
-                expect(await telcoin.balanceOf(member.address)).to.equal(300);
+                expect(await telcoin.balanceOf(member.address)).to.equal(333);
                 expect(await telcoin.balanceOf(support.address)).to.equal(0);
-                expect(await telcoin.balanceOf(await councilMember.getAddress())).to.equal(200);
+                expect(await telcoin.balanceOf(await councilMember.getAddress())).to.equal(167);
             });
         });
 
@@ -496,4 +481,3 @@ describe("CouncilMember", () => {
         });
     });
 });
-//supportsInterface 

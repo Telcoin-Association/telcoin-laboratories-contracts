@@ -13,6 +13,14 @@ import {ISource} from "../interfaces/ISource.sol";
  * @dev Relies on OpenZeppelin's Ownable2Step for ownership control and other external interfaces for token
  */
 contract VotingWeightCalculator is Ownable2Step {
+    /// @notice Emitted when a new liquidity source is added to the voting calculator
+    /// @param source The source contract that was added
+    event SourceAdded(ISource indexed source);
+    /// @notice Emitted when a liquidity source is removed from the voting calculator
+    /// @param source The source contract that was removed
+    /// @param index The index at which the source was located before removal
+    event SourceRemoved(ISource indexed source, uint256 index);
+
     // Array storing different liquidity sources
     ISource[] public sources;
 
@@ -20,16 +28,34 @@ contract VotingWeightCalculator is Ownable2Step {
     constructor(address initialOwner) Ownable(initialOwner) {}
 
     /**
-     * @notice Adds a new soure to be considered when calculating voting weight.
+     * @notice Returns the list of currently whitelisted liquidity sources
+     * @return An array of contracts implementing the ISource interface
+     */
+    function getSources() external view returns (ISource[] memory) {
+        return sources;
+    }
+
+    /**
+     * @notice Adds a new source to be considered when calculating voting weight.
      * @param source liquidity source to be added
      */
-    function addSource(address source) external onlyOwner {
+    function addSource(ISource source) external onlyOwner {
         require(
-            IERC165(source).supportsInterface(type(ISource).interfaceId),
+            IERC165(address(source)).supportsInterface(
+                type(ISource).interfaceId
+            ),
             "VotingWeightCalculator: address does not support Source"
         );
 
+        for (uint i = 0; i < sources.length; i++) {
+            require(
+                sources[i] != source,
+                "VotingWeightCalculator: source already added"
+            );
+        }
+
         sources.push(ISource(source));
+        emit SourceAdded(source);
     }
 
     /**
@@ -39,9 +65,10 @@ contract VotingWeightCalculator is Ownable2Step {
      */
     function removeSource(uint256 index) external onlyOwner {
         // Replace the source at the index with the last source in the list
-        ISource source = sources[sources.length - 1];
-        sources[index] = source;
-        sources.pop(); // Remove the last source
+        ISource removed = sources[index];
+        sources[index] = sources[sources.length - 1];
+        sources.pop();
+        emit SourceRemoved(removed, index);
     }
 
     /**
@@ -53,8 +80,9 @@ contract VotingWeightCalculator is Ownable2Step {
     function balanceOf(
         address voter
     ) public view returns (uint256 runningTotal) {
+        uint256 len = sources.length;
         // Loop through each staking contract to add up the TEL balance for the voter
-        for (uint i = 0; i < sources.length; i++) {
+        for (uint i = 0; i < len; i++) {
             runningTotal += sources[i].balanceOf(voter);
         }
     }

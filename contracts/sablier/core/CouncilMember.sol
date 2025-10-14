@@ -5,8 +5,7 @@ import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 import {ERC721EnumerableUpgradeable, ERC721Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
 import {AccessControlEnumerableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlEnumerableUpgradeable.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {ISablierV2ProxyTarget, ISablierV2Lockup} from "../interfaces/ISablierV2ProxyTarget.sol";
-import {IPRBProxy} from "../interfaces/IPRBProxy.sol";
+import {ISablierV2Lockup} from "../interfaces/ISablierV2Lockup.sol";
 
 /**
  * @title CouncilMember
@@ -21,23 +20,23 @@ contract CouncilMember is
 {
     using SafeERC20 for IERC20;
 
+    uint256 private constant INVALID_INDEX = type(uint256).max;
+
     /* ========== EVENTS ========== */
-    // Event fired when the proxy is updated
-    event ProxyUpdated(IPRBProxy newProxy);
+    // Reward Claimed Event
+    event Claimed(
+        uint256 indexed tokenId,
+        address indexed claimant,
+        uint256 amount
+    );
     // Event fired when the lockup address is updated
     event LockupUpdated(ISablierV2Lockup newLockup);
-    // Event fired when the target address is updated
-    event TargetUpdated(address newTarget);
     // Event fired when the ID is updated
     event IDUpdated(uint256 newID);
 
     /* ========== STATE VARIABLES ========== */
     // The main token of this ecosystem
     IERC20 public TELCOIN;
-    // Stream proxy address for this contract
-    IPRBProxy public _proxy;
-    // here is the implentation address
-    address public _target;
     // the location of tokens
     ISablierV2Lockup public _lockup;
     // the id associated with the sablier NFT
@@ -62,21 +61,21 @@ contract CouncilMember is
     // Support role for additional functionality
     bytes32 public constant SUPPORT_ROLE = keccak256("SUPPORT_ROLE");
 
+    constructor(bool disable) {
+        if (disable) _disableInitializers();
+    }
+
     /* ========== INITIALIZER ========== */
     function initialize(
         IERC20 telcoin,
         string memory name_,
         string memory symbol_,
-        IPRBProxy proxy_,
-        address target_,
         ISablierV2Lockup lockup_,
         uint256 id_
     ) external initializer {
         _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
         __ERC721_init(name_, symbol_);
         TELCOIN = telcoin;
-        _proxy = proxy_;
-        _target = target_;
         _lockup = lockup_;
         _id = id_;
     }
@@ -99,9 +98,8 @@ contract CouncilMember is
      * @notice Allows council members to claim their allocated amounts of TELCOIN
      * @dev Checks if the caller is the owner of the provided tokenId and if the requested amount is available.
      * @param tokenId The NFT index associated with a council member.
-     * @param amount Amount of TELCOIN the council member wants to withdraw.
      */
-    function claim(uint256 tokenId, uint256 amount) external {
+    function claim(uint256 tokenId) external {
         // Ensure the function caller is the owner of the token (council member) they're trying to claim for
         require(
             _msgSender() == ownerOf(tokenId),
@@ -110,18 +108,23 @@ contract CouncilMember is
         // Retrieve and distribute any pending TELCOIN for all council members
         _retrieve();
 
-        // Ensure the requested amount doesn't exceed the balance of the council member
+        uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
         require(
-            amount <= balances[tokenId],
-            "CouncilMember: withdrawal amount is higher than balance"
+            balanceIndex < balances.length,
+            "CouncilMember: invalid tokenId"
         );
 
-        uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
+        uint256 balance = balances[balanceIndex];
+        if (balance == 0) {
+            return;
+        }
 
-        // Deduct the claimed amount from the token's balance
-        balances[balanceIndex] -= amount;
+        // zeros out balance
+        balances[balanceIndex] = 0;
         // Safely transfer the claimed amount of TELCOIN to the function caller
-        TELCOIN.safeTransfer(_msgSender(), amount);
+        TELCOIN.safeTransfer(_msgSender(), balance);
+
+        emit Claimed(tokenId, _msgSender(), balance);
     }
 
     /**
@@ -135,10 +138,18 @@ contract CouncilMember is
         address to,
         uint256 tokenId
     ) public override(ERC721Upgradeable, IERC721) {
+        _retrieve();
         address previousApproval = _getApproved(tokenId);
         super.transferFrom(from, to, tokenId);
         _approve(previousApproval, tokenId, address(0), false);
-        TELCOIN.safeTransfer(from, balances[tokenId]);
+
+        uint256 idx = _slotOf(tokenId);
+        uint256 bal = balances[idx];
+        if (bal != 0) {
+            balances[idx] = 0; // effects first
+            TELCOIN.safeTransfer(from, bal); // interaction
+            emit Claimed(tokenId, from, bal);
+        }
     }
 
     /************************************************
@@ -155,7 +166,7 @@ contract CouncilMember is
         bytes4 interfaceId
     )
         public
-        pure
+        view
         override(
             AccessControlEnumerableUpgradeable,
             ERC721EnumerableUpgradeable
@@ -163,10 +174,8 @@ contract CouncilMember is
         returns (bool)
     {
         return
-            interfaceId ==
-            type(AccessControlEnumerableUpgradeable).interfaceId ||
-            interfaceId == type(ERC721EnumerableUpgradeable).interfaceId ||
-            interfaceId == type(IERC721).interfaceId;
+            AccessControlEnumerableUpgradeable.supportsInterface(interfaceId) ||
+            ERC721EnumerableUpgradeable.supportsInterface(interfaceId);
     }
 
     /************************************************
@@ -217,11 +226,11 @@ contract CouncilMember is
     function mint(
         address newMember
     ) external onlyRole(GOVERNANCE_COUNCIL_ROLE) {
+        _retrieve();
+
         uint256 index = counter++;
         _mint(newMember, index);
-        tokenIdToBalanceIndex[index] = balances.length;
-        balanceIndexToTokenId[balances.length] = index;
-        balances.push(0);
+        _assignSlot(index);
     }
 
     /**
@@ -235,54 +244,80 @@ contract CouncilMember is
         uint256 tokenId,
         address recipient
     ) external onlyRole(GOVERNANCE_COUNCIL_ROLE) {
+        require(recipient != address(0), "CouncilMember: recipient=0");
         require(totalSupply() > 1, "CouncilMember: must maintain council");
 
+        // Settle first so leaver gets proper share
+        _retrieve();
+
+        // Locate and cache owed balance
+        uint256 idx = _slotOf(tokenId);
+        uint256 owed = balances[idx];
+
+        // EFFECTS first: zero slot to avoid double-collect on failure paths
+        balances[idx] = 0;
+
+        // Remove the slot (swap-and-pop) and mark token invalid
+        _swapPopSlot(idx);
+
+        // Burn NFT after accounting
         _burn(tokenId);
-        uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
 
-        TELCOIN.safeTransfer(recipient, balances[balanceIndex]);
-
-        balances[balanceIndex] = balances[balances.length - 1];
-        balances[balances.length - 1] = 0;
-
-        tokenIdToBalanceIndex[
-            balanceIndexToTokenId[balances.length - 1]
-        ] = balanceIndex;
-        tokenIdToBalanceIndex[tokenId] = type(uint256).max;
-
-        balanceIndexToTokenId[balanceIndex] = balanceIndexToTokenId[
-            balances.length - 1
-        ];
-        balanceIndexToTokenId[balances.length - 1] = 0;
-
-        balances.pop();
+        // INTERACTIONS last
+        if (owed != 0) {
+            TELCOIN.safeTransfer(recipient, owed);
+            emit Claimed(tokenId, recipient, owed); // reuse existing event for traceability
+        }
     }
 
-    /**
-     * @notice Update the stream proxy address
-     * @dev Restricted to the GOVERNANCE_COUNCIL_ROLE.
-     * @param proxy_ New stream proxy address.
-     */
-    function updateProxy(
-        IPRBProxy proxy_
-    ) external onlyRole(GOVERNANCE_COUNCIL_ROLE) {
-        _retrieve();
-        _proxy = proxy_;
-        emit ProxyUpdated(proxy_);
-    }
+    // function burn(
+    //     uint256 tokenId,
+    //     address recipient
+    // ) external onlyRole(GOVERNANCE_COUNCIL_ROLE) {
+    //     require(recipient != address(0), "CouncilMember: recipient=0");
+    //     require(totalSupply() > 1, "CouncilMember: must maintain council");
 
-    /**
-     * @notice Update the target address
-     * @dev Restricted to the GOVERNANCE_COUNCIL_ROLE.
-     * @param target_ New target address.
-     */
-    function updateTarget(
-        address target_
-    ) external onlyRole(GOVERNANCE_COUNCIL_ROLE) {
-        _retrieve();
-        _target = target_;
-        emit TargetUpdated(target_);
-    }
+    //     // 1) Settle stream FIRST so leaver gets full share pre-burn
+    //     _retrieve();
+
+    //     // 2) Compute indices and owed amount
+    //     uint256 idx = tokenIdToBalanceIndex[tokenId];
+    //     require(idx < balances.length, "CouncilMember: invalid tokenId");
+    //     uint256 owed = balances[idx];
+    //     uint256 last = balances.length - 1;
+
+    //     // 3) EFFECTS FIRST (CEI)
+    //     //    3a) Clear the slot to prevent double-collect
+    //     balances[idx] = 0;
+
+    //     //    3b) Swap-and-pop indexes/mappings to keep array dense
+    //     if (idx != last) {
+    //         // Move last balance into idx
+    //         balances[idx] = balances[last];
+
+    //         // Move reverse/forward pointers for the moved token
+    //         uint256 movedTokenId = balanceIndexToTokenId[last];
+    //         tokenIdToBalanceIndex[movedTokenId] = idx;
+    //         balanceIndexToTokenId[idx] = movedTokenId;
+    //     }
+
+    //     // Clear tail mappings and shrink
+    //     delete balanceIndexToTokenId[last];
+    //     balances.pop();
+
+    //     // Mark burned token as invalid
+    //     tokenIdToBalanceIndex[tokenId] = type(uint256).max;
+
+    //     // Keep totalSupply() unchanged during bookkeeping, then burn
+    //     _burn(tokenId);
+
+    //     // 4) INTERACTIONS LAST
+    //     if (owed != 0) {
+    //         TELCOIN.safeTransfer(recipient, owed);
+    //         // Reuse Claimed for uniform analytics
+    //         emit Claimed(tokenId, recipient, owed);
+    //     }
+    // }
 
     /**
      * @notice Update the lockup address
@@ -312,31 +347,56 @@ contract CouncilMember is
      *   internal functions
      ************************************************/
 
+    /// @dev Strictly fetch the balance slot for tokenId and verify the triad is consistent.
+    function _slotOf(uint256 tokenId) internal view returns (uint256 idx) {
+        idx = tokenIdToBalanceIndex[tokenId];
+        require(idx < balances.length, "CouncilMember: index OOB");
+        require(
+            balanceIndexToTokenId[idx] == tokenId,
+            "CouncilMember: index drift"
+        );
+    }
+
+    /// @dev Assign a fresh zeroed slot at the end for tokenId. Use in mint.
+    function _assignSlot(uint256 tokenId) internal returns (uint256 idx) {
+        idx = balances.length;
+        balances.push(0);
+        tokenIdToBalanceIndex[tokenId] = idx;
+        balanceIndexToTokenId[idx] = tokenId;
+    }
+
+    /// @dev Swap-and-pop removal of slot idx. Marks removed tokenId as INVALID_INDEX. Use in burn.
+    function _swapPopSlot(uint256 idx) internal {
+        uint256 last = balances.length - 1;
+        uint256 tokenId = balanceIndexToTokenId[idx];
+
+        if (idx != last) {
+            // move last balance + owner into idx
+            balances[idx] = balances[last];
+
+            uint256 movedTokenId = balanceIndexToTokenId[last];
+            tokenIdToBalanceIndex[movedTokenId] = idx;
+            balanceIndexToTokenId[idx] = movedTokenId;
+        }
+
+        // clear tail and shrink
+        delete balanceIndexToTokenId[last];
+        balances.pop();
+
+        // mark removed token as invalid
+        tokenIdToBalanceIndex[tokenId] = INVALID_INDEX;
+    }
+
     /**
      * @notice Retrieve and distribute TELCOIN to council members based on the stream from _target
      * @dev This function fetches the maximum possible TELCOIN and distributes it equally among all council members.
      * @dev It also updates the running balance to ensure accurate distribution during subsequent calls.
      */
     function _retrieve() internal {
-        // Get the initial TELCOIN balance of the contract
-        uint256 initialBalance = TELCOIN.balanceOf(address(this));
-        // Execute the withdrawal from the _target, which might be a Sablier stream or another protocol
-        try
-            _proxy.execute(
-                _target,
-                abi.encodeWithSelector(
-                    ISablierV2ProxyTarget.withdrawMax.selector,
-                    _lockup,
-                    _id,
-                    address(this)
-                )
-            )
-        returns (bytes memory) {
-            // Get the new balance after the withdrawal
-            uint256 currentBalance = TELCOIN.balanceOf(address(this));
-            // Calculate the amount of TELCOIN that was withdrawn during this operation
-            uint256 finalBalance = (currentBalance - initialBalance) +
-                runningBalance;
+        if (totalSupply() == 0) return;
+        // Execute the withdrawal from the _lockup
+        try _lockup.withdrawMax(_id, address(this)) returns (uint128 amount) {
+            uint256 finalBalance = uint256(amount) + runningBalance;
             // Distribute the TELCOIN equally among all council members
             uint256 individualBalance = finalBalance / totalSupply();
             // Update the running balance which keeps track of any TELCOIN that can't be evenly distributed
@@ -363,26 +423,6 @@ contract CouncilMember is
     ) internal view override returns (bool) {
         return (hasRole(GOVERNANCE_COUNCIL_ROLE, spender) ||
             _getApproved(tokenId) == spender);
-    }
-
-    /**
-     * @notice Handle operations to be performed before transferring a token
-     * @dev This function retrieves and distributes TELCOIN before the token transfer.
-     * @dev It is an override of the _beforeTokenTransfer from OpenZeppelin's ERC721.
-     * @param to Address from which the token is being transferred.
-     * @param tokenId Token ID that's being transferred.
-     * @param auth Token ID that's being transferred.
-     */
-    function _update(
-        address to,
-        uint256 tokenId,
-        address auth
-    ) internal override returns (address) {
-        if (totalSupply() != 0) {
-            _retrieve();
-        }
-
-        return super._update(to, tokenId, auth);
     }
 
     /************************************************
