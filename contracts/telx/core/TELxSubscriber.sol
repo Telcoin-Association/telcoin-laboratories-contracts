@@ -54,11 +54,11 @@ contract TELxSubscriber is ISubscriber {
     /// @dev Deletes registry's stored subscription and permanently marks its position burned
     function notifyBurn(
         uint256 tokenId,
-        address,
+        address owner,
         PositionInfo,
         uint256,
         BalanceDelta
     ) external override onlyPositionManager {
-        registry.handleBurn(tokenId);
+        registry.handleBurn(tokenId, owner);
     }
 }

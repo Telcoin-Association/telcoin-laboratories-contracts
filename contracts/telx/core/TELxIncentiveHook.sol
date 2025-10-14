@@ -6,11 +6,8 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {IPositionRegistry} from "../interfaces/IPositionRegistry.sol";
-import {IMsgSender} from "../interfaces/IMsgSender.sol";
-import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 /**
  * @title TELx Incentive Hook
@@ -20,6 +17,7 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
  */
 contract TELxIncentiveHook is BaseHook {
     using PoolIdLibrary for PoolKey;
+    using BalanceDeltaLibrary for BalanceDelta;
 
     /// @notice Emitted during every swap, used for off-chain range validation
     event SwapOccurredWithTick(
@@ -33,6 +31,14 @@ contract TELxIncentiveHook is BaseHook {
     /// @notice Registry used to store and track liquidity positions
     IPositionRegistry public immutable registry;
     address public immutable positionManager;
+
+    modifier onlyPositionManager(address sender) {
+        require(
+            sender == positionManager,
+            "TELxIncentiveHook: Caller is not Position Manager"
+        );
+        _;
+    }
 
     /**
      * @notice Constructs the incentive hook contract
@@ -51,7 +57,7 @@ contract TELxIncentiveHook is BaseHook {
 
     /**
      * @notice Defines which Uniswap V4 hooks this contract implements
-     * @dev Only beforeAddLiquidity, beforeRemoveLiquidity, and afterSwap are enabled
+     * @dev Only beforeInitialize, afterAddLiquidity and afterRemoveLiquidity are enabled
      */
     function getHookPermissions()
         public
@@ -63,10 +69,10 @@ contract TELxIncentiveHook is BaseHook {
             Hooks.Permissions({
                 beforeInitialize: true,
                 afterInitialize: false,
-                beforeAddLiquidity: true,
-                afterAddLiquidity: false,
-                beforeRemoveLiquidity: true,
-                afterRemoveLiquidity: false,
+                beforeAddLiquidity: false,
+                afterAddLiquidity: true,
+                beforeRemoveLiquidity: false,
+                afterRemoveLiquidity: true,
                 beforeSwap: false,
                 afterSwap: false,
                 beforeDonate: false,
@@ -87,67 +93,66 @@ contract TELxIncentiveHook is BaseHook {
         address sender,
         PoolKey calldata key,
         uint160
-    ) internal virtual override returns (bytes4) {
+    ) internal virtual override onlyPoolManager() returns (bytes4) {
         registry.initialize(sender, key);
 
         return BaseHook.beforeInitialize.selector;
     }
 
     /**
-     * @notice Called before liquidity is added to a pool
+     * @notice Called after liquidity is added to a pool
      * @dev Passes the delta to the registry to record or update the LP’s position
      * @param sender Address of the LP adding liquidity
      * @param key The pool key (used to derive PoolId)
      * @param params Liquidity modification parameters (including tick range and delta)
      */
-    function _beforeAddLiquidity(
+    function _afterAddLiquidity(
         address sender,
         PoolKey calldata key,
         IPoolManager.ModifyLiquidityParams calldata params,
+        BalanceDelta delta,
+        BalanceDelta feesAccrued,
         bytes calldata
-    ) internal override returns (bytes4) {
-        require(
-            sender == positionManager,
-            "TELxIncentiveHook: Caller is not Position Manager"
-        );
-
+    ) internal override onlyPositionManager(sender) returns (bytes4, BalanceDelta) {
         uint256 tokenId = uint256(params.salt);
 
         registry.addOrUpdatePosition(
             tokenId,
             key.toId(),
-            int128(params.liquidityDelta)
+            int128(params.liquidityDelta),
+            feesAccrued.amount0(),
+            feesAccrued.amount1()
         );
 
-        return BaseHook.beforeAddLiquidity.selector;
+        return (BaseHook.afterAddLiquidity.selector, delta);
     }
 
     /**
-     * @notice Called before liquidity is removed from a pool
+     * @notice Called after liquidity is removed from a pool
      * @dev Updates or deletes position if liquidity reaches zero
      * @param sender Address of the LP removing liquidity
      * @param key The pool key
      * @param params Liquidity modification parameters (including tick range and delta)
      */
-    function _beforeRemoveLiquidity(
+    function _afterRemoveLiquidity(
         address sender,
         PoolKey calldata key,
         IPoolManager.ModifyLiquidityParams calldata params,
+        BalanceDelta delta,
+        BalanceDelta feesAccrued,
         bytes calldata
-    ) internal override returns (bytes4) {
-        require(
-            sender == positionManager,
-            "TELxIncentiveHook: Caller is not Position Manager"
-        );
+    ) internal override onlyPositionManager(sender) returns (bytes4, BalanceDelta) {
 
         uint256 tokenId = uint256(params.salt);
 
         registry.addOrUpdatePosition(
             tokenId,
             key.toId(),
-            int128(params.liquidityDelta)
+            int128(params.liquidityDelta),
+            feesAccrued.amount0(),
+            feesAccrued.amount1()
         );
 
-        return BaseHook.beforeRemoveLiquidity.selector;
+        return (BaseHook.afterRemoveLiquidity.selector, delta);
     }
 }

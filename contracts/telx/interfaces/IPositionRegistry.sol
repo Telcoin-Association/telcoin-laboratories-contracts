@@ -9,8 +9,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 interface IPositionRegistry {
     /// @notice Checkpoint structure for fee growth data
     struct FeeGrowthCheckpoint {
-        uint256 feeGrowthInside0X128;
-        uint256 feeGrowthInside1X128;
+        int128 feeGrowth0;
+        int128 feeGrowth1;
     }
 
     /// @notice Checkpoint metadata for better searchability offchain
@@ -70,8 +70,8 @@ interface IPositionRegistry {
         uint256 indexed tokenId,
         PoolId indexed poolId,
         uint256 indexed checkpointIndex,
-        uint256 feeGrowthInside0X128,
-        uint256 feeGrowthInside1X128
+        int128 feeGrowthInside0X128,
+        int128 feeGrowthInside1X128
     );
 
     /// @notice Emitted when a token is subscribed
@@ -103,11 +103,15 @@ interface IPositionRegistry {
      * @param tokenId The identifier of the position to remove.
      * @param poolId Target pool
      * @param liquidityDelta Change in liquidity (positive = add, negative = remove)
+     * @param feeGrowth0 Currency0 fees accrued since the last time fees were collected from this position
+     * @param feeGrowth1 Currency1 fees accrued since the last time fees were collected from this position
      */
     function addOrUpdatePosition(
         uint256 tokenId,
         PoolId poolId,
-        int128 liquidityDelta
+        int128 liquidityDelta,
+        int128 feeGrowth0,
+        int128 feeGrowth1
     ) external;
 
     /**
@@ -131,7 +135,7 @@ interface IPositionRegistry {
      * @dev Removes `tokenId` from `subscription` ledger and from the `subscribed` array
      * and marks the position as untracked to be permanently ignored
      */
-    function handleBurn(uint256 tokenId) external;
+    function handleBurn(uint256 tokenId, address owner) external;
 
     /**
      * @notice Computes currency0 & currency1 amounts for given liquidity at current tick price

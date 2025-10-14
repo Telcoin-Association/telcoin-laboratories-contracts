@@ -1,183 +1,128 @@
-# TELx Liquidity Tracking & Voting System
+# TELx Uniswap v4 Liquidity System: Final Specification
 
-This system is a coordinated set of contracts that extend Uniswap v4’s infrastructure to:
+## 1. Executive Summary
 
-- **Track LP positions in TEL-denominated pools**.
-- **Enable reward distribution based on in-range liquidity activity**.
-- **Feed TEL-based voting power into Snapshot governance**.
+This document outlines a coordinated system of on-chain contracts and off-chain services that integrate with Uniswap v4. The system is designed to solve two primary challenges:
 
-The core contracts are:
+**Problem (Incentives):** How to distribute TEL rewards to liquidity providers (LPs) in a way that encourages deep, stable, long-term liquidity and fairly rewards different provider behaviors (Passive, Active, and Just-in-Time).
 
-1. **PositionRegistry** – canonical store of tracked positions, liquidity, and rewards.
-2. **TELxIncentiveHook** – Uniswap v4 hook that pipes liquidity events and swap ticks into the registry.
-3. **TELxSubscriber** – Uniswap position transfer listener that triggers registry subscription logic.
-4. **VotingWeightCalculator** – governance voting weight aggregator from multiple sources.
-5. **UniswapAdaptor** – ISource adapter that converts Uniswap LP positions in the registry into TEL voting weight.
+**Problem (Governance):** How to accurately represent the value of these diverse LP positions as TEL-denominated voting power in Snapshot governance, without relying on manipulatable on-chain price oracles.
 
----
+**Solution:** The system utilizes a lightweight, immutable Uniswap v4 hook to capture essential on-chain data (feeGrowth, liquidity changes) with minimal gas overhead. This data is then consumed by two powerful off-chain components:
 
-## **1. PositionRegistry (Core Contract)**
+1. An **off-chain rewards script** that calculates and distributes rewards based on a sophisticated, configurable weighting system that differentiates between Passive, Active, and JIT liquidity.
 
-The **PositionRegistry** is the single source of truth for LP position metadata in TEL pools.
+2. A **custom Snapshot voting strategy** that securely calculates voting power by fetching raw position data and combining it with reliable, off-chain price feeds from sources like CoinGecko.
 
-**Key responsibilities:**
+This hybrid on-chain/off-chain architecture ensures on-chain efficiency and data integrity while enabling flexible, secure, and complex calculations off-chain.
 
-- **Tracking Positions**
+## 2. System Architecture
 
-  - Maps `tokenId → Position` (provider, poolId, tick range, liquidity).
-  - Separates subscribed vs. unsubscribed positions per provider.
-  - Supports a per-address position cap (`MAX_POSITIONS`).
+The system consists of three on-chain components and two off-chain services:
 
-- **Integration Points**
+### On-Chain Infrastructure (The Data Layer):
 
-  - **Liquidity Events** – Only updated by addresses with `UNI_HOOK_ROLE` (typically the TELxIncentiveHook).
-  - **Ownership Changes** – Triggered via `handleSubscribe()` by the TELxSubscriber (which has `SUBSCRIBER_ROLE`).
+- **PositionRegistry:** The central state contract and source of truth for all tracked position data.
+- **TELxIncentiveHook:** A Uniswap v4 hook that listens to liquidity modifications and checkpoints crucial data into the PositionRegistry.
+- **TELxSubscriber:** An ISubscriber that listens for position NFT transfers, ensuring ownership records remain accurate.
 
-- **Reward Distribution**
+### Off-Chain Services (The Logic Layer):
 
-  - Off-chain scripts calculate weekly rewards and call `addRewards()` with batched results.
-  - Users claim via `claim()` (transfers TEL from contract's balance).
+- **Off-Chain Rewards Script:** Consumes data from the PositionRegistry to calculate weighted rewards and sends the final distributions back on-chain.
+- **Custom Snapshot Strategy:** Runs on Snapshot's infrastructure to calculate voting power for governance proposals.
 
-- **Voting Weight Calculation**
+## 3. On-Chain Components
 
-  - `computeVotingWeight()` uses Uniswap V4 math (`TickMath`, `FullMath`) to calculate TEL-denominated liquidity value for a given position.
-  - Only pools marked with a valid TEL index in `telcoinPosition` are eligible.
+### 3.1. PositionRegistry (Core Contract)
 
-- **Administrative Controls**
-  - `SUPPORT_ROLE` manages TEL pool mapping, trusted routers, and reward updates.
-  - ERC20 rescue functionality for mis-sent tokens.
+The PositionRegistry is the canonical on-chain database for all LP data relevant to the TELx ecosystem.
 
----
+#### Key Responsibilities:
 
-## **2. TELxIncentiveHook (Uniswap v4 Hook)**
+- **Position Data Storage:** Maps `tokenId` to position data, including its owner, pool, tick range, and a history of liquidity modifications.
+- **Fee Growth Checkpointing:** Stores a history of `feeGrowthInside` snapshots for each position, captured every time its liquidity is modified. This provides a granular, on-chain data source for the off-chain rewards script.
+- **Subscription Management:** Tracks which positions have opted into the program via Uniswap v4's native `subscribe()` mechanism.
+- **Reward Payouts:** Holds the TEL rewards allocated by the off-chain script and allows users to `claim()` their share.
+- **Access Control:** Utilizes roles (`DEFAULT_ADMIN_ROLE`, `UNI_HOOK_ROLE`, `SUPPORT_ROLE`) to ensure only authorized components can modify its state.
 
-The **TELxIncentiveHook** is deployed alongside a Uniswap v4 `PoolManager` and is attached to TEL pools via Uniswap's hook mechanism.
+### 3.2. TELxIncentiveHook (Uniswap v4 Hook)
 
-**Hook permissions:**
+This hook is the system's direct interface with the Uniswap v4 PoolManager. It is designed for minimal gas impact on swappers.
 
-```solidity
-beforeAddLiquidity – Informs the registry of new/modified positions.
-beforeRemoveLiquidity – Updates registry on liquidity reductions or position burn.
-afterSwap – Emits a SwapOccurredWithTick event for off-chain processing.
-```
+#### Callbacks Used:
 
-**Core logic:**
+- **`beforeInitialize`:** Allows a contract admin to securely register new pools for tracking.
+- **`beforeModifyPosition`:** A single, efficient callback that captures all liquidity events (add, remove, mint, collect).
 
-- **Liquidity Tracking** – Extracts `tokenId` from the `salt` in `ModifyLiquidityParams`, passes the change (`liquidityDelta`) to the registry.
-- **Swap Event Emission** – Logs poolId, trader, swap deltas, and current tick.
-- **Router Resolution** – If sender is a trusted router, attempts to resolve the original user via `msgSender()`.
+#### Core Logic:
 
-**Role in rewards:**
+- **Data Capture:** On any liquidity modification, the hook reads the position's `liquidityDelta` and the current `feeGrowthInside` for its tick range.
+- **Checkpointing:** It immediately writes this data as a new checkpoint in the PositionRegistry, creating an immutable, auditable on-chain record of every position's liquidity and fee history.
+- **Position Validation:** It ensures that tracked positions are created via the official PositionManager, which guarantees the `tokenId` is correctly identified. Positions created through other means are ignored.
 
-- Off-chain reward scripts listen to `SwapOccurredWithTick` and cross-reference tick ranges with LP positions to determine "in-range" liquidity time.
+### 3.3. TELxSubscriber (Position Transfer Listener)
 
----
+This contract implements Uniswap's ISubscriber interface to keep ownership data synchronized.
 
-## **3. TELxSubscriber (Position Transfer Listener)**
+#### Functionality:
 
-**TELxSubscriber** implements Uniswap v4’s `ISubscriber` interface to track NFT position transfers.
+- When an LP subscribes to their position NFT via the PositionManager, `notifySubscribe()` is triggered, which in turn calls `registry.handleSubscribe()`.
+- When a position NFT is transferred, `notifyUnsubscribe()` is triggered. This results in the position being unsubscribed, requiring the new owner to explicitly re-subscribe to continue participating.
+- It also notifies the registry of position burns (`notifyBurn`) and liquidity modifications (`notifyModifyLiquidity`).
 
-**Functionality:**
+## 4. Off-Chain Components
 
-- On `notifySubscribe()` from the `PositionManager`, calls `registry.handleSubscribe(tokenId)`.
-- The registry:
-  - Moves positions from unsubscribed to subscribed lists.
-  - Updates provider ownership.
-  - Adds to the provider's tracked positions if within limits.
-- All other `ISubscriber` callbacks (`notifyUnsubscribe`, `notifyModifyLiquidity`, `notifyBurn`) are no-ops in this implementation.
+### 4.1. Off-Chain Rewards Calculation Script
 
-**Purpose:**  
-Ensures the registry's notion of position ownership stays in sync with Uniswap's actual NFT transfers.
+This script is responsible for implementing the sophisticated, weighted rewards logic. It runs on a periodic basis (e.g., weekly).
 
----
+#### Data Inputs:
 
-## **4. VotingWeightCalculator (Governance Weight Aggregator)**
+- It queries the PositionRegistry contract for all Checkpoint events that occurred during the reward epoch.
+- It uses this data to reconstruct the precise fee growth for every subscribed position.
 
-The **VotingWeightCalculator** pulls TEL voting power from multiple liquidity sources.
+#### Core Logic: Three-Tiered LP Weighting
 
-**Design:**
+The script classifies each liquidity provision period based on its on-chain lifetime to differentiate between three types of LPs. This allows for fine-tuned incentive distribution via admin-configurable parameters.
 
-- Maintains a dynamic list of `ISource` contracts (owner-controlled).
-- `balanceOf(voter)` queries each source for TEL-equivalent balance and sums them.
+1. **JIT (Just-In-Time) Liquidity:**
 
-**Snapshot Integration:**
+   - **Definition:** Positions with a lifetime less than `CONFIGURABLE_MIN_LIFETIME_JIT`.
+   - **Weighting:** Their earned `feeGrowth` is multiplied by `CONFIGURABLE_WEIGHTING_JIT` (e.g., 0.25).
 
-- Snapshot strategies call this contract to fetch an address's voting power.
-- Since TELx liquidity is off-chain rewarded but on-chain trackable, UniswapAdaptor (below) plugs into this list.
+2. **Active Liquidity:**
 
----
+   - **Definition:** Positions with a lifetime between `CONFIGURABLE_MIN_LIFETIME_JIT` and `CONFIGURABLE_MIN_LIFETIME_ACTIVE`.
+   - **Weighting:** Their earned `feeGrowth` is multiplied by `CONFIGURABLE_WEIGHTING_ACTIVE` (e.g., 0.75).
 
-## **5. UniswapAdaptor (ISource Adapter for TELx LPs)**
+3. **Passive Liquidity:**
+   - **Definition:** Positions with a lifetime greater than `CONFIGURABLE_MIN_LIFETIME_ACTIVE`.
+   - **Weighting:** Their earned `feeGrowth` receives the full weight (1.0).
 
-The **UniswapAdaptor** implements the `ISource` interface over the `PositionRegistry`.
+### 4.2. Custom Snapshot Voting Strategy
 
-**Logic:**
+This component completely replaces on-chain voting calculations. It's a JavaScript module that runs on Snapshot's backend to provide secure, accurate voting power.
 
-- For a given voter:
-  - Fetch all positionIds from `registry.getTokenIdsByProvider(voter)`.
-  - Call `registry.computeVotingWeight(tokenId)` for each.
-  - Return the total TEL-denominated liquidity.
+#### Functionality:
 
-**Role:**  
-Allows the voting calculator to treat Uniswap LP positions as if they were plain TEL balances for governance purposes.
+- **Data Input:** For a given voter, the script calls the PositionRegistry's public view functions to get the list of their subscribed positions and the raw data for each (liquidity, ticks, pool currencies).
+- **Off-Chain Pricing:** It makes API calls to a reliable, external price oracle (e.g., CoinGecko) to fetch the historical prices of all relevant assets (ETH, TEL, USDC, EMXN) in a common quote currency like USD, corresponding to the proposal's snapshot block.
+- **Valuation Logic:**
+  - It converts the raw on-chain liquidity and tick data into amounts of each token.
+  - It calculates the total USD value of the position by multiplying the token amounts by their fetched USD prices.
+  - It converts the final USD value into a TEL-denominated voting power by dividing it by the fetched TEL/USD price.
+- **Output:** The strategy returns a single number representing the voter's total voting power, which is then displayed in the Snapshot UI.
 
----
+## 5. System Flow & User Journey
 
-## **System Flow Overview**
+1. **Position Creation:** An LP mints a new Uniswap v4 position NFT in a tracked pool using the PositionManager.
 
-1. **Position Creation**
+2. **Opt-In via Subscription:** To become eligible for rewards and voting power, the LP must call `positionManager.subscribe()` on their NFT. This is the explicit opt-in action.
 
-   - LP mints a Uniswap v4 position NFT via the PositionManager.
-   - Position is marked unsubscribed in registry until explicitly subscribed.
+3. **Liquidity Events:** As the LP adds or removes liquidity, the TELxIncentiveHook automatically and transparently checkpoints their fee growth data into the PositionRegistry.
 
-2. **Subscription as opt-in**
+4. **Reward Calculation:** The off-chain rewards script runs periodically, calculating the weighted fee scores for all subscribed LPs and allocating TEL rewards by calling `addRewards()`.
 
-   - After creating a position, LP calls `positionManager.subscribe()` which is the action required for LPs to opt-in to the program and begin qualifying for voting weight and rewards.
-   - TELxSubscriber receives `notifySubscribe()` and calls `registry.handleSubscribe()`.
-   - Additionally, only users who stake on Telex qualify for rewards and voting power through the hook implementation
+5. **Claiming Rewards:** The LP can call `claim()` on the PositionRegistry at any time to receive their accrued TEL.
 
-3. **Liquidity Changes**
-
-   - When liquidity is added or removed in a TEL pool, TELxIncentiveHook's `beforeAddLiquidity` / `beforeRemoveLiquidity` triggers `registry.addOrUpdatePosition()`.
-
-4. **Swap Events**
-
-   - Every swap in a TEL pool calls `afterSwap` in the hook.
-   - Emits `SwapOccurredWithTick` for off-chain reward logic.
-
-5. **Rewards**
-
-   - Off-chain script consumes hook events + registry data to calculate eligible rewards. This is based on v4 fees earned, which involve all active liquidity positions including their size as well as all swaps including their size and liquidity range.
-   - Rewards distributions calculated by offchain script on weekly basis (ideally in tandem with TANIP-1)
-   - Script calls `addRewards()` to allocate TEL to providers.
-   - Providers claim via `claim()`.
-
-6. **Voting**
-   - Snapshot calls VotingWeightCalculator → UniswapAdaptor → PositionRegistry to get TEL-equivalent LP weight.
-   - The snapshot call to calculate voting weight will return zero if positions are not staked on Telex
-   - Voting weight calculation is based on the total value of the liquidity position (both sides) and include the full range of positions whether they are in range or not.
-
-## Known Limitations:
-
-- voting weight is computed based solely on the TEL side of LP positions, agnostically to liquidity ranges. This means that the TELx rewards work differently from Uni V4 fees which align economic incentives for deeper liquidity positions which span a narrower range.
-
-- voting weight determination relies solely on the pool's current tick (ie onchain price), which is thus subject to liquidity conditions at snapshot time (vote instantiation). This may be unreliable, especially in low liquidity conditions. An oracle or trusted external price aggregator feed could be desirable if there are no liquidity guarantees.
-
-- liquidity provision timing attacks to alter voting weight are possible in theory, though somewhat mitigated by the timing of state snapshots (made at vote creation time).
-
-  - Voting weight calculation occurs in context of the block where the vote is created, so in order to capitalize an attacker must somehow gain awareness of votes slated to go live ahead of time. If so, the attacker can open large ephemeral liquidity positions and remove them after vote creation to effectively increase their weight.
-  - In such an attack however they take on risk of impermanent loss so long as their position is open, which could potentially be substantial losses of capital not worth the extra voting weight gained via attack. Further, if large liquidity positions are opened in suspicious context, the vote creation action can be simply delayed by the TelX council to dissuade the attacker by subjecting them to indefinite periods of impermanent loss. This may be an acceptable nuance of the spec
-
-- TEL contract position is stored in `telcoinPosition` but the position is just determined by sorting address numerically.
-
-  - Storing of TEL contract position requires manual tx from `SUPPORT_ROLE` which can provide incorrect params such as `TEL == address(0x0)`. This could instead be performed as part of a `beforeInitialize` v4 hook call to `TELxIncentiveHook` during `PoolManager::initialize()`
-
-todo:
-positions MUST be created via the PositionManager to enforce salt == tokenId; positions not created this way are not accepted
-subscribe can be called by approved in adition to token owner; transfers of the token result in an unsubscription so new owners must re subscribe
-subscribe() checks that LP is staked on TELx plugin: make call to stakingPlugin to check for stake
-rewards script must also factor in TELx stake since the hook will not be able to track stake changes onchain
-voting weight calculation uses total value of position not just TEL side (but still denominated in a TEL amount based on TEL price- requires conversion of the non-TEL side's value to TEL terms)
-voting weight call from snapshot should return zero if positions are not staked on TELx (check TELx staking plugin)
-fees should be tracked in the v4 hook itself on each modifyLiquidity, this makes fee data more visible & available for rewards script
-hook's rewards ledger could benefit from a block record a la TANIP-1 to keep tabs on the `lastRewardsBlock`. This could further be linked to the fee tracking, but since fee tracking is lazily updated it might not be worthwhile
+6. **Voting in Governance:** The LP connects to Snapshot. Snapshot's backend executes the custom strategy, which calculates their TEL-denominated voting power based on the total off-chain value of their subscribed positions at the proposal's snapshot block.

@@ -56,7 +56,7 @@ contract PositionRegistryTest is
     address public support = address(0xdeadbeef);
     address permit2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     // address encoding the enabled beforeInitialize, afterAddLiquidity, and beforeRemoveLiquidity hooks
-    address public hookAddress = 0x0000000000000000000000000000000000002a00;
+    address public hookAddress = 0x0000000000000000000000000000000000002500;
     
     int24 tickSpacing = 60;
     uint256 constant V4_SWAP = 0x10;
@@ -133,8 +133,8 @@ contract PositionRegistryTest is
         assertEq(address(telXIncentiveHook.registry()), address(positionRegistry));
         Hooks.Permissions memory permissions = telXIncentiveHook.getHookPermissions();
         assertTrue(permissions.beforeInitialize);
-        assertTrue(permissions.beforeAddLiquidity);
-        assertTrue(permissions.beforeRemoveLiquidity);
+        assertTrue(permissions.afterAddLiquidity);
+        assertTrue(permissions.afterRemoveLiquidity);
 
         assertEq(address(positionRegistry.telcoin()), address(tel));
         assertTrue(positionRegistry.hasRole(positionRegistry.UNI_HOOK_ROLE(), address(telXIncentiveHook)));

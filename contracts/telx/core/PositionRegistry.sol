@@ -17,9 +17,6 @@ import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {IPositionManager, PoolKey, PositionInfo} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
-// todo: update spec.md -> README.md and incorporate google doc to current markdown (update custom snapshot strategy spec too)
-// todo: add weight levers
-
 /**
  * @title Position Registry
  * @author Robriks 📯️📯️📯️.eth
@@ -158,7 +155,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /// @inheritdoc IPositionRegistry
-    function addOrUpdatePosition(uint256 tokenId, PoolId poolId, int128 liquidityDelta)
+    function addOrUpdatePosition(uint256 tokenId, PoolId poolId, int128 liquidityDelta, int128 feeGrowth0, int128 feeGrowth1)
         external
         onlyRole(UNI_HOOK_ROLE)
     {
@@ -200,7 +197,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             } catch {
                 // token is being burned; if subscribed retain ownership for subsequent untracking
                 if (!isTokenSubscribed(tokenId)) _setUntracked(tokenId);
-                _writeCheckpoint(tokenId, uint32(block.number), newLiquidity);
+                _writeCheckpoint(tokenId, uint32(block.number), newLiquidity, feeGrowth0, feeGrowth1);
                 return;
             }
         }
@@ -209,7 +206,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         
         // record in positions mapping and checkpoints list, await LP opt-in via `subscribe`
         _updatePosition(tokenId, tokenOwner, poolId, info.tickLower(), info.tickUpper(), newLiquidity, isNew);
-        _writeCheckpoint(tokenId, uint32(block.number), newLiquidity);
+        _writeCheckpoint(tokenId, uint32(block.number), newLiquidity, feeGrowth0, feeGrowth1);
     }
 
     function _updatePosition(uint256 tokenId, address newOwner, PoolId poolId, int24 tickLower, int24 tickUpper, uint128 newLiquidity, bool isNew) internal {
@@ -226,21 +223,14 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         emit PositionUpdated(tokenId, newOwner, poolId, tickLower, tickUpper, uint128(newLiquidity));
     }
 
-    function _writeCheckpoint(uint256 tokenId, uint32 checkpointBlock, uint128 newLiquidity) internal {
+    function _writeCheckpoint(uint256 tokenId, uint32 checkpointBlock, uint128 newLiquidity, int128 feeGrowth0, int128 feeGrowth1) internal {
         Position storage pos = positions[tokenId];
         PoolId poolId = pos.poolId;
-        pos.liquidityModifications.push(checkpointBlock, newLiquidity);
 
-        // tick initialization occurs immediately before adding liquidity, so fee growth can be read safely before addition
-        // tick deinitialization occurs after removing liquidity, so fee growth can be read safely before removal
-        (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128) = stateView.getFeeGrowthInside(
-            pos.poolId,
-            pos.tickLower,
-            pos.tickUpper
-        );
+        pos.liquidityModifications.push(checkpointBlock, newLiquidity);
         pos.feeGrowthCheckpoints[checkpointBlock] = FeeGrowthCheckpoint({
-            feeGrowthInside0X128: feeGrowthInside0X128,
-            feeGrowthInside1X128: feeGrowthInside1X128
+            feeGrowth0: feeGrowth0,
+            feeGrowth1: feeGrowth1
         });
 
         // update metadata for better searchability offchain
@@ -251,7 +241,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         metadata.lastCheckpoint = checkpointBlock;
         uint256 checkpointIndex = metadata.totalCheckpoints++;
 
-        emit Checkpoint(tokenId, poolId, checkpointIndex, feeGrowthInside0X128, feeGrowthInside1X128);
+        emit Checkpoint(tokenId, poolId, checkpointIndex, feeGrowth0, feeGrowth1);
     }
 
     /// @dev Mark a position as untracked because it was burned or not created via PositionManager
@@ -312,10 +302,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /// @inheritdoc IPositionRegistry
-    function handleBurn(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
-        Position storage pos = positions[tokenId];
-        // ownership information is retained during `beforeRemoveLiquidity` hook in burn contexts
-        _removeSubscription(tokenId, pos.owner);
+    function handleBurn(uint256 tokenId, address owner) external onlyRole(SUBSCRIBER_ROLE) {
+        _removeSubscription(tokenId, owner);
         _setUntracked(tokenId);
     }
 
@@ -369,8 +357,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         telcoin.safeTransferFrom(_msgSender(), address(this), totalAmount);
 
-        uint256 total = 0;
-        for (uint256 i = 0; i < lps.length; i++) {
+        uint256 total;
+        for (uint256 i; i < lps.length; ++i) {
             unclaimedRewards[lps[i]] += amounts[i];
             total += amounts[i];
         }
