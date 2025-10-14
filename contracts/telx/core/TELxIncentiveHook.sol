@@ -86,8 +86,8 @@ contract TELxIncentiveHook is BaseHook {
 
     /**
      * @notice Called before initializing a new pool
-     * @dev Passes the delta to the registry to record or update the LP’s position
-     * @param key The pool key (used to derive PoolId)
+     * @notice Must be called by the registry admin
+     * @dev Adds support for a pool and sets currency0 and currency1
      */
     function _beforeInitialize(
         address sender,
@@ -101,7 +101,7 @@ contract TELxIncentiveHook is BaseHook {
 
     /**
      * @notice Called after liquidity is added to a pool
-     * @dev Passes the delta to the registry to record or update the LP’s position
+     * @dev Passes the liquidity and fee growth deltas to the registry to be recorded
      * @param sender Address of the LP adding liquidity
      * @param key The pool key (used to derive PoolId)
      * @param params Liquidity modification parameters (including tick range and delta)
@@ -129,7 +129,7 @@ contract TELxIncentiveHook is BaseHook {
 
     /**
      * @notice Called after liquidity is removed from a pool
-     * @dev Updates or deletes position if liquidity reaches zero
+     * @dev Passes the liquidity and fee growth deltas to the registry to be recorded
      * @param sender Address of the LP removing liquidity
      * @param key The pool key
      * @param params Liquidity modification parameters (including tick range and delta)
