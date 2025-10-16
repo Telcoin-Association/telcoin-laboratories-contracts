@@ -5,53 +5,60 @@ import {ISubscriber} from "@uniswap/v4-periphery/src/interfaces/ISubscriber.sol"
 import {IPositionRegistry} from "../interfaces/IPositionRegistry.sol";
 import {PositionInfo} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import {IPositionManager} from "../interfaces/IPositionManager.sol";
+import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
 /**
  * @title TELxSubscriber
- * @author Amir M. Shirif
+ * @author Robriks 📯️📯️📯️.eth
  * @notice Implements ISubscriber to receive Uniswap v4 position transfer events
  * @dev https://docs.uniswap.org/contracts/v4/quickstart/subscriber
  */
-contract TELxSubscriber is ISubscriber {
+contract TELxSubscriber is ISubscriber {    
     IPositionRegistry public immutable registry;
     address public immutable positionManager;
+
+    error OnlyPositionManager();
+
+    modifier onlyPositionManager() {
+        if (msg.sender != positionManager) {
+            revert OnlyPositionManager();
+        }
+        _;
+    }
 
     constructor(IPositionRegistry _registry, address _positionManager) {
         registry = _registry;
         positionManager = _positionManager;
     }
 
-    /// @notice Notifies this contract that a tokenId has been transferred to a new subscriber
-    /// @dev Only callable by the PositionManager; triggers internal state update in the PositionRegistry
-    /// @param tokenId The NFT tokenId representing a Uniswap LP position
-    function notifySubscribe(uint256 tokenId, bytes memory) external override {
-        require(
-            msg.sender == positionManager,
-            "TELxSubscriber: Caller is not Position Manager"
-        );
+    /// @notice Notifies registry that an LP token is being subscribed for the first time
+    /// @dev Only callable by the PositionManager to trigger internal state update in the PositionRegistry
+    function notifySubscribe(uint256 tokenId, bytes memory) external override onlyPositionManager {
         registry.handleSubscribe(tokenId);
     }
 
-    /// @notice No-op for unsubscribe events
-    /// @dev Required to satisfy ISubscriber but unused in this implementation
-    function notifyUnsubscribe(uint256) external pure override {}
+    /// @notice Notifies registry during unsubscriptions and LP token transfers
+    /// @dev Deletes registry's stored subscription, requiring LPs to resubscribe in the case of transfers
+    function notifyUnsubscribe(uint256 tokenId) external override onlyPositionManager {
+        registry.handleUnsubscribe(tokenId);
+    }
 
-    /// @notice No-op for liquidity modification events
-    /// @dev Required to satisfy ISubscriber but unused in this implementation
+    /// @notice No-op as liquidity modifications are recorded for all positions
     function notifyModifyLiquidity(
-        uint256,
+        uint256 tokenId,
         int256,
         BalanceDelta
-    ) external pure override {}
+    ) external override onlyPositionManager {}
 
-    /// @notice No-op for burn events
-    /// @dev Required to satisfy ISubscriber but unused in this implementation
+    /// @notice Notifies registry of position burn
+    /// @dev Deletes registry's stored subscription and permanently marks its position burned
     function notifyBurn(
-        uint256,
-        address,
+        uint256 tokenId,
+        address owner,
         PositionInfo,
         uint256,
         BalanceDelta
-    ) external pure override {}
+    ) external override onlyPositionManager {
+        registry.handleBurn(tokenId, owner);
+    }
 }

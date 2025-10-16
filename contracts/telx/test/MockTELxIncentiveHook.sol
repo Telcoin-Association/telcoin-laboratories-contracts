@@ -6,14 +6,15 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {IPositionRegistry} from "../interfaces/IPositionRegistry.sol";
 import {IMsgSender} from "../interfaces/IMsgSender.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import { TELxIncentiveHook } from "../core/TELxIncentiveHook.sol";
 
 contract MockTELxIncentiveHook is BaseHook {
     using PoolIdLibrary for PoolKey;
+    using BalanceDeltaLibrary for BalanceDelta;
 
     event SwapOccurredWithTick(
         PoolId indexed poolId,
@@ -42,12 +43,12 @@ contract MockTELxIncentiveHook is BaseHook {
     {
         return
             Hooks.Permissions({
-                beforeInitialize: false,
+                beforeInitialize: true,
                 afterInitialize: false,
-                beforeAddLiquidity: true,
-                afterAddLiquidity: false,
-                beforeRemoveLiquidity: true,
-                afterRemoveLiquidity: false,
+                beforeAddLiquidity: false,
+                afterAddLiquidity: true,
+                beforeRemoveLiquidity: false,
+                afterRemoveLiquidity: true,
                 beforeSwap: false,
                 afterSwap: true,
                 beforeDonate: false,
@@ -59,64 +60,60 @@ contract MockTELxIncentiveHook is BaseHook {
             });
     }
 
-    function _beforeAddLiquidity(
-        address,
-        PoolKey calldata key,
-        IPoolManager.ModifyLiquidityParams calldata params,
-        bytes calldata
-    ) internal override returns (bytes4) {
-        uint256 tokenId = uint256(uint160(bytes20(params.salt)));
-
-        registry.addOrUpdatePosition(
-            tokenId,
-            key.toId(),
-            int128(params.liquidityDelta)
-        );
-
-        return BaseHook.beforeAddLiquidity.selector;
-    }
-
-    function _beforeRemoveLiquidity(
-        address,
-        PoolKey calldata key,
-        IPoolManager.ModifyLiquidityParams calldata params,
-        bytes calldata
-    ) internal override returns (bytes4) {
-        uint256 tokenId = uint256(uint160(bytes20(params.salt)));
-
-        registry.addOrUpdatePosition(
-            tokenId,
-            key.toId(),
-            int128(params.liquidityDelta)
-        );
-
-        return BaseHook.beforeRemoveLiquidity.selector;
-    }
-
-    function _afterSwap(
+    function _beforeInitialize(
         address sender,
         PoolKey calldata key,
-        IPoolManager.SwapParams calldata,
+        uint160
+    ) internal virtual override returns (bytes4) {
+        registry.initialize(sender, key);
+
+        return BaseHook.afterInitialize.selector;
+    }
+
+    function _afterAddLiquidity(
+        address,
+        PoolKey calldata key,
+        IPoolManager.ModifyLiquidityParams calldata params,
         BalanceDelta delta,
+        BalanceDelta feesAccrued,
         bytes calldata
-    ) internal override returns (bytes4, int128) {
-        if (registry.validPool(key.toId())) {
-            (, int24 tick, , ) = StateLibrary.getSlot0(poolManager, key.toId());
+    ) internal override returns (bytes4, BalanceDelta) {
+        uint256 tokenId = uint256(params.salt);
 
-            emit SwapOccurredWithTick(
-                key.toId(),
-                sender,
-                delta.amount0(),
-                delta.amount1(),
-                tick
-            );
-        }
+        registry.addOrUpdatePosition(
+            tokenId,
+            key.toId(),
+            int128(params.liquidityDelta),
+            feesAccrued.amount0(),
+            feesAccrued.amount1()
+        );
 
-        return (BaseHook.afterSwap.selector, 0);
+        return (BaseHook.afterAddLiquidity.selector, delta);
+    }
+
+    function _afterRemoveLiquidity(
+        address,
+        PoolKey calldata key,
+        IPoolManager.ModifyLiquidityParams calldata params,
+        BalanceDelta delta,
+        BalanceDelta feesAccrued,
+        bytes calldata
+    ) internal override returns (bytes4, BalanceDelta) {
+        uint256 tokenId = uint256(params.salt);
+
+        registry.addOrUpdatePosition(
+            tokenId,
+            key.toId(),
+            int128(params.liquidityDelta),
+            feesAccrued.amount0(),
+            feesAccrued.amount1()
+        );
+
+        return (BaseHook.afterRemoveLiquidity.selector, delta);
     }
 
     function _resolveUser(address sender) internal view returns (address) {
-        if (registry.activeRouters(sender)) {
+        if (registry.isActiveRouter(sender)) {
             try IMsgSender(sender).msgSender() returns (address user) {
                 return user;
             } catch {
@@ -125,4 +122,14 @@ contract MockTELxIncentiveHook is BaseHook {
         }
         return sender;
     }
+}
+
+contract TELxIncentiveHookDeployable is TELxIncentiveHook {
+    constructor(
+        IPoolManager _poolManager,
+        address _positionManager,
+        IPositionRegistry _registry
+    ) TELxIncentiveHook(_poolManager, _positionManager, _registry) {}
+
+    function validateHookAddress(BaseHook _this) internal pure override {}
 }
