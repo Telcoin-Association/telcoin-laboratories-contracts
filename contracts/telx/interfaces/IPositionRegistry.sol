@@ -63,7 +63,7 @@ interface IPositionRegistry {
     event PoolInitialized(PoolKey indexed poolKey);
 
     /// @notice Emitted when the weight configuration is updated
-    event WeightsConfigured(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight);
+    event WeightsConfigured(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight, uint256 passiveWeight);
 
     /// @notice Emitted at each liquidity modification for offchain consumption
     event Checkpoint(
@@ -203,7 +203,7 @@ interface IPositionRegistry {
     function getUnclaimedRewards(address user) external view returns (uint256);
 
     /// @notice Configures JIT | Active | Passive lifetimes and weights for offchain consumption
-    function configureWeights(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight) external;
+    function configureWeights(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight, uint256 passiveWeight) external;
 
     /**
      * @notice Admin function to recover ERC20 tokens sent to contract in error

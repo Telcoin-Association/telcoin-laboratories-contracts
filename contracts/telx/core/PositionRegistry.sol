@@ -36,13 +36,13 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     uint256 constant MAX_SUBSCRIPTIONS = 100;
     uint256 constant MAX_SUBSCRIBED = 1_000;
 
-    /// @dev JIT lifetime is always one block and passive weight is always 100%
+    /// @dev JIT lifetime is always one block
     uint256 public constant JIT_LIFETIME = 1;
-    uint256 public constant PASSIVE_WEIGHT = 100;
     /// @notice Configurable levers for JIT | active | passive LP reward weighting
     uint256 public MIN_PASSIVE_LIFETIME;
     uint256 public JIT_WEIGHT;
     uint256 public ACTIVE_WEIGHT;
+    uint256 public PASSIVE_WEIGHT;
 
     mapping(address => bool) public routers;
     mapping(PoolId => PoolKey) public initializedPoolKeys;
@@ -75,6 +75,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         MIN_PASSIVE_LIFETIME = 43_200;
         JIT_WEIGHT = 0;
         ACTIVE_WEIGHT = 25;
+        PASSIVE_WEIGHT = 100;
     }
 
     /// @inheritdoc IPositionRegistry
@@ -396,7 +397,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /// @inheritdoc IPositionRegistry
-    function configureWeights(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight)
+    function configureWeights(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight, uint256 passiveWeight)
         external
         onlyRole(SUPPORT_ROLE)
     {
@@ -404,8 +405,9 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         MIN_PASSIVE_LIFETIME = minPassiveLifetime;
         JIT_WEIGHT = jitWeight;
         ACTIVE_WEIGHT = activeWeight;
+        PASSIVE_WEIGHT = passiveWeight;
 
-        emit WeightsConfigured(minPassiveLifetime, jitWeight, activeWeight);
+        emit WeightsConfigured(minPassiveLifetime, jitWeight, activeWeight, passiveWeight);
     }
 
     /// @inheritdoc IPositionRegistry
