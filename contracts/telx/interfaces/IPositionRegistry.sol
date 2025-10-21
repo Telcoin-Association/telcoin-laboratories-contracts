@@ -78,10 +78,7 @@ interface IPositionRegistry {
     event Subscribed(uint256 indexed tokenId, address indexed owner);
 
     /// @notice Emitted when a subscription is removed
-    event Unsubscribed(
-        uint256 indexed tokenId,
-        address indexed owner
-    );
+    event Unsubscribed(uint256 indexed tokenId, address indexed owner);
 
     /**
      * @notice Updates the stored index of TEL in a specific Uniswap V4 pool.
@@ -141,20 +138,16 @@ interface IPositionRegistry {
      * @notice Computes currency0 & currency1 amounts for given liquidity at current tick price
      * @dev Exposes Uniswap V3/V4 concentrated liquidity math publicly for TELx frontend use
      */
-    function getAmountsForLiquidity(
-        PoolId poolId,
-        uint128 liquidity,
-        int24 tickLower,
-        int24 tickUpper
-    ) external view returns (uint256 amount0, uint256 amount1, uint160 sqrtPriceX96);
+    function getAmountsForLiquidity(PoolId poolId, uint128 liquidity, int24 tickLower, int24 tickUpper)
+        external
+        view
+        returns (uint256 amount0, uint256 amount1, uint160 sqrtPriceX96);
 
     /// @notice Returns position metadata for a given tokenId
-    function getPosition(uint256 tokenId) external view returns (
-        address owner,
-        PoolId poolId,
-        int24 tickLower,
-        int24 tickUpper
-    );
+    function getPosition(uint256 tokenId)
+        external
+        view
+        returns (address owner, PoolId poolId, int24 tickLower, int24 tickUpper);
 
     /// @notice Returns position with more granular multipool data for external consumption
     function getPositionDetails(uint256 tokenId) external view returns (PositionDetails memory);
@@ -203,7 +196,12 @@ interface IPositionRegistry {
     function getUnclaimedRewards(address user) external view returns (uint256);
 
     /// @notice Configures JIT | Active | Passive lifetimes and weights for offchain consumption
-    function configureWeights(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight, uint256 passiveWeight) external;
+    function configureWeights(
+        uint256 minPassiveLifetime,
+        uint256 jitWeight,
+        uint256 activeWeight,
+        uint256 passiveWeight
+    ) external;
 
     /**
      * @notice Admin function to recover ERC20 tokens sent to contract in error

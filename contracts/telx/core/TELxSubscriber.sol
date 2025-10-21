@@ -13,7 +13,7 @@ import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionMa
  * @notice Implements ISubscriber to receive Uniswap v4 position transfer events
  * @dev https://docs.uniswap.org/contracts/v4/quickstart/subscriber
  */
-contract TELxSubscriber is ISubscriber {    
+contract TELxSubscriber is ISubscriber {
     IPositionRegistry public immutable registry;
     address public immutable positionManager;
 
@@ -44,21 +44,15 @@ contract TELxSubscriber is ISubscriber {
     }
 
     /// @notice No-op as liquidity modifications are recorded for all positions
-    function notifyModifyLiquidity(
-        uint256 tokenId,
-        int256,
-        BalanceDelta
-    ) external override onlyPositionManager {}
+    function notifyModifyLiquidity(uint256 tokenId, int256, BalanceDelta) external override onlyPositionManager {}
 
     /// @notice Notifies registry of position burn
     /// @dev Deletes registry's stored subscription and permanently marks its position burned
-    function notifyBurn(
-        uint256 tokenId,
-        address owner,
-        PositionInfo,
-        uint256,
-        BalanceDelta
-    ) external override onlyPositionManager {
+    function notifyBurn(uint256 tokenId, address owner, PositionInfo, uint256, BalanceDelta)
+        external
+        override
+        onlyPositionManager
+    {
         registry.handleBurn(tokenId, owner);
     }
 }
