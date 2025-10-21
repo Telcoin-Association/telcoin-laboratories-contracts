@@ -74,8 +74,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         // initial configuration uses ~1 day in 2s blocks, weights 0%/25%/100%
         MIN_PASSIVE_LIFETIME = 43_200;
         JIT_WEIGHT = 0;
-        ACTIVE_WEIGHT = 25;
-        PASSIVE_WEIGHT = 100;
+        ACTIVE_WEIGHT = 2_500;
+        PASSIVE_WEIGHT = 10_000;
     }
 
     /// @inheritdoc IPositionRegistry
@@ -401,7 +401,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         external
         onlyRole(SUPPORT_ROLE)
     {
-        require(jitWeight <= 100 && activeWeight <= 100, "PositionRegistry: Weights must be between 0 and 100");
+        require(jitWeight <= 10_000 && activeWeight <= 10_000 && passiveWeight <= 10_000, "PositionRegistry: Weights must be between 0 and 10000 bps");
+        require(jitWeight + activeWeight + passiveWeight == 10_000, "PositionRegistry: Weights must total 100%");
         MIN_PASSIVE_LIFETIME = minPassiveLifetime;
         JIT_WEIGHT = jitWeight;
         ACTIVE_WEIGHT = activeWeight;
