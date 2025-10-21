@@ -46,11 +46,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     mapping(address => bool) public routers;
     mapping(PoolId => PoolKey) public initializedPoolKeys;
-    
+
     /// @notice Mapping to track all positions associated with supported pools
     mapping(uint256 => Position) public positions;
     mapping(uint256 => CheckpointMetadata) public positionMetadata;
-    
+
     /// @notice The current set of active subscriptions participating in the TELxIncentives program
     address[] public subscribed;
     mapping(address => uint256) private subscribedIndex;
@@ -74,8 +74,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         // initial configuration uses ~1 day in 2s blocks, weights 0%/25%/100%
         MIN_PASSIVE_LIFETIME = 43_200;
         JIT_WEIGHT = 0;
-        ACTIVE_WEIGHT = 25;
-        PASSIVE_WEIGHT = 100;
+        ACTIVE_WEIGHT = 2_500;
+        PASSIVE_WEIGHT = 10_000;
     }
 
     /// @inheritdoc IPositionRegistry
@@ -90,12 +90,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /// @inheritdoc IPositionRegistry
-    function getPosition(uint256 tokenId) external view returns (
-        address owner,
-        PoolId poolId,
-        int24 tickLower,
-        int24 tickUpper
-    ) {
+    function getPosition(uint256 tokenId)
+        external
+        view
+        returns (address owner, PoolId poolId, int24 tickLower, int24 tickUpper)
+    {
         Position storage pos = positions[tokenId];
         return (pos.owner, pos.poolId, pos.tickLower, pos.tickUpper);
     }
@@ -138,28 +137,27 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /// @inheritdoc IPositionRegistry
-    function getAmountsForLiquidity(
-        PoolId poolId,
-        uint128 liquidity,
-        int24 tickLower,
-        int24 tickUpper
-    ) public view returns (uint256 amount0, uint256 amount1, uint160 sqrtPriceX96) {
+    function getAmountsForLiquidity(PoolId poolId, uint128 liquidity, int24 tickLower, int24 tickUpper)
+        public
+        view
+        returns (uint256 amount0, uint256 amount1, uint160 sqrtPriceX96)
+    {
         (sqrtPriceX96,,,) = stateView.getSlot0(poolId);
         (amount0, amount1) = LiquidityAmounts.getAmountsForLiquidity(
-            sqrtPriceX96, 
-            TickMath.getSqrtPriceAtTick(tickLower),
-            TickMath.getSqrtPriceAtTick(tickUpper),
-            liquidity
+            sqrtPriceX96, TickMath.getSqrtPriceAtTick(tickLower), TickMath.getSqrtPriceAtTick(tickUpper), liquidity
         );
 
         return (amount0, amount1, sqrtPriceX96);
     }
 
     /// @inheritdoc IPositionRegistry
-    function addOrUpdatePosition(uint256 tokenId, PoolId poolId, int128 liquidityDelta, int128 feeGrowth0, int128 feeGrowth1)
-        external
-        onlyRole(UNI_HOOK_ROLE)
-    {
+    function addOrUpdatePosition(
+        uint256 tokenId,
+        PoolId poolId,
+        int128 liquidityDelta,
+        int128 feeGrowth0,
+        int128 feeGrowth1
+    ) external onlyRole(UNI_HOOK_ROLE) {
         // Does not fail on invalid poolId, just skips update
         if (!validPool(poolId)) {
             return;
@@ -204,19 +202,27 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         }
 
         (, PositionInfo info) = positionManager.getPoolAndPositionInfo(tokenId);
-        
+
         // record in positions mapping and checkpoints list, await LP opt-in via `subscribe`
         _updatePosition(tokenId, tokenOwner, poolId, info.tickLower(), info.tickUpper(), newLiquidity, isNew);
         _writeCheckpoint(tokenId, uint32(block.number), newLiquidity, feeGrowth0, feeGrowth1);
     }
 
-    function _updatePosition(uint256 tokenId, address newOwner, PoolId poolId, int24 tickLower, int24 tickUpper, uint128 newLiquidity, bool isNew) internal {
+    function _updatePosition(
+        uint256 tokenId,
+        address newOwner,
+        PoolId poolId,
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 newLiquidity,
+        bool isNew
+    ) internal {
         if (isNew) {
             positions[tokenId].owner = newOwner;
             positions[tokenId].poolId = poolId;
             positions[tokenId].tickLower = tickLower;
             positions[tokenId].tickUpper = tickUpper;
-        } else {            
+        } else {
             positions[tokenId].owner = newOwner;
             positions[tokenId].poolId = poolId;
         }
@@ -224,15 +230,19 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         emit PositionUpdated(tokenId, newOwner, poolId, tickLower, tickUpper, uint128(newLiquidity));
     }
 
-    function _writeCheckpoint(uint256 tokenId, uint32 checkpointBlock, uint128 newLiquidity, int128 feeGrowth0, int128 feeGrowth1) internal {
+    function _writeCheckpoint(
+        uint256 tokenId,
+        uint32 checkpointBlock,
+        uint128 newLiquidity,
+        int128 feeGrowth0,
+        int128 feeGrowth1
+    ) internal {
         Position storage pos = positions[tokenId];
         PoolId poolId = pos.poolId;
 
         pos.liquidityModifications.push(checkpointBlock, newLiquidity);
-        pos.feeGrowthCheckpoints[checkpointBlock] = FeeGrowthCheckpoint({
-            feeGrowth0: feeGrowth0,
-            feeGrowth1: feeGrowth1
-        });
+        pos.feeGrowthCheckpoints[checkpointBlock] =
+            FeeGrowthCheckpoint({feeGrowth0: feeGrowth0, feeGrowth1: feeGrowth1});
 
         // update metadata for better searchability offchain
         CheckpointMetadata storage metadata = positionMetadata[tokenId];
@@ -274,12 +284,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     function handleSubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
         Position storage pos = positions[tokenId];
         require(validPool(pos.poolId), "PositionRegistry: Invalid pool");
-        require(pos.owner != UNTRACKED, "PositionRegistry: Only positions created via PositionManager can be subscribed");
+        require(
+            pos.owner != UNTRACKED, "PositionRegistry: Only positions created via PositionManager can be subscribed"
+        );
 
         // approved may also initiate subscribe flow but the token owner is counted for subscription anyway
         address tokenOwner = IERC721(address(positionManager)).ownerOf(tokenId);
         // `pos.owner` may be stale since ownership ledger is only updated during liquidity modifications
-        if (pos.owner != tokenOwner) _updatePosition(tokenId, tokenOwner, pos.poolId, pos.tickLower, pos.tickUpper, _getLiquidityLast(tokenId), false);
+        if (pos.owner != tokenOwner) {
+            _updatePosition(
+                tokenId, tokenOwner, pos.poolId, pos.tickLower, pos.tickUpper, _getLiquidityLast(tokenId), false
+            );
+        }
 
         uint256[] storage ownerSubscriptions = subscriptions[tokenOwner];
         require(ownerSubscriptions.length < MAX_SUBSCRIPTIONS, "PositionRegistry: Max subscriptions reached");
@@ -313,9 +329,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @param tokenId The identifier of the position to remove.
      * @param owner The address of the LP whose position is being removed.
      */
-    function _removeSubscription(uint256 tokenId, address owner)
-        internal
-    {
+    function _removeSubscription(uint256 tokenId, address owner) internal {
         uint256[] storage list = subscriptions[owner];
         uint256 len = list.length;
         for (uint256 i; i < len; ++i) {
@@ -389,7 +403,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     /// @inheritdoc IPositionRegistry
     function initialize(address sender, PoolKey calldata key) external onlyRole(UNI_HOOK_ROLE) {
-        require(hasRole(DEFAULT_ADMIN_ROLE, _resolveUser(sender)), "PositionRegistry: Only admin can initialize pools with this hook");
+        require(
+            hasRole(DEFAULT_ADMIN_ROLE, _resolveUser(sender)),
+            "PositionRegistry: Only admin can initialize pools with this hook"
+        );
         require(!validPool(key.toId()), "PositionRegistry: Pool already initialized");
         initializedPoolKeys[key.toId()] = key;
 
@@ -397,11 +414,17 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     }
 
     /// @inheritdoc IPositionRegistry
-    function configureWeights(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight, uint256 passiveWeight)
-        external
-        onlyRole(SUPPORT_ROLE)
-    {
-        require(jitWeight <= 100 && activeWeight <= 100, "PositionRegistry: Weights must be between 0 and 100");
+    function configureWeights(
+        uint256 minPassiveLifetime,
+        uint256 jitWeight,
+        uint256 activeWeight,
+        uint256 passiveWeight
+    ) external onlyRole(SUPPORT_ROLE) {
+        require(
+            jitWeight <= 10_000 && activeWeight <= 10_000 && passiveWeight <= 10_000,
+            "PositionRegistry: Weights must be between 0 and 10000 bps"
+        );
+        require(jitWeight + activeWeight + passiveWeight == 10_000, "PositionRegistry: Weights must total 100%");
         MIN_PASSIVE_LIFETIME = minPassiveLifetime;
         JIT_WEIGHT = jitWeight;
         ACTIVE_WEIGHT = activeWeight;

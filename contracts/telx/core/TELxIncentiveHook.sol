@@ -21,11 +21,7 @@ contract TELxIncentiveHook is BaseHook {
 
     /// @notice Emitted during every swap, used for off-chain range validation
     event SwapOccurredWithTick(
-        PoolId indexed poolId,
-        address indexed trader,
-        int256 amount0,
-        int256 amount1,
-        int24 currentTick
+        PoolId indexed poolId, address indexed trader, int256 amount0, int256 amount1, int24 currentTick
     );
 
     /// @notice Registry used to store and track liquidity positions
@@ -33,10 +29,7 @@ contract TELxIncentiveHook is BaseHook {
     address public immutable positionManager;
 
     modifier onlyPositionManager(address sender) {
-        require(
-            sender == positionManager,
-            "TELxIncentiveHook: Caller is not Position Manager"
-        );
+        require(sender == positionManager, "TELxIncentiveHook: Caller is not Position Manager");
         _;
     }
 
@@ -46,11 +39,9 @@ contract TELxIncentiveHook is BaseHook {
      * @param _positionManager Address of the position manager used to track LP data
      * @param _registry Address of the PositionRegistry used to track LP metadata
      */
-    constructor(
-        IPoolManager _poolManager,
-        address _positionManager,
-        IPositionRegistry _registry
-    ) BaseHook(_poolManager) {
+    constructor(IPoolManager _poolManager, address _positionManager, IPositionRegistry _registry)
+        BaseHook(_poolManager)
+    {
         registry = _registry;
         positionManager = _positionManager;
     }
@@ -59,29 +50,23 @@ contract TELxIncentiveHook is BaseHook {
      * @notice Defines which Uniswap V4 hooks this contract implements
      * @dev Only beforeInitialize, afterAddLiquidity and afterRemoveLiquidity are enabled
      */
-    function getHookPermissions()
-        public
-        pure
-        override
-        returns (Hooks.Permissions memory)
-    {
-        return
-            Hooks.Permissions({
-                beforeInitialize: true,
-                afterInitialize: false,
-                beforeAddLiquidity: false,
-                afterAddLiquidity: true,
-                beforeRemoveLiquidity: false,
-                afterRemoveLiquidity: true,
-                beforeSwap: false,
-                afterSwap: false,
-                beforeDonate: false,
-                afterDonate: false,
-                beforeSwapReturnDelta: false,
-                afterSwapReturnDelta: false,
-                afterAddLiquidityReturnDelta: false,
-                afterRemoveLiquidityReturnDelta: false
-            });
+    function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
+        return Hooks.Permissions({
+            beforeInitialize: true,
+            afterInitialize: false,
+            beforeAddLiquidity: false,
+            afterAddLiquidity: true,
+            beforeRemoveLiquidity: false,
+            afterRemoveLiquidity: true,
+            beforeSwap: false,
+            afterSwap: false,
+            beforeDonate: false,
+            afterDonate: false,
+            beforeSwapReturnDelta: false,
+            afterSwapReturnDelta: false,
+            afterAddLiquidityReturnDelta: false,
+            afterRemoveLiquidityReturnDelta: false
+        });
     }
 
     /**
@@ -89,11 +74,13 @@ contract TELxIncentiveHook is BaseHook {
      * @notice Must be called by the registry admin
      * @dev Adds support for a pool and sets currency0 and currency1
      */
-    function _beforeInitialize(
-        address sender,
-        PoolKey calldata key,
-        uint160
-    ) internal virtual override onlyPoolManager() returns (bytes4) {
+    function _beforeInitialize(address sender, PoolKey calldata key, uint160)
+        internal
+        virtual
+        override
+        onlyPoolManager
+        returns (bytes4)
+    {
         registry.initialize(sender, key);
 
         return BaseHook.beforeInitialize.selector;
@@ -117,11 +104,7 @@ contract TELxIncentiveHook is BaseHook {
         uint256 tokenId = uint256(params.salt);
 
         registry.addOrUpdatePosition(
-            tokenId,
-            key.toId(),
-            int128(params.liquidityDelta),
-            feesAccrued.amount0(),
-            feesAccrued.amount1()
+            tokenId, key.toId(), int128(params.liquidityDelta), feesAccrued.amount0(), feesAccrued.amount1()
         );
 
         return (BaseHook.afterAddLiquidity.selector, delta);
@@ -142,15 +125,10 @@ contract TELxIncentiveHook is BaseHook {
         BalanceDelta feesAccrued,
         bytes calldata
     ) internal override onlyPositionManager(sender) returns (bytes4, BalanceDelta) {
-
         uint256 tokenId = uint256(params.salt);
 
         registry.addOrUpdatePosition(
-            tokenId,
-            key.toId(),
-            int128(params.liquidityDelta),
-            feesAccrued.amount0(),
-            feesAccrued.amount1()
+            tokenId, key.toId(), int128(params.liquidityDelta), feesAccrued.amount0(), feesAccrued.amount1()
         );
 
         return (BaseHook.afterRemoveLiquidity.selector, delta);
