@@ -19,11 +19,6 @@ contract TELxIncentiveHook is BaseHook {
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
 
-    /// @notice Emitted during every swap, used for off-chain range validation
-    event SwapOccurredWithTick(
-        PoolId indexed poolId, address indexed trader, int256 amount0, int256 amount1, int24 currentTick
-    );
-
     /// @notice Registry used to store and track liquidity positions
     IPositionRegistry public immutable registry;
     address public immutable positionManager;
