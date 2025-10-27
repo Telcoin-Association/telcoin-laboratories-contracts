@@ -50,7 +50,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     mapping(uint256 => CheckpointMetadata) public positionMetadata;
 
     /// @notice The current set of active subscriptions participating in the TELxIncentives program
-    address[] public subscribed;
+    address[] private subscribed;
     mapping(address => uint256) private subscribedIndex;
     mapping(address => uint256[]) public subscriptions;
     mapping(address => bool) public isSubscribed;

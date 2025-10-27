@@ -407,7 +407,7 @@ contract PositionRegistryTest is
         // after subscribing the position should be reregistered
         assertTrue(positionRegistry.getSubscriptions(support).length == 1);
         assertTrue(positionRegistry.getSubscribed().length == 1);
-        assertEq(positionRegistry.subscribed(0), support);
+        assertEq(positionRegistry.getSubscribed()[0], support);
     }
 
     function test_swap(int24 range, uint128 liquidity, uint128 amountIn, bool zeroForOne) public {
