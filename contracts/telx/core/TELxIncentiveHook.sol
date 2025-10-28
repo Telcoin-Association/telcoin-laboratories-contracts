@@ -7,6 +7,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {IPositionRegistry} from "../interfaces/IPositionRegistry.sol";
 
 /**
@@ -96,7 +97,7 @@ contract TELxIncentiveHook is BaseHook {
     function _afterAddLiquidity(
         address sender,
         PoolKey calldata key,
-        IPoolManager.ModifyLiquidityParams calldata params,
+        ModifyLiquidityParams calldata params,
         BalanceDelta delta,
         BalanceDelta feesAccrued,
         bytes calldata
@@ -120,7 +121,7 @@ contract TELxIncentiveHook is BaseHook {
     function _afterRemoveLiquidity(
         address sender,
         PoolKey calldata key,
-        IPoolManager.ModifyLiquidityParams calldata params,
+        ModifyLiquidityParams calldata params,
         BalanceDelta delta,
         BalanceDelta feesAccrued,
         bytes calldata
