@@ -245,12 +245,24 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         Position storage pos = positions[tokenId];
         PoolId poolId = pos.poolId;
 
+        FeeGrowthCheckpoint memory lastGrowth = pos.feeGrowthCheckpoints[checkpointBlock];
         uint256 lengthBefore = Checkpoints.length(pos.liquidityModifications);
         // for multiple liquidity modifications within one block, overwrite with latest information
         Checkpoints.push(pos.liquidityModifications, checkpointBlock, newLiquidity);
         uint256 lengthAfter = Checkpoints.length(pos.liquidityModifications);
+        
+        // sum actual fee growth within the block when overwriting
+        int128 actualGrowth0;
+        int128 actualGrowth1;
+        if (lengthAfter == lengthBefore) {
+            actualGrowth0 = lastGrowth.feeGrowth0 + feeGrowth0;
+            actualGrowth1 = lastGrowth.feeGrowth1 + feeGrowth1;
+        } else {
+            actualGrowth0 = feeGrowth0;
+            actualGrowth1 = feeGrowth1;
+        }
         pos.feeGrowthCheckpoints[checkpointBlock] =
-            FeeGrowthCheckpoint({feeGrowth0: feeGrowth0, feeGrowth1: feeGrowth1});
+            FeeGrowthCheckpoint({feeGrowth0: actualGrowth0, feeGrowth1: actualGrowth1});
 
         // update metadata for better searchability offchain
         CheckpointMetadata storage metadata = positionMetadata[tokenId];
