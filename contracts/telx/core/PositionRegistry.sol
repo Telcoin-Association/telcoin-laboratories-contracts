@@ -118,7 +118,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     function _getLiquidityLast(uint256 tokenId) internal view returns (uint128) {
         Position storage pos = positions[tokenId];
-        uint256 len = Checkpoints.length(pos.liquidityModifications);//.length();
+        uint256 len = Checkpoints.length(pos.liquidityModifications); //.length();
         if (len == 0) return 0;
 
         return uint128(Checkpoints.latest(pos.liquidityModifications));
@@ -199,6 +199,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             }
         }
 
+        // clear subscriptions that dip below 1bps share of the pool's total liquidity
+        if (isTokenSubscribed(tokenId) && !_meetsSubscriptionThreshold(poolId, newLiquidity)) {
+            _removeSubscription(tokenId, tokenOwner);
+        }
+
         (, PositionInfo info) = positionManager.getPoolAndPositionInfo(tokenId);
 
         // record in positions mapping and checkpoints list, await LP opt-in via `subscribe`
@@ -251,15 +256,30 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             metadata.firstCheckpoint = checkpointBlock;
         }
 
-        // if `lastCheckpoint == checkpointBlock` this is intrablock JIT; skip SSTORE to save gas 
+        // if `lastCheckpoint == checkpointBlock` this is intrablock JIT; skip SSTORE to save gas
         if (metadata.lastCheckpoint != checkpointBlock) metadata.lastCheckpoint = checkpointBlock;
         // similarly, if the existing checkpoint was overwritten, skip incrementing total
         if (lengthAfter > lengthBefore) metadata.totalCheckpoints++;
 
         uint256 checkpointIndex = lengthAfter - 1;
-        
+
         // for intrablock JIT liquidity modifications, this reuses + re-emits cached index
         emit Checkpoint(tokenId, poolId, checkpointIndex, feeGrowth0, feeGrowth1);
+    }
+
+    /**
+     * @dev Checks if a position meets the minimum liquidity threshold for subscription.
+     * Threshold is 1bps of the pool's total liquidity.
+     */
+    function _meetsSubscriptionThreshold(PoolId poolId, uint128 positionLiquidity) internal view returns (bool) {
+        if (positionLiquidity == 0) return false;
+
+        // if pool is very small, any liquidity amount is accepted for subscription
+        uint128 totalLiquidity = stateView.getLiquidity(poolId);
+        if (totalLiquidity <= 10_000) return true;
+
+        uint128 subscriptionThreshold = totalLiquidity / 10_000;
+        return positionLiquidity >= subscriptionThreshold;
     }
 
     /// @dev Mark a position as untracked because it was burned or not created via PositionManager
@@ -295,13 +315,16 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         );
         require(validPool(pos.poolId), "PositionRegistry: Invalid pool");
 
+        uint128 currentLiquidity = _getLiquidityLast(tokenId);
+        require(
+            _meetsSubscriptionThreshold(pos.poolId, currentLiquidity), "PositionRegistry: Liquidity below threshold"
+        );
+
         // approved may also initiate subscribe flow but the token owner is counted for subscription anyway
         address tokenOwner = IERC721(address(positionManager)).ownerOf(tokenId);
         // `pos.owner` may be stale since ownership ledger is only updated during liquidity modifications
         if (pos.owner != tokenOwner) {
-            _updatePosition(
-                tokenId, tokenOwner, pos.poolId, pos.tickLower, pos.tickUpper, _getLiquidityLast(tokenId), false
-            );
+            _updatePosition(tokenId, tokenOwner, pos.poolId, pos.tickLower, pos.tickUpper, currentLiquidity, false);
         }
 
         uint256[] storage ownerSubscriptions = subscriptions[tokenOwner];
