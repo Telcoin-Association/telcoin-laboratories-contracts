@@ -32,7 +32,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     /// @dev Marks positions either burned or not created via PositionManager
     address constant UNTRACKED = address(type(uint160).max);
     uint256 constant MAX_SUBSCRIPTIONS = 100;
-    uint256 constant MAX_SUBSCRIBED = 1_000;
+    uint256 constant MAX_SUBSCRIBED = 50_000;
 
     /// @dev JIT lifetime is always one block
     uint256 public constant JIT_LIFETIME = 1;
@@ -54,6 +54,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     mapping(address => uint256) private subscribedIndex;
     mapping(address => uint256[]) public subscriptions;
     mapping(address => bool) public isSubscribed;
+    mapping(uint256 => bool) public isTokenSubscribed;
+    mapping(uint256 => uint256) private subscriptionIndex;
 
     mapping(address => uint256) public unclaimedRewards;
 
@@ -193,14 +195,14 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
                 tokenOwner = lp;
             } catch {
                 // token is being burned; if subscribed retain ownership for subsequent untracking
-                if (!isTokenSubscribed(tokenId)) _setUntracked(tokenId);
+                if (!isTokenSubscribed[tokenId]) _setUntracked(tokenId);
                 _writeCheckpoint(tokenId, uint48(block.number), newLiquidity, feeGrowth0, feeGrowth1);
                 return;
             }
         }
 
         // clear subscriptions that dip below 1bps share of the pool's total liquidity
-        if (isTokenSubscribed(tokenId) && !_meetsSubscriptionThreshold(poolId, newLiquidity)) {
+        if (isTokenSubscribed[tokenId] && !_meetsSubscriptionThreshold(poolId, newLiquidity)) {
             _removeSubscription(tokenId, tokenOwner);
         }
 
@@ -292,22 +294,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      */
 
     /// @inheritdoc IPositionRegistry
-    function isTokenSubscribed(uint256 tokenId) public view returns (bool) {
-        Position storage pos = positions[tokenId];
-        if (pos.owner == address(0x0) || pos.owner == UNTRACKED) return false;
-
-        uint256[] storage subscribedIds = subscriptions[pos.owner];
-        uint256 len = subscribedIds.length;
-        for (uint256 i; i < len; ++i) {
-            if (subscribedIds[i] == tokenId) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// @inheritdoc IPositionRegistry
     function handleSubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
         Position storage pos = positions[tokenId];
         require(
@@ -328,15 +314,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         }
 
         uint256[] storage ownerSubscriptions = subscriptions[tokenOwner];
-        require(ownerSubscriptions.length < MAX_SUBSCRIPTIONS, "PositionRegistry: Max subscriptions reached");
+        require(ownerSubscriptions.length <= MAX_SUBSCRIPTIONS, "PositionRegistry: Max subscriptions reached");
         // only add to subscribed array on first subscription
         if (ownerSubscriptions.length == 0) {
-            require(subscribed.length < MAX_SUBSCRIBED, "PositionRegistry: Max subscribed reached");
+            require(subscribed.length <= MAX_SUBSCRIBED, "PositionRegistry: Max subscribed reached");
 
             subscribed.push(tokenOwner);
             subscribedIndex[tokenOwner] = subscribed.length - 1;
             isSubscribed[tokenOwner] = true;
         }
+        // store and index the new subscription for O(1) complexity
+        subscriptionIndex[tokenId] = ownerSubscriptions.length;
+        isTokenSubscribed[tokenId] = true;
         ownerSubscriptions.push(tokenId);
 
         emit Subscribed(tokenId, tokenOwner);
@@ -360,24 +349,30 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @param owner The address of the LP whose position is being removed.
      */
     function _removeSubscription(uint256 tokenId, address owner) internal {
+        uint256 subscriptionIdx = subscriptionIndex[tokenId];
         uint256[] storage list = subscriptions[owner];
         uint256 len = list.length;
-        for (uint256 i; i < len; ++i) {
-            if (list[i] == tokenId) {
-                list[i] = list[len - 1];
-                list.pop();
-                break;
-            }
+        uint256 lastIndex = len - 1;
+
+        // if it's not the last token, swap the last token into its spot before popping
+        if (subscriptionIdx != lastIndex) {
+            uint256 lastTokenId = list[lastIndex];
+            list[subscriptionIdx] = lastTokenId;
+            // update the index of the token we just moved
+            subscriptionIndex[lastTokenId] = subscriptionIdx;
         }
+        list.pop();
+        delete subscriptionIndex[tokenId];
+        delete isTokenSubscribed[tokenId];
 
         // If the owner has no more subscriptions, remove them from the global array
-        if (subscriptions[owner].length == 0) {
-            uint256 indexToRemove = subscribedIndex[owner];
+        if (list.length == 0) {
+            uint256 subscribedIdx = subscribedIndex[owner];
             address lastOwner = subscribed[subscribed.length - 1];
 
             // use the stored index to move the last element to the deleted spot (swap and pop)
-            subscribed[indexToRemove] = lastOwner;
-            subscribedIndex[lastOwner] = indexToRemove;
+            subscribed[subscribedIdx] = lastOwner;
+            subscribedIndex[lastOwner] = subscribedIdx;
 
             subscribed.pop();
             delete subscribedIndex[owner];

@@ -169,9 +169,6 @@ interface IPositionRegistry {
      */
     function validPool(PoolId id) external view returns (bool);
 
-    /// @dev Returns whether `tokenId` is currently subscribed
-    function isTokenSubscribed(uint256 tokenId) external view returns (bool);
-
     /// @notice Returns the list of all addresses that have active subscriptions
     function getSubscribed() external view returns (address[] memory);
 
