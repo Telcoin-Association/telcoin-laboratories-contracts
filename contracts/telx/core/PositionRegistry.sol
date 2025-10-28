@@ -118,10 +118,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     function _getLiquidityLast(uint256 tokenId) internal view returns (uint128) {
         Position storage pos = positions[tokenId];
-        uint256 len = pos.liquidityModifications.length();
+        uint256 len = Checkpoints.length(pos.liquidityModifications);//.length();
         if (len == 0) return 0;
 
-        return uint128(pos.liquidityModifications.latest());
+        return uint128(Checkpoints.latest(pos.liquidityModifications));
     }
 
     /// @inheritdoc IPositionRegistry
@@ -194,7 +194,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             } catch {
                 // token is being burned; if subscribed retain ownership for subsequent untracking
                 if (!isTokenSubscribed(tokenId)) _setUntracked(tokenId);
-                _writeCheckpoint(tokenId, uint32(block.number), newLiquidity, feeGrowth0, feeGrowth1);
+                _writeCheckpoint(tokenId, uint48(block.number), newLiquidity, feeGrowth0, feeGrowth1);
                 return;
             }
         }
@@ -203,7 +203,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
         // record in positions mapping and checkpoints list, await LP opt-in via `subscribe`
         _updatePosition(tokenId, tokenOwner, poolId, info.tickLower(), info.tickUpper(), newLiquidity, isNew);
-        _writeCheckpoint(tokenId, uint32(block.number), newLiquidity, feeGrowth0, feeGrowth1);
+        _writeCheckpoint(tokenId, uint48(block.number), newLiquidity, feeGrowth0, feeGrowth1);
     }
 
     function _updatePosition(
@@ -230,7 +230,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     function _writeCheckpoint(
         uint256 tokenId,
-        uint32 checkpointBlock,
+        uint48 checkpointBlock,
         uint128 newLiquidity,
         int128 feeGrowth0,
         int128 feeGrowth1
@@ -238,7 +238,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         Position storage pos = positions[tokenId];
         PoolId poolId = pos.poolId;
 
-        pos.liquidityModifications.push(checkpointBlock, newLiquidity);
+        Checkpoints.push(pos.liquidityModifications, checkpointBlock, newLiquidity);
         pos.feeGrowthCheckpoints[checkpointBlock] =
             FeeGrowthCheckpoint({feeGrowth0: feeGrowth0, feeGrowth1: feeGrowth1});
 
