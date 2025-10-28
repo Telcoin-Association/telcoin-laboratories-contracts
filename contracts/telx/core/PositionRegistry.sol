@@ -281,10 +281,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     /// @inheritdoc IPositionRegistry
     function handleSubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
         Position storage pos = positions[tokenId];
-        require(validPool(pos.poolId), "PositionRegistry: Invalid pool");
         require(
             pos.owner != UNTRACKED, "PositionRegistry: Only positions created via PositionManager can be subscribed"
         );
+        require(validPool(pos.poolId), "PositionRegistry: Invalid pool");
 
         // approved may also initiate subscribe flow but the token owner is counted for subscription anyway
         address tokenOwner = IERC721(address(positionManager)).ownerOf(tokenId);
