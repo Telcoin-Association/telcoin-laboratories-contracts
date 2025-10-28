@@ -238,7 +238,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         Position storage pos = positions[tokenId];
         PoolId poolId = pos.poolId;
 
+        uint256 lengthBefore = Checkpoints.length(pos.liquidityModifications);
+        // for multiple liquidity modifications within one block, overwrite with latest information
         Checkpoints.push(pos.liquidityModifications, checkpointBlock, newLiquidity);
+        uint256 lengthAfter = Checkpoints.length(pos.liquidityModifications);
         pos.feeGrowthCheckpoints[checkpointBlock] =
             FeeGrowthCheckpoint({feeGrowth0: feeGrowth0, feeGrowth1: feeGrowth1});
 
@@ -247,9 +250,15 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         if (metadata.firstCheckpoint == 0) {
             metadata.firstCheckpoint = checkpointBlock;
         }
-        metadata.lastCheckpoint = checkpointBlock;
-        uint256 checkpointIndex = metadata.totalCheckpoints++;
 
+        // if `lastCheckpoint == checkpointBlock` this is intrablock JIT; skip SSTORE to save gas 
+        if (metadata.lastCheckpoint != checkpointBlock) metadata.lastCheckpoint = checkpointBlock;
+        // similarly, if the existing checkpoint was overwritten, skip incrementing total
+        if (lengthAfter > lengthBefore) metadata.totalCheckpoints++;
+
+        uint256 checkpointIndex = lengthAfter - 1;
+        
+        // for intrablock JIT liquidity modifications, this reuses + re-emits cached index
         emit Checkpoint(tokenId, poolId, checkpointIndex, feeGrowth0, feeGrowth1);
     }
 
