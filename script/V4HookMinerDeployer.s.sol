@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
-import {console} from "forge-std/console.sol";
+// import {console} from "forge-std/console.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -132,7 +132,7 @@ contract V4HookMinerDeployer is Script {
         // 1. Determine Target Chain/Pool & Load Config
         uint256 chainId = block.chainid;
         ChainConfig storage config = _getChainConfig(chainId);
-        (PoolConfig storage poolConfig, PoolKey memory targetPoolKey) = _getPoolConfig(bytes(targetPool));
+        PoolConfig storage poolConfig = _getPoolConfig(bytes(targetPool));
 
         // Validate Price Input
         require(sqrtPriceX96 > 0, "Initial sqrtPriceX96 must be provided and > 0");
@@ -145,6 +145,7 @@ contract V4HookMinerDeployer is Script {
         _configureRoles(config);
 
         // 4. Initialize the Target Pool
+        PoolKey memory targetPoolKey = _getPoolKey(poolConfig); // must be after _deployContracts
         _initializePool(config, poolConfig, targetPoolKey, sqrtPriceX96);
 
         vm.stopBroadcast();
@@ -167,15 +168,16 @@ contract V4HookMinerDeployer is Script {
             IERC20(config.telToken),
             IPoolManager(config.poolManager),
             IPositionManager(config.positionManager),
-            StateView(config.stateView)
+            StateView(config.stateView),
+            deployer
         );
         bytes memory registryBytecode = abi.encodePacked(type(PositionRegistry).creationCode, registryConstructorArgs);
-        address predictedRegistryAddress = computeCreate2Address(REGISTRY_SALT, keccak256(registryBytecode), CREATE2_DEPLOYER);
+        address predictedRegistryAddress = vm.computeCreate2Address(REGISTRY_SALT, keccak256(registryBytecode), CREATE2_DEPLOYER);
 
         // Deploy only if not already deployed at the predicted address
         if (predictedRegistryAddress.code.length == 0) {
             // positionRegistry = PositionRegistry(payable(Create2.deploy(0, REGISTRY_SALT, registryBytecode))); //todo
-            positionRegistry = new PositionRegistry{salt: REGISTRY_SALT}(IERC20(config.telToken), IPoolManager(config.poolManager), IPositionManager(config.positionManager), StateView(config.stateView));
+            positionRegistry = new PositionRegistry{salt: REGISTRY_SALT}(IERC20(config.telToken), IPoolManager(config.poolManager), IPositionManager(config.positionManager), StateView(config.stateView), deployer);
             require(address(positionRegistry) == predictedRegistryAddress, "Registry address mismatch");
             console.log("  Deployed PositionRegistry at: %s", address(positionRegistry));
         } else {
@@ -189,7 +191,7 @@ contract V4HookMinerDeployer is Script {
             config.positionManager
         );
         bytes memory subscriberBytecode = abi.encodePacked(type(TELxSubscriber).creationCode, subscriberConstructorArgs);
-        address predictedSubscriberAddress = computeCreate2Address(SUBSCRIBER_SALT, keccak256(subscriberBytecode), CREATE2_DEPLOYER);
+        address predictedSubscriberAddress = vm.computeCreate2Address(SUBSCRIBER_SALT, keccak256(subscriberBytecode), CREATE2_DEPLOYER);
 
         if (predictedSubscriberAddress.code.length == 0) {
             telxSubscriber = new TELxSubscriber{salt: SUBSCRIBER_SALT}(IPositionRegistry(address(positionRegistry)), config.positionManager);
@@ -246,11 +248,14 @@ contract V4HookMinerDeployer is Script {
          // grant roles where necessary to meet config
          if (!positionRegistry.hasRole(supportRole, config.supportSafe)) {
             positionRegistry.grantRole(supportRole, config.supportSafe);
-         } else if (!positionRegistry.hasRole(supportRole, deployer)) {
+         }
+         if (!positionRegistry.hasRole(supportRole, deployer)) {
             positionRegistry.grantRole(supportRole, deployer); // revoked later after router setup
-         } else if (!positionRegistry.hasRole(hookRole, address(telxIncentiveHook))) {
+         }
+         if (!positionRegistry.hasRole(hookRole, address(telxIncentiveHook))) {
             positionRegistry.grantRole(hookRole, address(telxIncentiveHook));
-         } else if (!positionRegistry.hasRole(subscriberRole, address(telxSubscriber))) {
+         }
+         if (!positionRegistry.hasRole(subscriberRole, address(telxSubscriber))) {
             positionRegistry.grantRole(subscriberRole, address(telxSubscriber));
          }
 
@@ -312,8 +317,9 @@ contract V4HookMinerDeployer is Script {
         require(chainConfigs[chainId].poolManager != address(0), "Unsupported chainId");
         return chainConfigs[chainId];
     }
+
      // Helper to get pool config safely
-    function _getPoolConfig(bytes memory targetPool) internal view returns (PoolConfig storage, PoolKey memory) {
+    function _getPoolConfig(bytes memory targetPool) internal view returns (PoolConfig storage) {
         require(
             keccak256(targetPool) == keccak256("BASE_ETH_TEL") || 
             keccak256(targetPool) == keccak256("POLYGON_WETH_TEL") || 
@@ -331,6 +337,20 @@ contract V4HookMinerDeployer is Script {
             "Unsupported poolId"
         );
 
+        return (poolConfig);
+    }
+
+     // Helper to get pool key safely, must occur after `_deployContracts`
+    function _getPoolKey(PoolConfig storage poolConfig) internal view returns (PoolKey memory) {
+        address addr0 = poolConfig.currency0; 
+        address addr1 = poolConfig.currency1; 
+        require(
+            addr0 != address(type(uint160).max) &&
+            addr1 != address(type(uint160).max) &&
+            addr1 != address(0),
+            "Unsupported poolId"
+        );
+
         PoolKey memory key = PoolKey({
             currency0: Currency.wrap(addr0),
             currency1: Currency.wrap(addr1),
@@ -339,6 +359,6 @@ contract V4HookMinerDeployer is Script {
             hooks: IHooks(hookAddress)
         });
 
-        return (poolConfig, key);
+        return (key);
     }
 }
