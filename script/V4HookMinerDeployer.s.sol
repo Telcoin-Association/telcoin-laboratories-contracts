@@ -55,11 +55,14 @@ contract V4HookMinerDeployer is Script {
     address constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
     bytes32 constant REGISTRY_SALT = keccak256("TELx_PositionRegistry_v1");
     bytes32 constant SUBSCRIBER_SALT = keccak256("TELx_Subscriber_v1");
-    bytes32 constant POLYGON_WETH_TEL_POOLID =
-        bytes32(0x9a005a0c12cc2ef01b34e9a7f3fb91a0e6304d377b5479bd3f08f8c29cdf5deb);
-    bytes32 constant POLYGON_USDC_EMXN_POOLID =
-        bytes32(0xfd56605f7f4620ab44dfc0860d70b9bd1d1f648a5a74558491b39e816a10b99a);
-    bytes32 constant BASE_ETH_TEL_POOLID = bytes32(0xb6d004fca4f9a34197862176485c45ceab7117c86f07422d1fe3d9cfd6e9d1da);
+    /// @dev Only used for fetching sqrtPriceX96 from existing pools for accuracy
+    /// For future pool initialization without existing deprecatable pools,
+    /// another offchain method must be used to obtain a sqrtPriceX96 
+    PoolId constant POLYGON_WETH_TEL_POOLID =
+        PoolId.wrap(bytes32(0x9a005a0c12cc2ef01b34e9a7f3fb91a0e6304d377b5479bd3f08f8c29cdf5deb));
+    PoolId constant POLYGON_USDC_EMXN_POOLID =
+        PoolId.wrap(bytes32(0xfd56605f7f4620ab44dfc0860d70b9bd1d1f648a5a74558491b39e816a10b99a));
+    PoolId constant BASE_ETH_TEL_POOLID = PoolId.wrap(bytes32(0xb6d004fca4f9a34197862176485c45ceab7117c86f07422d1fe3d9cfd6e9d1da));
 
     // --- Config Storage ---
     mapping(uint256 => ChainConfig) public chainConfigs;
@@ -75,7 +78,6 @@ contract V4HookMinerDeployer is Script {
     function setUp() public {
         uint256 deployerPk = vm.envUint("DEPLOYER_PK");
         deployer = vm.addr(deployerPk);
-        require(deployer == 0xc1612C97537c2CC62a11FC4516367AB6F62d4B23, "WRONG DEPLOYER"); //todo
 
         // Polygon Config
         uint256 polygonChainId = 137;
@@ -136,9 +138,6 @@ contract V4HookMinerDeployer is Script {
         ChainConfig storage config = _getChainConfig(chainId);
         PoolConfig storage poolConfig = _getPoolConfig(bytes(targetPool));
 
-        // Validate Price Input
-        require(sqrtPriceX96 > 0, "Initial sqrtPriceX96 must be provided and > 0");
-
         // 2. Deploy Contracts via CREATE2
         vm.startBroadcast(deployer); // Start broadcasting state changes
         _deployContracts(config);
@@ -146,13 +145,20 @@ contract V4HookMinerDeployer is Script {
         // 3. Configure Roles & Router
         _configureRoles(config);
 
-        // 4. Initialize the Target Pool
+
+        /// @dev For future runs deploying + initializing brand new pools, the below must be replaced with offchain calc
+        // 4. Fetch the current SQRT priceX96 from the existing v4 pools to be deprecated
+        require(sqrtPriceX96 == 0, "CLI-provided sqrtPriceX96 not yet supported, must use 0");
+        (sqrtPriceX96, , ,) = StateView(config.stateView).getSlot0(BASE_ETH_TEL_POOLID);
+        assert(sqrtPriceX96 != 0);
+
+        // 5. Initialize the Target Pool
         PoolKey memory targetPoolKey = _getPoolKey(poolConfig); // must be after _deployContracts
         _initializePool(config, poolConfig, targetPoolKey, sqrtPriceX96);
 
         vm.stopBroadcast();
 
-        // 5. Sanity Checks (optional but recommended)
+        // 6. Sanity Checks
         _postDeploymentChecks(config, poolConfig, targetPoolKey);
 
         console.log("Deployment Successful!");
@@ -179,7 +185,6 @@ contract V4HookMinerDeployer is Script {
 
         // Deploy only if not already deployed at the predicted address
         if (predictedRegistryAddress.code.length == 0) {
-            // positionRegistry = PositionRegistry(payable(Create2.deploy(0, REGISTRY_SALT, registryBytecode))); //todo
             positionRegistry = new PositionRegistry{salt: REGISTRY_SALT}(
                 IERC20(config.telToken),
                 IPoolManager(config.poolManager),
@@ -205,7 +210,6 @@ contract V4HookMinerDeployer is Script {
             telxSubscriber = new TELxSubscriber{salt: SUBSCRIBER_SALT}(
                 IPositionRegistry(address(positionRegistry)), config.positionManager
             );
-            // telxSubscriber = new TELxSubscriber(payable(Create2.deploy(0, SUBSCRIBER_SALT, subscriberBytecode))); //todo
             require(address(telxSubscriber) == predictedSubscriberAddress, "Subscriber address mismatch");
             console.log("  Deployed TELxSubscriber at: %s", address(telxSubscriber));
         } else {

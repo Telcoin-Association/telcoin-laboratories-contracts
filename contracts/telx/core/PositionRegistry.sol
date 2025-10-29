@@ -314,15 +314,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     /// @inheritdoc IPositionRegistry
     function handleSubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
         Position storage pos = positions[tokenId];
-        require(
-            pos.owner != UNTRACKED, "PositionRegistry: Only positions created via PositionManager can be subscribed"
-        );
-        require(validPool(pos.poolId), "PositionRegistry: Invalid pool");
+        if (pos.owner == UNTRACKED) revert Untracked(tokenId);
+        if (!validPool(pos.poolId)) revert InvalidPool(pos.poolId);
 
         uint128 currentLiquidity = _getLiquidityLast(tokenId);
-        require(
-            _meetsSubscriptionThreshold(pos.poolId, currentLiquidity), "PositionRegistry: Liquidity below threshold"
-        );
+        if (!_meetsSubscriptionThreshold(pos.poolId, currentLiquidity)) revert LiquidityBelowThreshold(currentLiquidity);
 
         // approved may also initiate subscribe flow but the token owner is counted for subscription anyway
         address tokenOwner = IERC721(address(positionManager)).ownerOf(tokenId);
@@ -332,10 +328,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         }
 
         uint256[] storage ownerSubscriptions = subscriptions[tokenOwner];
-        require(ownerSubscriptions.length <= MAX_SUBSCRIPTIONS, "PositionRegistry: Max subscriptions reached");
+        if (ownerSubscriptions.length >= MAX_SUBSCRIPTIONS) revert MaxSubscriptions();
         // only add to subscribed array on first subscription
         if (ownerSubscriptions.length == 0) {
-            require(subscribed.length <= MAX_SUBSCRIBED, "PositionRegistry: Max subscribed reached");
+            if (subscribed.length >= MAX_SUBSCRIBED) revert MaxSubscribed();
 
             subscribed.push(tokenOwner);
             subscribedIndex[tokenOwner] = subscribed.length - 1;
@@ -411,7 +407,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         nonReentrant
         onlyRole(SUPPORT_ROLE)
     {
-        require(lps.length == amounts.length, "PositionRegistry: Length mismatch");
+        if (lps.length != amounts.length) revert ArityMismatch();
 
         telcoin.safeTransferFrom(_msgSender(), address(this), totalAmount);
 
@@ -421,13 +417,13 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
             total += amounts[i];
         }
 
-        require(total == totalAmount, "PositionRegistry: Total amount mismatch");
+        if (total != totalAmount) revert AmountMismatch();
     }
 
     /// @inheritdoc IPositionRegistry
     function claim() external nonReentrant {
         uint256 reward = unclaimedRewards[_msgSender()];
-        require(reward > 0, "PositionRegistry: No claimable rewards");
+        if (reward == 0) revert NoClaimableRewards();
 
         unclaimedRewards[_msgSender()] = 0;
         telcoin.safeTransfer(_msgSender(), reward);
@@ -446,11 +442,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     /// @inheritdoc IPositionRegistry
     function initialize(address sender, PoolKey calldata key) external onlyRole(UNI_HOOK_ROLE) {
-        require(
-            hasRole(DEFAULT_ADMIN_ROLE, _resolveUser(sender)),
-            "PositionRegistry: Only admin can initialize pools with this hook"
-        );
-        require(!validPool(key.toId()), "PositionRegistry: Pool already initialized");
+        if (!hasRole(DEFAULT_ADMIN_ROLE, _resolveUser(sender))) revert OnlyAdmin();
+        if (validPool(key.toId())) revert AlreadyInitialized();
         initializedPoolKeys[key.toId()] = key;
 
         emit PoolInitialized(key);
