@@ -31,7 +31,9 @@ import {IPositionDescriptor} from "@uniswap/v4-periphery/src/interfaces/IPositio
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 
 contract PositionRegistryTest is
-    PositionRegistry(IERC20(address(0)), IPoolManager(address(0)), IPositionManager(address(0)), StateView(address(0)), address(0)),
+    PositionRegistry(
+        IERC20(address(0)), IPoolManager(address(0)), IPositionManager(address(0)), StateView(address(0)), address(0)
+    ),
     Test
 {
     using PoolIdLibrary for bytes32;
@@ -57,7 +59,7 @@ contract PositionRegistryTest is
     address permit2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     // address encoding the enabled beforeInitialize, afterAddLiquidity, and beforeRemoveLiquidity hooks
     address public hookAddress = 0x0000000000000000000000000000000000002500;
-    
+
     int24 tickSpacing = 60;
     uint256 constant V4_SWAP = 0x10;
 
@@ -75,8 +77,13 @@ contract PositionRegistryTest is
 
         // create pool registry and hook on permissions-encoded address
         vm.startPrank(admin);
-        positionRegistry =
-            new PositionRegistry(tel, IPoolManager(address(poolMngr)), IPositionManager(address(positionMngr)), StateView(address(st8View)), admin);
+        positionRegistry = new PositionRegistry(
+            tel,
+            IPoolManager(address(poolMngr)),
+            IPositionManager(address(positionMngr)),
+            StateView(address(st8View)),
+            admin
+        );
         positionRegistry.grantRole(positionRegistry.SUPPORT_ROLE(), support);
         TELxIncentiveHook tempHook = new TELxIncentiveHookDeployable(
             IPoolManager(address(poolMngr)), address(positionMngr), IPositionRegistry(address(positionRegistry))
@@ -121,7 +128,8 @@ contract PositionRegistryTest is
         assertEq(returnedTick, tick);
 
         assertTrue(positionRegistry.validPool(poolKey.toId()));
-        (Currency currency0, Currency currency1, uint24 fee, int24 spacing, IHooks hooks) = positionRegistry.initializedPoolKeys(poolKey.toId());
+        (Currency currency0, Currency currency1, uint24 fee, int24 spacing, IHooks hooks) =
+            positionRegistry.initializedPoolKeys(poolKey.toId());
         assertEq(Currency.unwrap(currency0), Currency.unwrap(poolKey.currency0));
         assertEq(Currency.unwrap(currency1), Currency.unwrap(poolKey.currency1));
         assertEq(fee, poolKey.fee);
@@ -149,7 +157,7 @@ contract PositionRegistryTest is
             tickSpacing: 60,
             hooks: IHooks(hookAddress)
         });
-        
+
         // only admin can call initialize
         vm.expectRevert();
         vm.prank(holder);
@@ -161,14 +169,14 @@ contract PositionRegistryTest is
         poolMngr.initialize(dummyKey, uint160(1e27));
     }
 
-    function testRevert_alreadyInitialized() public {        
+    function testRevert_alreadyInitialized() public {
         assertTrue(positionRegistry.validPool(poolKey.toId()));
 
         // revert for already initialized pools
         vm.expectRevert();
         vm.prank(admin);
         poolMngr.initialize(poolKey, uint160(1e27));
-        
+
         // initialized pool unchanged
         assertTrue(positionRegistry.validPool(poolKey.toId()));
     }
@@ -218,7 +226,8 @@ contract PositionRegistryTest is
 
         uint256 tokenId = positionMngr.nextTokenId();
         // slippage is beyond scope of this test so amount0Max and amount1Max are set to `type(uint128).max`
-        (int24 tickLower, int24 tickUpper) = mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
+        (int24 tickLower, int24 tickUpper) =
+            mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
 
         // expect PositionUpdated event, which is emitted at subscribe time, not mint time
         vm.expectEmit(true, true, true, true);
@@ -234,7 +243,8 @@ contract PositionRegistryTest is
         assertEq(subscribed.length, 1);
         assertEq(subscribed[0], holder);
         // assert position values are as expected
-        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) = positionRegistry.getPosition(tokenId);
+        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) =
+            positionRegistry.getPosition(tokenId);
         assertEq(owner, holder);
         assertEq(tickLower, returnedTickLower);
         assertEq(tickUpper, returnedTickUpper);
@@ -254,7 +264,8 @@ contract PositionRegistryTest is
 
         // mint initial position
         uint256 tokenId = positionMngr.nextTokenId();
-        (int24 tickLower, int24 tickUpper) = mintPosition(holder, currentTick, range, 1000, type(uint128).max, type(uint128).max);
+        (int24 tickLower, int24 tickUpper) =
+            mintPosition(holder, currentTick, range, 1000, type(uint128).max, type(uint128).max);
 
         vm.prank(holder); // LP must be the one to call subscribe
         positionMngr.subscribe(tokenId, address(telXSubscriber), "");
@@ -265,7 +276,9 @@ contract PositionRegistryTest is
         uint128 liquidityBefore = positionMngr.getPositionLiquidity(tokenId);
 
         vm.expectEmit(true, true, true, true);
-        emit IPositionRegistry.PositionUpdated(tokenId, holder, poolKey.toId(), tickLower, tickUpper, liquidityBefore + additionalLiquidity);
+        emit IPositionRegistry.PositionUpdated(
+            tokenId, holder, poolKey.toId(), tickLower, tickUpper, liquidityBefore + additionalLiquidity
+        );
         increaseLiquidity(holder, tokenId, additionalLiquidity, type(uint128).max, type(uint128).max);
 
         // confirm the increased liquidity in the pool
@@ -276,7 +289,8 @@ contract PositionRegistryTest is
         assertLe(tel.balanceOf(holder), telBefore);
 
         // verify the positionRegistry reflects the updated position
-        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) = positionRegistry.getPosition(tokenId);
+        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) =
+            positionRegistry.getPosition(tokenId);
         assertEq(owner, holder);
         assertEq(tickLower, returnedTickLower);
         assertEq(tickUpper, returnedTickUpper);
@@ -294,7 +308,8 @@ contract PositionRegistryTest is
 
         // mint initial position
         uint256 tokenId = positionMngr.nextTokenId();
-        (int24 tickLower, int24 tickUpper) = mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
+        (int24 tickLower, int24 tickUpper) =
+            mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
 
         vm.prank(holder); // LP must be the one to call subscribe
         positionMngr.subscribe(tokenId, address(telXSubscriber), "");
@@ -305,7 +320,9 @@ contract PositionRegistryTest is
         uint128 liquidityBefore = positionMngr.getPositionLiquidity(tokenId);
 
         vm.expectEmit(true, true, true, true);
-        emit IPositionRegistry.PositionUpdated(tokenId, holder, poolKey.toId(), tickLower, tickUpper, liquidityBefore - liquidityToRemove);
+        emit IPositionRegistry.PositionUpdated(
+            tokenId, holder, poolKey.toId(), tickLower, tickUpper, liquidityBefore - liquidityToRemove
+        );
         decreaseLiquidity(holder, tokenId, liquidityToRemove, 0, 0);
 
         // confirm the decreased liquidity is accurately reflected in the pool
@@ -316,7 +333,8 @@ contract PositionRegistryTest is
         assertGe(tel.balanceOf(holder), telBefore);
 
         // verify the positionRegistry reflects the updated position
-        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) = positionRegistry.getPosition(tokenId);
+        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) =
+            positionRegistry.getPosition(tokenId);
         assertEq(owner, holder);
         assertEq(tickLower, returnedTickLower);
         assertEq(tickUpper, returnedTickUpper);
@@ -337,7 +355,8 @@ contract PositionRegistryTest is
 
         // mint initial position
         uint256 tokenId = positionMngr.nextTokenId();
-        (int24 tickLower, int24 tickUpper) = mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
+        (int24 tickLower, int24 tickUpper) =
+            mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
 
         vm.prank(holder); // LP must be the one to call subscribe
         positionMngr.subscribe(tokenId, address(telXSubscriber), "");
@@ -354,7 +373,8 @@ contract PositionRegistryTest is
         assertApproxEqAbs(tel.balanceOf(holder), telBefore, 1, "balance deviation above v4 rounding precision");
 
         // verify the positionRegistry reflects the burned position
-        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) = positionRegistry.getPosition(tokenId);
+        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) =
+            positionRegistry.getPosition(tokenId);
         assertEq(owner, UNTRACKED);
         assertEq(positionRegistry.getLiquidityLast(tokenId), 0);
         assertEq(returnedTickLower, tickLower);
@@ -373,7 +393,8 @@ contract PositionRegistryTest is
 
         // mint initial position
         uint256 tokenId = positionMngr.nextTokenId();
-        (int24 tickLower, int24 tickUpper) = mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
+        (int24 tickLower, int24 tickUpper) =
+            mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
 
         vm.prank(holder); // LP must be the one to call subscribe
         positionMngr.subscribe(tokenId, address(telXSubscriber), "");
@@ -381,7 +402,8 @@ contract PositionRegistryTest is
         uint256 liquidityBefore = positionMngr.getPositionLiquidity(tokenId);
 
         vm.prank(holder);
-        (bool r,) = address(positionMngr).call(abi.encodeWithSignature("transferFrom(address,address,uint256)", holder, support, tokenId));
+        (bool r,) = address(positionMngr)
+            .call(abi.encodeWithSignature("transferFrom(address,address,uint256)", holder, support, tokenId));
         require(r);
 
         // liquidity should be unchanged despite owner change
@@ -389,7 +411,8 @@ contract PositionRegistryTest is
         assertEq(liquidityAfter, liquidityBefore);
 
         // after transfer position should remain unchanged
-        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) = positionRegistry.getPosition(tokenId);
+        (address owner, PoolId poolId, int24 returnedTickLower, int24 returnedTickUpper) =
+            positionRegistry.getPosition(tokenId);
         assertEq(owner, holder);
         assertEq(positionRegistry.getLiquidityLast(tokenId), liquidityAfter);
         assertEq(tickLower, returnedTickLower);
@@ -417,8 +440,9 @@ contract PositionRegistryTest is
 
         // mint initial position so there is liquidity in the pool
         uint256 tokenId = positionMngr.nextTokenId();
-        (int24 tickLower, int24 tickUpper) = mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
-        
+        (int24 tickLower, int24 tickUpper) =
+            mintPosition(holder, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
+
         // identify amountIn bound based on not exceeding available liquidity
         (uint160 sqrtPriceX96,,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
         uint256 liquidityBound = calculateLiquidityBound(liquidity, sqrtPriceX96, tickLower, tickUpper, zeroForOne);
@@ -442,7 +466,7 @@ contract PositionRegistryTest is
         uint256 initialOutputBal = outputCurrency.balanceOf(holder);
 
         uint256 amountOut = swapTokensExactInSingle(holder, amountIn, 0, zeroForOne);
-        
+
         // verify swap execution and resulting balances
         assertEq(inputCurrency.balanceOf(holder), initialInputBal - amountIn);
         assertEq(outputCurrency.balanceOf(holder), initialOutputBal + amountOut);
@@ -478,12 +502,7 @@ contract PositionRegistryTest is
         vm.stopPrank();
     }
 
-    function burnPosition(
-        address lp,
-        uint256 tokenId,
-        uint128 amount0Min,
-        uint128 amount1Min
-    ) internal {
+    function burnPosition(address lp, uint256 tokenId, uint128 amount0Min, uint128 amount1Min) internal {
         bytes memory actions = abi.encodePacked(uint8(Actions.BURN_POSITION), uint8(Actions.TAKE_PAIR));
         bytes[] memory params = new bytes[](2);
         // BURN_POSITION
@@ -496,24 +515,33 @@ contract PositionRegistryTest is
     }
 
     // assumes approvals are already set
-    function increaseLiquidity(address lp, uint256 tokenId, uint128 additionalLiquidity, uint128 amount0Max, uint128 amount1Max) internal {
+    function increaseLiquidity(
+        address lp,
+        uint256 tokenId,
+        uint128 additionalLiquidity,
+        uint128 amount0Max,
+        uint128 amount1Max
+    ) internal {
         bytes memory actions = abi.encodePacked(uint8(Actions.INCREASE_LIQUIDITY), uint8(Actions.SETTLE_PAIR));
         bytes[] memory params = new bytes[](2);
         // INCREASE_LIQUIDITY
         params[0] = abi.encode(tokenId, additionalLiquidity, amount0Max, amount1Max, "");
         // SETTLE_PAIR
         params[1] = abi.encode(poolKey.currency0, poolKey.currency1);
-        
+
         vm.startPrank(lp);
-        positionMngr.modifyLiquidities(
-            abi.encode(actions, params),
-            block.timestamp + 1 minutes
-        );
+        positionMngr.modifyLiquidities(abi.encode(actions, params), block.timestamp + 1 minutes);
         vm.stopPrank();
     }
 
     // assumes approvals are already set
-    function decreaseLiquidity(address lp, uint256 tokenId, uint128 liquidityToRemove, uint128 amount0Min, uint128 amount1Min) internal {
+    function decreaseLiquidity(
+        address lp,
+        uint256 tokenId,
+        uint128 liquidityToRemove,
+        uint128 amount0Min,
+        uint128 amount1Min
+    ) internal {
         bytes memory actions = abi.encodePacked(uint8(Actions.DECREASE_LIQUIDITY), uint8(Actions.TAKE_PAIR));
         bytes[] memory params = new bytes[](2);
         // DECREASE_LIQUIDITY
@@ -522,10 +550,7 @@ contract PositionRegistryTest is
         params[1] = abi.encode(poolKey.currency0, poolKey.currency1, lp);
 
         vm.startPrank(lp);
-        positionMngr.modifyLiquidities(
-            abi.encode(actions, params),
-            block.timestamp + 1 minutes
-        );
+        positionMngr.modifyLiquidities(abi.encode(actions, params), block.timestamp + 1 minutes);
         vm.stopPrank();
     }
 
@@ -535,21 +560,16 @@ contract PositionRegistryTest is
         Permit2(permit2).approve(address(token), address(positionMngr), type(uint160).max, type(uint48).max);
     }
 
-    // assumes previous approval to permit2::approve for router address on behalf of swapper 
-    function swapTokensExactInSingle(
-        address swapper,
-        uint128 amountIn,
-        uint128 minAmountOut,
-        bool zeroForOne
-    ) public returns (uint256 amountOut) {
+    // assumes previous approval to permit2::approve for router address on behalf of swapper
+    function swapTokensExactInSingle(address swapper, uint128 amountIn, uint128 minAmountOut, bool zeroForOne)
+        public
+        returns (uint256 amountOut)
+    {
         (Currency inputCurrency, Currency outputCurrency) = inputAndOutputCurrencies(zeroForOne);
 
         bytes memory commands = abi.encodePacked(uint8(V4_SWAP));
-        bytes memory actions = abi.encodePacked(
-            uint8(Actions.SWAP_EXACT_IN_SINGLE),
-            uint8(Actions.SETTLE_ALL),
-            uint8(Actions.TAKE_ALL)
-        );
+        bytes memory actions =
+            abi.encodePacked(uint8(Actions.SWAP_EXACT_IN_SINGLE), uint8(Actions.SETTLE_ALL), uint8(Actions.TAKE_ALL));
         bytes[] memory params = new bytes[](3);
         // SWAP_EXACT_IN_SINGLE
         params[0] = abi.encode(
@@ -581,7 +601,11 @@ contract PositionRegistryTest is
         return finalBal - initialBal;
     }
 
-    function inputAndOutputCurrencies(bool zeroForOne) internal view returns (Currency inputCurrency, Currency outputCurrency) {
+    function inputAndOutputCurrencies(bool zeroForOne)
+        internal
+        view
+        returns (Currency inputCurrency, Currency outputCurrency)
+    {
         if (zeroForOne) {
             inputCurrency = poolKey.currency0;
             outputCurrency = poolKey.currency1;
@@ -604,12 +628,18 @@ contract PositionRegistryTest is
     }
 
     // calculates the max swappable amount based on available liquidity
-    function calculateLiquidityBound(uint128 liquidity, uint160 sqrtPriceX96, int24 tickLower, int24 tickUpper, bool zeroForOne) internal pure returns (uint256) {        
+    function calculateLiquidityBound(
+        uint128 liquidity,
+        uint160 sqrtPriceX96,
+        int24 tickLower,
+        int24 tickUpper,
+        bool zeroForOne
+    ) internal pure returns (uint256) {
         // calculate the price which exceeds the position's range
-        uint160 sqrtPriceLimitX96 = zeroForOne 
-            ? TickMath.getSqrtPriceAtTick(tickLower) // downward bound
+        uint160 sqrtPriceLimitX96 = zeroForOne
+            ? TickMath.getSqrtPriceAtTick(tickLower)  // downward bound
             : TickMath.getSqrtPriceAtTick(tickUpper); // upward bound
-        
+
         // calculate max swappable amount based on liquidity
         uint256 liquidityBoundAmountIn;
         if (zeroForOne) {
@@ -633,12 +663,16 @@ contract PositionRegistryTest is
         return liquidityBoundAmountIn;
     }
 
-    function boundAmountInByBalance(address lp, uint128 amountIn, uint256 liquidityBound, bool zeroForOne) internal view returns (Currency, uint128) {
+    function boundAmountInByBalance(address lp, uint128 amountIn, uint256 liquidityBound, bool zeroForOne)
+        internal
+        view
+        returns (Currency, uint128)
+    {
         // identify amountIn bound based on not exceeding holder balance
-        (Currency inputCurrency, ) = inputAndOutputCurrencies(zeroForOne);
+        (Currency inputCurrency,) = inputAndOutputCurrencies(zeroForOne);
         uint256 swappableBalance = inputCurrency.balanceOf(lp);
         uint256 finalBound = swappableBalance < liquidityBound ? swappableBalance : liquidityBound;
-        
+
         // bound amountIn to be nonzero and no more than the lesser of the two bounds
         amountIn = uint128(bound(amountIn, 1, finalBound));
 
@@ -648,11 +682,7 @@ contract PositionRegistryTest is
 
 // interface used to interact with the Uniswap V4 Universal Router without requiring extra dependencies
 interface UniversalRouter {
-    function execute(
-        bytes memory commands,
-        bytes[] memory inputs,
-        uint256 deadline
-    ) external payable;
+    function execute(bytes memory commands, bytes[] memory inputs, uint256 deadline) external payable;
 }
 
 interface Permit2 {

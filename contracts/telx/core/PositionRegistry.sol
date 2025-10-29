@@ -64,7 +64,13 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     IPositionManager public immutable positionManager;
     StateView public immutable stateView;
 
-    constructor(IERC20 telcoin_, IPoolManager poolManager_, IPositionManager positionManager_, StateView stateView_, address admin) {
+    constructor(
+        IERC20 telcoin_,
+        IPoolManager poolManager_,
+        IPositionManager positionManager_,
+        StateView stateView_,
+        address admin
+    ) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         telcoin = telcoin_;
         poolManager = poolManager_;
