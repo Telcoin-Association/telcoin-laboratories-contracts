@@ -8,6 +8,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {IPositionRegistry} from "../interfaces/IPositionRegistry.sol";
+import {PositionManagerAuth} from "../abstract/PositionManagerAuth.sol";
 
 /**
  * @title TELx Incentive Hook
@@ -15,23 +16,12 @@ import {IPositionRegistry} from "../interfaces/IPositionRegistry.sol";
  * @notice Uniswap v4 hook that tracks LP activity and emits swap events for off-chain reward logic.
  * @dev This contract works in tandem with a PositionRegistry and an off-chain rewards script.
  */
-contract TELxIncentiveHook is BaseHook {
+contract TELxIncentiveHook is BaseHook, PositionManagerAuth {
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
 
-    /// @notice Emitted during every swap, used for off-chain range validation
-    event SwapOccurredWithTick(
-        PoolId indexed poolId, address indexed trader, int256 amount0, int256 amount1, int24 currentTick
-    );
-
     /// @notice Registry used to store and track liquidity positions
     IPositionRegistry public immutable registry;
-    address public immutable positionManager;
-
-    modifier onlyPositionManager(address sender) {
-        require(sender == positionManager, "TELxIncentiveHook: Caller is not Position Manager");
-        _;
-    }
 
     /**
      * @notice Constructs the incentive hook contract
@@ -40,10 +30,10 @@ contract TELxIncentiveHook is BaseHook {
      * @param _registry Address of the PositionRegistry used to track LP metadata
      */
     constructor(IPoolManager _poolManager, address _positionManager, IPositionRegistry _registry)
+        PositionManagerAuth(_positionManager)
         BaseHook(_poolManager)
     {
         registry = _registry;
-        positionManager = _positionManager;
     }
 
     /**
