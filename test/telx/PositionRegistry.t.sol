@@ -402,8 +402,9 @@ contract PositionRegistryTest is
         uint256 liquidityBefore = positionMngr.getPositionLiquidity(tokenId);
 
         vm.prank(holder);
-        (bool r,) = address(positionMngr)
-            .call(abi.encodeWithSignature("transferFrom(address,address,uint256)", holder, support, tokenId));
+        (bool r,) = address(positionMngr).call(
+            abi.encodeWithSignature("transferFrom(address,address,uint256)", holder, support, tokenId)
+        );
         require(r);
 
         // liquidity should be unchanged despite owner change
@@ -430,7 +431,7 @@ contract PositionRegistryTest is
         // after subscribing the position should be reregistered
         assertTrue(positionRegistry.getSubscriptions(support).length == 1);
         assertTrue(positionRegistry.getSubscribed().length == 1);
-        assertEq(positionRegistry.subscribed(0), support);
+        assertEq(positionRegistry.getSubscribed()[0], support);
     }
 
     function test_swap(int24 range, uint128 liquidity, uint128 amountIn, bool zeroForOne) public {
@@ -470,6 +471,52 @@ contract PositionRegistryTest is
         // verify swap execution and resulting balances
         assertEq(inputCurrency.balanceOf(holder), initialInputBal - amountIn);
         assertEq(outputCurrency.balanceOf(holder), initialOutputBal + amountOut);
+    }
+
+    // Test function to benchmark scaling `MAX_SUBSCRIPTIONS` and `MAX_SUBSCRIBED`
+    function test_gas_MAX_SUBSCRIBED_MAX_SUBSCRIPTIONS() public {
+        uint256 maxSubscribed = 50_000;
+        uint256 maxSubscriptions = 100;
+
+        (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
+        int24 range = int24(60);
+        uint128 liquidity = uint128(10_000);
+        int24 tickLower = (currentTick - range) / tickSpacing * tickSpacing;
+        int24 tickUpper = (currentTick + range) / tickSpacing * tickSpacing;
+
+        (uint256 amount0, uint256 amount1,) =
+            positionRegistry.getAmountsForLiquidity(poolKey.toId(), liquidity, tickLower, tickUpper);
+        // fund all mock users with enough tokens to mint positions
+        for (uint160 i = 1; i <= maxSubscribed; i++) {
+            address user = address(i);
+
+            vm.startPrank(holder);
+            tel.transfer(user, amount0 * maxSubscriptions);
+            usdc.transfer(user, amount1 * maxSubscriptions);
+            vm.stopPrank();
+        }
+
+        uint256 startTokenId = positionMngr.nextTokenId();
+
+        // create 'maxSubscribed' users and subscribe 'maxSubscriptions' token IDs for them all
+        for (uint160 i = 1; i <= maxSubscribed; i++) {
+            address user = address(i);
+
+            for (uint256 j; j < maxSubscriptions; j++) {
+                uint256 iteration = maxSubscriptions * j;
+                uint256 tokenId = startTokenId + j + iteration;
+                mintPosition(user, currentTick, range, liquidity, type(uint128).max, type(uint128).max);
+
+                vm.prank(user);
+                positionMngr.subscribe(tokenId, address(telXSubscriber), "");
+            }
+        }
+
+        // reverts when contract cannot handle any more
+        address[] memory subscribed = positionRegistry.getSubscribed();
+        assertEq(subscribed.length, maxSubscribed);
+        uint256[] memory subscriptions = positionRegistry.getSubscriptions(address(uint160(maxSubscribed)));
+        assertEq(subscriptions.length, maxSubscriptions);
     }
 
     /**
@@ -637,7 +684,7 @@ contract PositionRegistryTest is
     ) internal pure returns (uint256) {
         // calculate the price which exceeds the position's range
         uint160 sqrtPriceLimitX96 = zeroForOne
-            ? TickMath.getSqrtPriceAtTick(tickLower)  // downward bound
+            ? TickMath.getSqrtPriceAtTick(tickLower) // downward bound
             : TickMath.getSqrtPriceAtTick(tickUpper); // upward bound
 
         // calculate max swappable amount based on liquidity

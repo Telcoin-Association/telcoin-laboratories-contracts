@@ -15,9 +15,9 @@ interface IPositionRegistry {
 
     /// @notice Checkpoint metadata for better searchability offchain
     struct CheckpointMetadata {
-        uint32 firstCheckpoint;
-        uint32 lastCheckpoint;
-        uint32 totalCheckpoints;
+        uint48 firstCheckpoint;
+        uint48 lastCheckpoint;
+        uint48 totalCheckpoints;
     }
 
     /// @notice Struct to represent a tracked LP position
@@ -27,10 +27,10 @@ interface IPositionRegistry {
         int24 tickLower;
         int24 tickUpper;
         /// @notice History of positions' liquidity + feeGrowth checkpoints
-        /// @dev Since Trace224 array is unbounded it can grow beyond EVM memory limits
+        /// @dev Since Trace208 array is unbounded it can grow beyond EVM memory limits
         /// do not load into EVM memory; consume events offchain instead and fall back to loading slots if needed
-        Checkpoints.Trace224 liquidityModifications;
-        mapping(uint32 => FeeGrowthCheckpoint) feeGrowthCheckpoints;
+        Checkpoints.Trace208 liquidityModifications;
+        mapping(uint48 => FeeGrowthCheckpoint) feeGrowthCheckpoints;
     }
 
     /// @notice Struct to represent positions with more granular multipool data for external consumption
@@ -168,9 +168,6 @@ interface IPositionRegistry {
      * @return True if the pool has a non-zero currency0 or currency1 address.
      */
     function validPool(PoolId id) external view returns (bool);
-
-    /// @dev Returns whether `tokenId` is currently subscribed
-    function isTokenSubscribed(uint256 tokenId) external view returns (bool);
 
     /// @notice Returns the list of all addresses that have active subscriptions
     function getSubscribed() external view returns (address[] memory);

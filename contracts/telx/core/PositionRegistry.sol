@@ -6,12 +6,10 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Checkpoints} from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
-import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IPositionRegistry, PoolId} from "../interfaces/IPositionRegistry.sol";
 import {IMsgSender} from "../interfaces/IMsgSender.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
@@ -34,7 +32,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     /// @dev Marks positions either burned or not created via PositionManager
     address constant UNTRACKED = address(type(uint160).max);
     uint256 constant MAX_SUBSCRIPTIONS = 100;
-    uint256 constant MAX_SUBSCRIBED = 1_000;
+    uint256 constant MAX_SUBSCRIBED = 50_000;
 
     /// @dev JIT lifetime is always one block
     uint256 public constant JIT_LIFETIME = 1;
@@ -52,10 +50,12 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
     mapping(uint256 => CheckpointMetadata) public positionMetadata;
 
     /// @notice The current set of active subscriptions participating in the TELxIncentives program
-    address[] public subscribed;
+    address[] private subscribed;
     mapping(address => uint256) private subscribedIndex;
     mapping(address => uint256[]) public subscriptions;
     mapping(address => bool) public isSubscribed;
+    mapping(uint256 => bool) public isTokenSubscribed;
+    mapping(uint256 => uint256) private subscriptionIndex;
 
     mapping(address => uint256) public unclaimedRewards;
 
@@ -126,10 +126,10 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     function _getLiquidityLast(uint256 tokenId) internal view returns (uint128) {
         Position storage pos = positions[tokenId];
-        uint256 len = pos.liquidityModifications.length();
+        uint256 len = Checkpoints.length(pos.liquidityModifications); //.length();
         if (len == 0) return 0;
 
-        return uint128(pos.liquidityModifications.latest());
+        return uint128(Checkpoints.latest(pos.liquidityModifications));
     }
 
     /// @inheritdoc IPositionRegistry
@@ -201,17 +201,22 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
                 tokenOwner = lp;
             } catch {
                 // token is being burned; if subscribed retain ownership for subsequent untracking
-                if (!isTokenSubscribed(tokenId)) _setUntracked(tokenId);
-                _writeCheckpoint(tokenId, uint32(block.number), newLiquidity, feeGrowth0, feeGrowth1);
+                if (!isTokenSubscribed[tokenId]) _setUntracked(tokenId);
+                _writeCheckpoint(tokenId, uint48(block.number), newLiquidity, feeGrowth0, feeGrowth1);
                 return;
             }
+        }
+
+        // clear subscriptions that dip below 1bps share of the pool's total liquidity
+        if (isTokenSubscribed[tokenId] && !_meetsSubscriptionThreshold(poolId, newLiquidity)) {
+            _removeSubscription(tokenId, tokenOwner);
         }
 
         (, PositionInfo info) = positionManager.getPoolAndPositionInfo(tokenId);
 
         // record in positions mapping and checkpoints list, await LP opt-in via `subscribe`
         _updatePosition(tokenId, tokenOwner, poolId, info.tickLower(), info.tickUpper(), newLiquidity, isNew);
-        _writeCheckpoint(tokenId, uint32(block.number), newLiquidity, feeGrowth0, feeGrowth1);
+        _writeCheckpoint(tokenId, uint48(block.number), newLiquidity, feeGrowth0, feeGrowth1);
     }
 
     function _updatePosition(
@@ -238,7 +243,7 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
 
     function _writeCheckpoint(
         uint256 tokenId,
-        uint32 checkpointBlock,
+        uint48 checkpointBlock,
         uint128 newLiquidity,
         int128 feeGrowth0,
         int128 feeGrowth1
@@ -246,19 +251,55 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         Position storage pos = positions[tokenId];
         PoolId poolId = pos.poolId;
 
-        pos.liquidityModifications.push(checkpointBlock, newLiquidity);
+        FeeGrowthCheckpoint memory lastGrowth = pos.feeGrowthCheckpoints[checkpointBlock];
+        uint256 lengthBefore = Checkpoints.length(pos.liquidityModifications);
+        // for multiple liquidity modifications within one block, overwrite with latest information
+        Checkpoints.push(pos.liquidityModifications, checkpointBlock, newLiquidity);
+        uint256 lengthAfter = Checkpoints.length(pos.liquidityModifications);
+        
+        // sum actual fee growth within the block when overwriting
+        int128 actualGrowth0;
+        int128 actualGrowth1;
+        if (lengthAfter == lengthBefore) {
+            actualGrowth0 = lastGrowth.feeGrowth0 + feeGrowth0;
+            actualGrowth1 = lastGrowth.feeGrowth1 + feeGrowth1;
+        } else {
+            actualGrowth0 = feeGrowth0;
+            actualGrowth1 = feeGrowth1;
+        }
         pos.feeGrowthCheckpoints[checkpointBlock] =
-            FeeGrowthCheckpoint({feeGrowth0: feeGrowth0, feeGrowth1: feeGrowth1});
+            FeeGrowthCheckpoint({feeGrowth0: actualGrowth0, feeGrowth1: actualGrowth1});
 
         // update metadata for better searchability offchain
         CheckpointMetadata storage metadata = positionMetadata[tokenId];
         if (metadata.firstCheckpoint == 0) {
             metadata.firstCheckpoint = checkpointBlock;
         }
-        metadata.lastCheckpoint = checkpointBlock;
-        uint256 checkpointIndex = metadata.totalCheckpoints++;
 
+        // if `lastCheckpoint == checkpointBlock` this is intrablock JIT; skip SSTORE to save gas
+        if (metadata.lastCheckpoint != checkpointBlock) metadata.lastCheckpoint = checkpointBlock;
+        // similarly, if the existing checkpoint was overwritten, skip incrementing total
+        if (lengthAfter > lengthBefore) metadata.totalCheckpoints++;
+
+        uint256 checkpointIndex = lengthAfter - 1;
+
+        // for intrablock JIT liquidity modifications, this reuses + re-emits cached index
         emit Checkpoint(tokenId, poolId, checkpointIndex, feeGrowth0, feeGrowth1);
+    }
+
+    /**
+     * @dev Checks if a position meets the minimum liquidity threshold for subscription.
+     * Threshold is 1bps of the pool's total liquidity.
+     */
+    function _meetsSubscriptionThreshold(PoolId poolId, uint128 positionLiquidity) internal view returns (bool) {
+        if (positionLiquidity == 0) return false;
+
+        // if pool is very small, any liquidity amount is accepted for subscription
+        uint128 totalLiquidity = stateView.getLiquidity(poolId);
+        if (totalLiquidity <= 10_000) return true;
+
+        uint128 subscriptionThreshold = totalLiquidity / 10_000;
+        return positionLiquidity >= subscriptionThreshold;
     }
 
     /// @dev Mark a position as untracked because it was burned or not created via PositionManager
@@ -271,48 +312,38 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      */
 
     /// @inheritdoc IPositionRegistry
-    function isTokenSubscribed(uint256 tokenId) public view returns (bool) {
-        Position storage pos = positions[tokenId];
-        if (pos.owner == address(0x0) || pos.owner == UNTRACKED) return false;
-
-        uint256[] storage subscribedIds = subscriptions[pos.owner];
-        uint256 len = subscribedIds.length;
-        for (uint256 i; i < len; ++i) {
-            if (subscribedIds[i] == tokenId) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// @inheritdoc IPositionRegistry
     function handleSubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
         Position storage pos = positions[tokenId];
-        require(validPool(pos.poolId), "PositionRegistry: Invalid pool");
         require(
             pos.owner != UNTRACKED, "PositionRegistry: Only positions created via PositionManager can be subscribed"
+        );
+        require(validPool(pos.poolId), "PositionRegistry: Invalid pool");
+
+        uint128 currentLiquidity = _getLiquidityLast(tokenId);
+        require(
+            _meetsSubscriptionThreshold(pos.poolId, currentLiquidity), "PositionRegistry: Liquidity below threshold"
         );
 
         // approved may also initiate subscribe flow but the token owner is counted for subscription anyway
         address tokenOwner = IERC721(address(positionManager)).ownerOf(tokenId);
         // `pos.owner` may be stale since ownership ledger is only updated during liquidity modifications
         if (pos.owner != tokenOwner) {
-            _updatePosition(
-                tokenId, tokenOwner, pos.poolId, pos.tickLower, pos.tickUpper, _getLiquidityLast(tokenId), false
-            );
+            _updatePosition(tokenId, tokenOwner, pos.poolId, pos.tickLower, pos.tickUpper, currentLiquidity, false);
         }
 
         uint256[] storage ownerSubscriptions = subscriptions[tokenOwner];
-        require(ownerSubscriptions.length < MAX_SUBSCRIPTIONS, "PositionRegistry: Max subscriptions reached");
+        require(ownerSubscriptions.length <= MAX_SUBSCRIPTIONS, "PositionRegistry: Max subscriptions reached");
         // only add to subscribed array on first subscription
         if (ownerSubscriptions.length == 0) {
-            require(subscribed.length < MAX_SUBSCRIBED, "PositionRegistry: Max subscribed reached");
+            require(subscribed.length <= MAX_SUBSCRIBED, "PositionRegistry: Max subscribed reached");
 
             subscribed.push(tokenOwner);
             subscribedIndex[tokenOwner] = subscribed.length - 1;
             isSubscribed[tokenOwner] = true;
         }
+        // store and index the new subscription for O(1) complexity
+        subscriptionIndex[tokenId] = ownerSubscriptions.length;
+        isTokenSubscribed[tokenId] = true;
         ownerSubscriptions.push(tokenId);
 
         emit Subscribed(tokenId, tokenOwner);
@@ -336,24 +367,30 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
      * @param owner The address of the LP whose position is being removed.
      */
     function _removeSubscription(uint256 tokenId, address owner) internal {
+        uint256 subscriptionIdx = subscriptionIndex[tokenId];
         uint256[] storage list = subscriptions[owner];
         uint256 len = list.length;
-        for (uint256 i; i < len; ++i) {
-            if (list[i] == tokenId) {
-                list[i] = list[len - 1];
-                list.pop();
-                break;
-            }
+        uint256 lastIndex = len - 1;
+
+        // if it's not the last token, swap the last token into its spot before popping
+        if (subscriptionIdx != lastIndex) {
+            uint256 lastTokenId = list[lastIndex];
+            list[subscriptionIdx] = lastTokenId;
+            // update the index of the token we just moved
+            subscriptionIndex[lastTokenId] = subscriptionIdx;
         }
+        list.pop();
+        delete subscriptionIndex[tokenId];
+        delete isTokenSubscribed[tokenId];
 
         // If the owner has no more subscriptions, remove them from the global array
-        if (subscriptions[owner].length == 0) {
-            uint256 indexToRemove = subscribedIndex[owner];
+        if (list.length == 0) {
+            uint256 subscribedIdx = subscribedIndex[owner];
             address lastOwner = subscribed[subscribed.length - 1];
 
             // use the stored index to move the last element to the deleted spot (swap and pop)
-            subscribed[indexToRemove] = lastOwner;
-            subscribedIndex[lastOwner] = indexToRemove;
+            subscribed[subscribedIdx] = lastOwner;
+            subscribedIndex[lastOwner] = subscribedIdx;
 
             subscribed.pop();
             delete subscribedIndex[owner];
