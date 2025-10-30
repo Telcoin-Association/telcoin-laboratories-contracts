@@ -20,6 +20,34 @@ The scope of this security audit includes the following Solidity smart contracts
 2.  **`TELxIncentiveHook.sol`**: The Uniswap v4 hook that listens to on-chain liquidity events and forwards data to the `PositionRegistry`.
 3.  **`TELxSubscriber.sol`**: The `ISubscriber` implementation that listens for position NFT transfers and updates ownership records in the `PositionRegistry`.
 
+#### Deployment Addresses
+
+**Base Mainnet**
+PositionRegistry: 0x3994e3ae3Cf62bD2a3a83dcE73636E954852BB04
+TELxSubscriber: 0x735ee950D979C70C14FAa739f80fC96d9893f7ED
+TELxIncentiveHook: 0x23aB2e6D4Ab0c5f872567098671F1ffb46Fd2500
+Supported Pools:
+"BASE_ETH_TEL": 0x727b2741ac2b2df8bc9185e1de972661519fc07b156057eeed9b07c50e08829b
+
+**Polygon Mainnet**
+PositionRegistry: 0x2c33fC9c09CfAC5431e754b8fe708B1dA3F5B954
+TELxSubscriber: 0x3Bf9bAdC67573e7b4756547A2dC0C77368A2062b
+TELxIncentiveHook: TEL-WETH:0xD77cC9230Ded5b6591730032975453744532a500 USDC-EMXN:0x13B979ecB3280bFf58A94B50ac6250f7Ca52a500
+Supported Pools:
+"POLYGON_WETH_TEL": 0x25412ca33f9a2069f0520708da3f70a7843374dd46dc1c7e62f6d5002f5f9fa7
+"POLYGON_USDC_EMXN": 0x37dafec81119c7987538ac000b8a8a16a7f4daeecf91626efc9956ccd5146246
+
+#### Verification
+
+forge verify-contract hook contracts/telx/core/TELxIncentiveHook.sol:TELxIncentiveHook --constructor-args $(cast abi-encode "constru
+ctor(address,address,address)" poolmanager positonmanager registry) --rpc-url $POLYGON_RPC_URL --watch
+
+forge verify-contract 0x2c33fc9c09cfac5431e754b8fe708b1da3f5b954 contracts/telx/core/PositionRegistry.sol:PositionRegistry --constructor-args $(cast abi-encode "construct
+or(address,address,address,address,address)" telcoin poolmanager positionmanager stateview admin) --rpc-url $POLYGON_RPC_URL --watch
+
+forge verify-contract subscriber contracts/telx/core/TELxSubscriber.sol:TELxSubscriber --constructor-args $(cast abi-encode "constructor(a
+ddress,address)" registry manager) --rpc-url $POLYGON_RPC_URL --watch
+
 ### Off-Chain Components (For Context)
 
 The following off-chain services are critical to the system's function but their code is **out of scope** for this audit. However, their interactions with the in-scope contracts are a key part of the review.

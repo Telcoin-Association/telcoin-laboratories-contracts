@@ -80,6 +80,17 @@ interface IPositionRegistry {
     /// @notice Emitted when a subscription is removed
     event Unsubscribed(uint256 indexed tokenId, address indexed owner);
 
+    error Untracked(uint256 tokenId);
+    error InvalidPool(PoolId poolId);
+    error LiquidityBelowThreshold(uint128 currentLiquidity);
+    error MaxSubscriptions();
+    error MaxSubscribed();
+    error ArityMismatch();
+    error AmountMismatch();
+    error NoClaimableRewards();
+    error OnlyAdmin();
+    error AlreadyInitialized();
+
     /**
      * @notice Updates the stored index of TEL in a specific Uniswap V4 pool.
      * @dev Only callable by the TELxIncentiveHook which possesses `UNI_HOOK_ROLE`

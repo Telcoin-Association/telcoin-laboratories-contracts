@@ -5,6 +5,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {MockTELxIncentiveHook} from "./MockTELxIncentiveHook.sol";
 
 // TESTING ONLY
@@ -38,7 +39,7 @@ contract TestPoolManager {
         address hook,
         address sender,
         PoolKey calldata key,
-        IPoolManager.SwapParams calldata params,
+        SwapParams calldata params,
         BalanceDelta delta,
         bytes calldata hookData
     ) external {
@@ -55,7 +56,7 @@ contract TestPoolManager {
         address hook,
         address sender,
         PoolKey calldata key,
-        IPoolManager.ModifyLiquidityParams calldata params,
+        ModifyLiquidityParams calldata params,
         bytes calldata hookData
     ) external {
         MockTELxIncentiveHook(hook).beforeAddLiquidity(
@@ -70,7 +71,7 @@ contract TestPoolManager {
         address hook,
         address sender,
         PoolKey calldata key,
-        IPoolManager.ModifyLiquidityParams calldata params,
+        ModifyLiquidityParams calldata params,
         bytes calldata hookData
     ) external {
         MockTELxIncentiveHook(hook).beforeRemoveLiquidity(

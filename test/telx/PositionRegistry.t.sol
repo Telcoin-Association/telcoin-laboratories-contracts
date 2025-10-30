@@ -31,7 +31,9 @@ import {IPositionDescriptor} from "@uniswap/v4-periphery/src/interfaces/IPositio
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 
 contract PositionRegistryTest is
-    PositionRegistry(IERC20(address(0)), IPoolManager(address(0)), IPositionManager(address(0)), StateView(address(0))),
+    PositionRegistry(
+        IERC20(address(0)), IPoolManager(address(0)), IPositionManager(address(0)), StateView(address(0)), address(0)
+    ),
     Test
 {
     using PoolIdLibrary for bytes32;
@@ -76,7 +78,11 @@ contract PositionRegistryTest is
         // create pool registry and hook on permissions-encoded address
         vm.startPrank(admin);
         positionRegistry = new PositionRegistry(
-            tel, IPoolManager(address(poolMngr)), IPositionManager(address(positionMngr)), StateView(address(st8View))
+            tel,
+            IPoolManager(address(poolMngr)),
+            IPositionManager(address(positionMngr)),
+            StateView(address(st8View)),
+            admin
         );
         positionRegistry.grantRole(positionRegistry.SUPPORT_ROLE(), support);
         TELxIncentiveHook tempHook = new TELxIncentiveHookDeployable(
