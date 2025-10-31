@@ -49,6 +49,7 @@ contract V4HookMinerDeployer is Script {
         address currency1;
         uint24 fee;
         int24 tickSpacing;
+        address hook;
     }
 
     // --- Constants ---
@@ -63,6 +64,9 @@ contract V4HookMinerDeployer is Script {
     PoolId constant POLYGON_USDC_EMXN_POOLID =
         PoolId.wrap(bytes32(0xfd56605f7f4620ab44dfc0860d70b9bd1d1f648a5a74558491b39e816a10b99a));
     PoolId constant BASE_ETH_TEL_POOLID = PoolId.wrap(bytes32(0xb6d004fca4f9a34197862176485c45ceab7117c86f07422d1fe3d9cfd6e9d1da));
+
+    // used when deprecating an old pool and migrating to new one
+    PoolId currentPoolId;
 
     // --- Config Storage ---
     mapping(uint256 => ChainConfig) public chainConfigs;
@@ -97,13 +101,15 @@ contract V4HookMinerDeployer is Script {
             currency0: chainConfigs[polygonChainId].wethToken, // WETH is currency0
             currency1: chainConfigs[polygonChainId].telToken, // TEL is currency1
             fee: 3000, // 0.3% fee = 3000
-            tickSpacing: 60
+            tickSpacing: 60,
+            hook: 0xD77cC9230Ded5b6591730032975453744532a500
         });
         poolConfigs[keccak256("POLYGON_USDC_EMXN")] = PoolConfig({
             currency0: chainConfigs[polygonChainId].usdcToken, // USDC is currency0
             currency1: chainConfigs[polygonChainId].emxnToken, // EMXN is currency1
             fee: 500, // 0.05% fee = 500
-            tickSpacing: 10
+            tickSpacing: 10,
+            hook: 0xD77cC9230Ded5b6591730032975453744532a500
         });
 
         // --- Base Config ---
@@ -124,7 +130,8 @@ contract V4HookMinerDeployer is Script {
             currency0: chainConfigs[baseChainId].nativeToken,
             currency1: chainConfigs[baseChainId].telToken,
             fee: 3000, // 0.3% fee = 3000
-            tickSpacing: 60
+            tickSpacing: 60,
+            hook: 0x23aB2e6D4Ab0c5f872567098671F1ffb46Fd2500
         });
 
         // add any future chains and pools here
@@ -139,8 +146,8 @@ contract V4HookMinerDeployer is Script {
         PoolConfig storage poolConfig = _getPoolConfig(bytes(targetPool));
 
         // 2. Deploy Contracts via CREATE2
-        vm.startBroadcast(deployer); // Start broadcasting state changes
-        _deployContracts(config);
+        vm.startBroadcast(deployer);
+        _deployContracts(config, poolConfig);
 
         // 3. Configure Roles & Router
         _configureRoles(config);
@@ -149,7 +156,14 @@ contract V4HookMinerDeployer is Script {
         /// @dev For future runs deploying + initializing brand new pools, the below must be replaced with offchain calc
         // 4. Fetch the current SQRT priceX96 from the existing v4 pools to be deprecated
         require(sqrtPriceX96 == 0, "CLI-provided sqrtPriceX96 not yet supported, must use 0");
-        (sqrtPriceX96, , ,) = StateView(config.stateView).getSlot0(BASE_ETH_TEL_POOLID);
+        if (keccak256(bytes(targetPool)) == keccak256("BASE_ETH_TEL")) {
+            currentPoolId = BASE_ETH_TEL_POOLID;
+        } else if (keccak256(bytes(targetPool)) == keccak256("POLYGON_WETH_TEL")) {
+            currentPoolId = POLYGON_WETH_TEL_POOLID;
+        } else if (keccak256(bytes(targetPool)) == keccak256("POLYGON_USDC_EMXN")) {
+            currentPoolId = POLYGON_USDC_EMXN_POOLID;
+        }
+        (sqrtPriceX96, , ,) = StateView(config.stateView).getSlot0(currentPoolId);
         assert(sqrtPriceX96 != 0);
 
         // 5. Initialize the Target Pool
@@ -168,7 +182,7 @@ contract V4HookMinerDeployer is Script {
         console.log("  Initialized Pool: %s", targetPool);
     }
 
-    function _deployContracts(ChainConfig storage config) internal {
+    function _deployContracts(ChainConfig storage config, PoolConfig memory poolConfig) internal {
         console.log("Deploying contracts via CREATE2...");
 
         // A. Deploy PositionRegistry
@@ -218,6 +232,12 @@ contract V4HookMinerDeployer is Script {
         }
 
         // C. Mine and Deploy TELxIncentiveHook
+        if (poolConfig.hook != address(0x0) || poolConfig.hook != address(type(uint160).max)) {
+            /// @dev if the hook is already deployed just set it since HookMiner will search for a new one
+            hookAddress = poolConfig.hook;
+            telxIncentiveHook = TELxIncentiveHook(poolConfig.hook);
+            return;
+        }
         console.log("  Mining hook salt...");
         // specific flags encoded in the address
         uint160 flags =
