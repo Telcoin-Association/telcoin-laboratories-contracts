@@ -40,13 +40,13 @@ Supported Pools:
 #### Verification
 
 forge verify-contract hook contracts/telx/core/TELxIncentiveHook.sol:TELxIncentiveHook --constructor-args $(cast abi-encode "constru
-ctor(address,address,address)" poolmanager positonmanager registry) --rpc-url $POLYGON_RPC_URL --watch
+ctor(address,address,address)" poolmanager positonmanager registry) --rpc-url $RPC_URL --watch
 
-forge verify-contract 0x2c33fc9c09cfac5431e754b8fe708b1da3f5b954 contracts/telx/core/PositionRegistry.sol:PositionRegistry --constructor-args $(cast abi-encode "construct
-or(address,address,address,address,address)" telcoin poolmanager positionmanager stateview admin) --rpc-url $POLYGON_RPC_URL --watch
+forge verify-contract registry contracts/telx/core/PositionRegistry.sol:PositionRegistry --constructor-args $(cast abi-encode "construct
+or(address,address,address,address,address)" telcoin poolmanager positionmanager stateview admin) --rpc-url $RPC_URL --watch
 
 forge verify-contract subscriber contracts/telx/core/TELxSubscriber.sol:TELxSubscriber --constructor-args $(cast abi-encode "constructor(a
-ddress,address)" registry manager) --rpc-url $POLYGON_RPC_URL --watch
+ddress,address)" registry manager) --rpc-url $RPC_URL --watch
 
 ### Off-Chain Components (For Context)
 
