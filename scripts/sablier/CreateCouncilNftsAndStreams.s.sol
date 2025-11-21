@@ -13,13 +13,11 @@ import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transpa
 import {ISablierV2Lockup} from "../../contracts/sablier/interfaces/ISablierV2Lockup.sol";
 
 // Sablier lockup interfaces & types for creating streams
-import {ISablierLockup} from "@sablier/lockup/src/interfaces/ISablierLockup.sol";
-import {Lockup} from "@sablier/lockup/src/types/Lockup.sol";
-import {LockupLinear} from "@sablier/lockup/src/types/LockupLinear.sol";
+import {ISablierV2LockupLinear} from "@sablier/v2-core/src/interfaces/ISablierV2LockupLinear.sol";
+import {Broker, Lockup, LockupLinear} from "@sablier/v2-core/src/types/DataTypes.sol";
+import {UD60x18} from "@prb/math/src/UD60x18.sol";
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-import {LockupLinearStreamCreator} from "./lockupLinearStreamCreator.sol";
 
 contract CreateCouncilNftsAndStreams is Script {
     struct CouncilConfig {
@@ -41,7 +39,7 @@ contract CreateCouncilNftsAndStreams is Script {
     function deploy(
         address sablierSender,
         IERC20 tel,
-        ISablierLockup sablier,
+        ISablierV2LockupLinear sablier,
         ISablierV2Lockup sablierView,
         CouncilConfig[] memory councilConfigs
     )
@@ -74,7 +72,7 @@ contract CreateCouncilNftsAndStreams is Script {
     function _deployProxiesAndStreams(
         address sablierSender,
         IERC20 tel,
-        ISablierLockup sablier,
+        ISablierV2LockupLinear sablier,
         ISablierV2Lockup sablierView,
         address implementation,
         CouncilConfig[] memory councilConfigs
@@ -100,7 +98,7 @@ contract CreateCouncilNftsAndStreams is Script {
     function _deploySingleProxyAndStream(
         address sablierSender,
         IERC20 tel,
-        ISablierLockup sablier,
+        ISablierV2LockupLinear sablier,
         ISablierV2Lockup sablierView,
         address implementation,
         CouncilConfig memory councilConfig
@@ -126,10 +124,11 @@ contract CreateCouncilNftsAndStreams is Script {
         CouncilMember councilNFT = CouncilMember(proxyAddr);
 
         // Create stream
-        uint256 streamId = _createStream(
-            sablierSender,
-            tel,
+        uint256 streamId = _createV2LinearStream(
             sablier,
+            tel,
+            sablierSender,
+            sablierSender,
             proxyAddr,
             councilConfig.deposit
         );
@@ -147,39 +146,45 @@ contract CreateCouncilNftsAndStreams is Script {
         console2.log("proxy and stream deployed");
     }
 
-    function _createStream(
-        address sablierSender,
+    function _createV2LinearStream(
+        ISablierV2LockupLinear lockupLinear,
         IERC20 tel,
-        ISablierLockup sablier,
-        address recipient,
-        uint128 deposit
+        address funder, // msg.sender in the script
+        address sender, // who can cancel
+        address recipient, // CouncilMember proxy
+        uint128 totalAmount // deposit (+ broker fee if any)
     ) internal returns (uint256 streamId) {
-        //tel.transferFrom(msg.sender, address(this), deposit);
-        console2.log("creating stream");
-        tel.approve(address(sablier), deposit);
+        // 1. Approve TEL to the lockup contract (funder must be msg.sender)
+        // If you’re already in a script broadcast as `funder`, this is enough:
+        tel.approve(address(lockupLinear), totalAmount);
 
-        Lockup.CreateWithDurations memory params;
-        params.sender = sablierSender;
-        params.recipient = recipient;
-        params.depositAmount = deposit;
-        params.token = tel;
-        params.cancelable = true;
-        params.transferable = false;
-
-        LockupLinear.UnlockAmounts memory unlockAmounts = LockupLinear
-            .UnlockAmounts({start: 0, cliff: 0});
-
+        // 2. Durations – 1 year, no cliff
         LockupLinear.Durations memory durations = LockupLinear.Durations({
             cliff: 0,
             total: 52 weeks
         });
 
-        streamId = sablier.createWithDurationsLL(
-            params,
-            unlockAmounts,
-            durations
-        );
-        console2.log("stream created");
+        // 3. Broker – set to zero if you don’t use a broker
+        Broker memory broker = Broker({
+            account: address(0),
+            fee: UD60x18.wrap(0) // zero fixed-point fee
+        });
+
+        // 4. Build params
+        LockupLinear.CreateWithDurations memory params = LockupLinear
+            .CreateWithDurations({
+                sender: sender,
+                recipient: recipient,
+                totalAmount: totalAmount,
+                asset: tel,
+                cancelable: true, // adjust
+                transferable: false, // usually false for council-owned streams
+                durations: durations,
+                broker: broker
+            });
+
+        // 5. Create the stream – this pulls `totalAmount` TEL from funder (msg.sender)
+        streamId = lockupLinear.createWithDurations(params);
     }
 
     /// @notice Production entry point – thin wrapper around `deploy`.
@@ -199,7 +204,9 @@ contract CreateCouncilNftsAndStreams is Script {
         address sablierLockupAddr = 0x8D87c5eddb5644D1a714F85930Ca940166e465f0;
 
         // Same on-chain contract, two interfaces:
-        ISablierLockup sablier = ISablierLockup(sablierLockupAddr); // for create
+        ISablierV2LockupLinear sablier = ISablierV2LockupLinear(
+            sablierLockupAddr
+        ); // for create
         ISablierV2Lockup sablierView = ISablierV2Lockup(sablierLockupAddr); // for withdrawMax
 
         uint256 councilCount = 6;
@@ -406,39 +413,5 @@ contract CreateCouncilNftsAndStreams is Script {
                 require(council.ownerOf(j) == councilConfigs[i].members[j]);
             }
         }
-    }
-
-    function createStream() external {
-        // creates a stream using helper contract as described here: https://docs.sablier.com/guides/lockup/examples/create-stream/lockup-linear
-        // more of a sanity check
-        address sablierSender = 0xd7e88D492Dc992127384215b8555C9305C218299;
-        address telcoinToken = 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32;
-
-        // Fund sablierSender with TEL & ETH
-        vm.startPrank(0x2ff79955Aad11fA93B84d79D45F504E6168935BC);
-        IERC20(telcoinToken).transfer(sablierSender, 1e9);
-        vm.stopPrank();
-        vm.deal(sablierSender, 10 ether);
-
-        // Deploy and use the stream creator
-        vm.startPrank(sablierSender);
-        LockupLinearStreamCreator streamCreator = new LockupLinearStreamCreator();
-        console2.log("Helper deployed at:", address(streamCreator));
-
-        // Fix 1: Use proper amount (1e18 instead of 1e9)
-        uint128 depositAmount = 1e9; // 1 TEL token
-
-        // Approve the stream creator to spend TEL
-        IERC20(telcoinToken).approve(address(streamCreator), depositAmount);
-
-        // Fix 2: Remove redundant address() cast
-        uint256 streamId = streamCreator.createStream(
-            depositAmount,
-            sablierSender
-        );
-
-        console2.log("Stream created with ID:", streamId);
-
-        vm.stopPrank();
     }
 }
