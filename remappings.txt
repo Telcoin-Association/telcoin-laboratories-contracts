@@ -1,1 +1,4 @@
 @uniswap/=node_modules/@uniswap/
+@sablier/lockup/=lib/lockup/
+@sablier/evm-utils/=lib/evm-utils/
+@prb/math/=lib/prb-math/

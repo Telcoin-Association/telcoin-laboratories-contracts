@@ -1,5 +1,35 @@
 {
+  "lib/evm-utils": {
+    "tag": {
+      "name": "v1.0.0",
+      "rev": "d7d6c051a39cbacadef672e92ed9d57628c80dc4"
+    }
+  },
   "lib/forge-std": {
     "rev": "8bbcf6e3f8f62f419e5429a0bd89331c85c37824"
+  },
+  "lib/lockup": {
+    "tag": {
+      "name": "v3.0.1",
+      "rev": "0c3ea987b00f12a57274556cd84bddaab92f5a16"
+    }
+  },
+  "lib/openzeppelin-contracts": {
+    "tag": {
+      "name": "v5.5.0",
+      "rev": "fcbae5394ae8ad52d8e580a3477db99814b9d565"
+    }
+  },
+  "lib/openzeppelin-contracts-upgradeable": {
+    "tag": {
+      "name": "v5.5.0",
+      "rev": "aa677e9d28ed78fc427ec47ba2baef2030c58e7c"
+    }
+  },
+  "lib/prb-math": {
+    "tag": {
+      "name": "v4.1.0",
+      "rev": "280fc5f77e1b21b9c54013aac51966be33f4a410"
+    }
   }
 }
