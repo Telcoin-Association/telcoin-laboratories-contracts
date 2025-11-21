@@ -8,12 +8,6 @@
   "lib/forge-std": {
     "rev": "8bbcf6e3f8f62f419e5429a0bd89331c85c37824"
   },
-  "lib/lockup": {
-    "tag": {
-      "name": "v3.0.1",
-      "rev": "0c3ea987b00f12a57274556cd84bddaab92f5a16"
-    }
-  },
   "lib/openzeppelin-contracts": {
     "tag": {
       "name": "v5.5.0",

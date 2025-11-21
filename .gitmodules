@@ -7,9 +7,6 @@
 [submodule "lib/openzeppelin-contracts"]
 	path = lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
-[submodule "lib/lockup"]
-	path = lib/lockup
-	url = https://github.com/sablier-labs/lockup
 [submodule "lib/evm-utils"]
 	path = lib/evm-utils
 	url = https://github.com/sablier-labs/evm-utils
