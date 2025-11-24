@@ -5,8 +5,6 @@ import "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
 
 import {CouncilMember} from "../../contracts/sablier/core/CouncilMember.sol";
-// IMPORTANT: use the same TransparentUpgradeableProxy implementation your existing deployment uses.
-// If that is a local contract, import from your repo instead of OZ’s default.
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 // Local interface used by CouncilMember for withdrawMax
@@ -107,7 +105,6 @@ contract CreateCouncilNftsAndStreams is Script {
     /// @param sablierView Interface used by CouncilMember (withdrawMax).
     /// @param implementation Deployed Council Member instance. Proxies point to this address.
     /// @param councilConfig array of info for council NFT creation and deployment
-
     function _deploySingleProxyAndStream(
         address sablierSender,
         IERC20 tel,
@@ -156,12 +153,13 @@ contract CreateCouncilNftsAndStreams is Script {
         updatedConfig.streamId = streamId;
     }
 
+    /// @notice Creates a sablier v2 linear stream (v1.2)
     function _createV2LinearStream(
         ISablierV2LockupLinear lockupLinear,
         IERC20 tel,
-        address sender, // who can cancel
-        address recipient, // CouncilMember proxy
-        uint128 totalAmount // deposit (+ broker fee if any)
+        address sender,
+        address recipient,
+        uint128 totalAmount
     ) internal returns (uint256 streamId) {
         // 1. Approve TEL to the lockup contract (funder must be msg.sender)
         tel.approve(address(lockupLinear), totalAmount);
@@ -195,6 +193,7 @@ contract CreateCouncilNftsAndStreams is Script {
         streamId = lockupLinear.createWithDurations(params);
     }
 
+    /// @notice pure function to neaten writing of council NFT parameters to script
     function getCouncilsInfo()
         internal
         pure
