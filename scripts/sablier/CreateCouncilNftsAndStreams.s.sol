@@ -30,8 +30,8 @@ contract CreateCouncilNftsAndStreams is Script {
         uint256 streamId;
     }
 
-    /// @notice deploys implementation, proxies and streams.'connect' each stream to corresponding proxy sablierSender will have governance council role. This needs to be transferred to the respective governance council at the end
-    /// @param sablierSender Address that funds streams and is set as `sender` in Sablier params.
+    /// @notice deploys implementation, proxies and streams.'connects' each stream to corresponding proxy. sablierSender will have governance council role. This needs to be transferred to the respective governance council at the end
+    /// @param sablierSender Address that funds streams and is msg.sender in Sablier stream creation.
     /// @param tel TEL token interface.
     /// @param sablier Sablier Lockup interface for creating streams.
     /// @param sablierView Interface used by CouncilMember (withdrawMax).
@@ -46,7 +46,6 @@ contract CreateCouncilNftsAndStreams is Script {
         public
         returns (address implementation, CouncilConfig[] memory updatedConfigs)
     {
-        console2.log("starting deploy");
         // Deploy implementation
         implementation = _deployImplementation();
 
@@ -61,6 +60,8 @@ contract CreateCouncilNftsAndStreams is Script {
         );
     }
 
+    /// @notice deploys Council Member (implementation) contract.
+
     function _deployImplementation() internal returns (address) {
         CouncilMember impl = new CouncilMember(true);
         address implementation = address(impl);
@@ -69,6 +70,13 @@ contract CreateCouncilNftsAndStreams is Script {
         return implementation;
     }
 
+    /// @notice deploys proxies and streams.'connects' each stream to corresponding proxy. sablierSender will have governance council role. This needs to be transferred to the respective governance council at the end
+    /// @param sablierSender Address that funds streams and is msg.sender in Sablier stream creation.
+    /// @param tel TEL token interface.
+    /// @param sablier Sablier Lockup interface for creating streams.
+    /// @param sablierView Interface used by CouncilMember (withdrawMax).
+    /// @param implementation Deployed Council Member instance. Proxies point to this address.
+    /// @param councilConfigs array of info for council NFT creation and deployment
     function _deployProxiesAndStreams(
         address sablierSender,
         IERC20 tel,
@@ -79,7 +87,6 @@ contract CreateCouncilNftsAndStreams is Script {
     ) internal returns (CouncilConfig[] memory updatedConfigs) {
         uint256 length = councilConfigs.length;
         updatedConfigs = new CouncilConfig[](length);
-        console2.log(length);
 
         for (uint256 i = 0; i < length; ++i) {
             (updatedConfigs[i]) = _deploySingleProxyAndStream(
@@ -90,10 +97,16 @@ contract CreateCouncilNftsAndStreams is Script {
                 implementation,
                 councilConfigs[i]
             );
-            console2.log("proxy and stream deployed");
         }
-        console2.log("proxies and streams deployed");
     }
+
+    /// @notice deploys a single Transparent Upgradeable Proxy and its corresponding stream.'connects' each stream to corresponding proxy. sablierSender will have governance council role. This needs to be transferred to the respective governance council at the end
+    /// @param sablierSender Address that funds streams and is msg.sender in Sablier stream creation.
+    /// @param tel TEL token interface.
+    /// @param sablier Sablier Lockup interface for creating streams.
+    /// @param sablierView Interface used by CouncilMember (withdrawMax).
+    /// @param implementation Deployed Council Member instance. Proxies point to this address.
+    /// @param councilConfig array of info for council NFT creation and deployment
 
     function _deploySingleProxyAndStream(
         address sablierSender,
@@ -104,7 +117,6 @@ contract CreateCouncilNftsAndStreams is Script {
         CouncilConfig memory councilConfig
     ) internal returns (CouncilConfig memory updatedConfig) {
         // Initialize CouncilMember
-        console2.log("deploying single proxy and stream");
         bytes memory initData = abi.encodeWithSelector(
             CouncilMember.initialize.selector,
             tel,
@@ -128,7 +140,6 @@ contract CreateCouncilNftsAndStreams is Script {
             sablier,
             tel,
             sablierSender,
-            sablierSender,
             proxyAddr,
             councilConfig.deposit
         );
@@ -143,19 +154,16 @@ contract CreateCouncilNftsAndStreams is Script {
         updatedConfig = councilConfig;
         updatedConfig.proxy = proxyAddr;
         updatedConfig.streamId = streamId;
-        console2.log("proxy and stream deployed");
     }
 
     function _createV2LinearStream(
         ISablierV2LockupLinear lockupLinear,
         IERC20 tel,
-        address funder, // msg.sender in the script
         address sender, // who can cancel
         address recipient, // CouncilMember proxy
         uint128 totalAmount // deposit (+ broker fee if any)
     ) internal returns (uint256 streamId) {
         // 1. Approve TEL to the lockup contract (funder must be msg.sender)
-        // If you’re already in a script broadcast as `funder`, this is enough:
         tel.approve(address(lockupLinear), totalAmount);
 
         // 2. Durations – 1 year, no cliff
@@ -164,10 +172,10 @@ contract CreateCouncilNftsAndStreams is Script {
             total: 52 weeks
         });
 
-        // 3. Broker – set to zero if you don’t use a broker
+        // 3. Broker - N/A - set to zero
         Broker memory broker = Broker({
             account: address(0),
-            fee: UD60x18.wrap(0) // zero fixed-point fee
+            fee: UD60x18.wrap(0)
         });
 
         // 4. Build params
@@ -177,43 +185,24 @@ contract CreateCouncilNftsAndStreams is Script {
                 recipient: recipient,
                 totalAmount: totalAmount,
                 asset: tel,
-                cancelable: true, // adjust
-                transferable: false, // usually false for council-owned streams
+                cancelable: true,
+                transferable: false,
                 durations: durations,
                 broker: broker
             });
 
-        // 5. Create the stream – this pulls `totalAmount` TEL from funder (msg.sender)
+        // 5. Create the stream – this pulls `totalAmount` TEL from msg.sender
         streamId = lockupLinear.createWithDurations(params);
     }
 
-    /// @notice Production entry point – thin wrapper around `deploy`.
-    function run() external {
-        uint256 pk = vm.envOr("PRIVATE_KEY", uint256(0));
-        address sablierSender;
-        if (pk == 0) {
-            sablierSender = 0x576b81F0c21EDBc920ad63FeEEB2b0736b018A58;
-        } else {
-            sablierSender = vm.addr(pk);
-        }
-
-        console2.log("starting run");
-
-        IERC20 tel = IERC20(0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32);
-
-        address sablierLockupAddr = 0x8D87c5eddb5644D1a714F85930Ca940166e465f0;
-
-        // Same on-chain contract, two interfaces:
-        ISablierV2LockupLinear sablier = ISablierV2LockupLinear(
-            sablierLockupAddr
-        ); // for create
-        ISablierV2Lockup sablierView = ISablierV2Lockup(sablierLockupAddr); // for withdrawMax
-
+    function getCouncilsInfo()
+        internal
+        pure
+        returns (CouncilConfig[] memory councilConfigs)
+    {
         uint256 councilCount = 6;
 
-        CouncilConfig[] memory councilConfigs = new CouncilConfig[](
-            councilCount
-        );
+        councilConfigs = new CouncilConfig[](councilCount);
 
         // TAO Config
 
@@ -325,6 +314,29 @@ contract CreateCouncilNftsAndStreams is Script {
         members5[5] = 0x5ea52e2269eb71413cC1be9Db12230A915E254D1;
 
         councilConfigs[5].members = members5;
+    }
+
+    /// @notice Production entry point – thin wrapper around `deploy`.
+    function run() external {
+        uint256 pk = vm.envOr("PRIVATE_KEY", uint256(0));
+        address sablierSender;
+        if (pk == 0) {
+            sablierSender = 0x576b81F0c21EDBc920ad63FeEEB2b0736b018A58;
+        } else {
+            sablierSender = vm.addr(pk);
+        }
+
+        IERC20 tel = IERC20(0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32);
+
+        address sablierLockupAddr = 0x8D87c5eddb5644D1a714F85930Ca940166e465f0;
+
+        // Same on-chain contract, two interfaces:
+        ISablierV2LockupLinear sablier = ISablierV2LockupLinear(
+            sablierLockupAddr
+        ); // for create
+        ISablierV2Lockup sablierView = ISablierV2Lockup(sablierLockupAddr); // for withdrawMax
+
+        CouncilConfig[] memory councilConfigs = getCouncilsInfo();
 
         vm.startBroadcast(sablierSender); //(pk)
 
@@ -387,9 +399,12 @@ contract CreateCouncilNftsAndStreams is Script {
             "CRITICAL: implementation initializer is NOT disabled"
         );
 
+        // Council Config tests
         for (uint256 i = 0; i < councilConfigs.length; i++) {
-            CouncilMember council = CouncilMember(councilConfigs[i].proxy);
-            require(council._id() == councilConfigs[i].streamId);
+            address proxyAddress = councilConfigs[i].proxy;
+            CouncilMember council = CouncilMember(proxyAddress);
+            uint256 streamId = council._id();
+            require(streamId == councilConfigs[i].streamId);
             require(council.totalSupply() == councilConfigs[i].members.length);
             require(
                 council.hasRole(
@@ -412,6 +427,29 @@ contract CreateCouncilNftsAndStreams is Script {
             for (uint256 j = 0; j < councilConfigs[i].members.length; j++) {
                 require(council.ownerOf(j) == councilConfigs[i].members[j]);
             }
+
+            // **Sablier tests**
+            // require streaming to proxy
+            require(sablier.balanceOf(proxyAddress) > 0);
+
+            LockupLinear.StreamLL memory sablierStreamInfo = sablier.getStream(
+                streamId
+            );
+            require(sablierStreamInfo.sender == sablierSender);
+            require(sablierStreamInfo.recipient == proxyAddress);
+            require(sablierStreamInfo.isCancelable == true);
+            require(sablierStreamInfo.wasCanceled == false);
+            require(sablierStreamInfo.asset == tel);
+            require(sablierStreamInfo.endTime > sablierStreamInfo.startTime);
+            require(sablierStreamInfo.isDepleted == false);
+            require(sablierStreamInfo.isStream == true);
+            require(sablierStreamInfo.isTransferable == false);
+            require(
+                sablierStreamInfo.amounts.deposited == councilConfigs[i].deposit
+            );
+            require(sablierStreamInfo.amounts.withdrawn == 0);
+            require(sablierStreamInfo.amounts.refunded == 0);
+            require(sablierStreamInfo.cliffTime == 0);
         }
     }
 }
