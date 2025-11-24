@@ -62,6 +62,8 @@ contract CreateCouncilNftsAndStreams is Script {
 
     function _deployImplementation() internal returns (address) {
         CouncilMember impl = new CouncilMember(true);
+        // NOTE: CouncilMemberDeployed has no constructor (which should call _disableInitializers())
+        // impl._disableInitializers();
         address implementation = address(impl);
         console.log("implementation deployed to: ", implementation);
 
