@@ -15,9 +15,9 @@ interface IPositionRegistry {
 
     /// @notice Checkpoint metadata for better searchability offchain
     struct CheckpointMetadata {
-        uint32 firstCheckpoint;
-        uint32 lastCheckpoint;
-        uint32 totalCheckpoints;
+        uint48 firstCheckpoint;
+        uint48 lastCheckpoint;
+        uint48 totalCheckpoints;
     }
 
     /// @notice Struct to represent a tracked LP position
@@ -27,10 +27,10 @@ interface IPositionRegistry {
         int24 tickLower;
         int24 tickUpper;
         /// @notice History of positions' liquidity + feeGrowth checkpoints
-        /// @dev Since Trace224 array is unbounded it can grow beyond EVM memory limits
+        /// @dev Since Trace208 array is unbounded it can grow beyond EVM memory limits
         /// do not load into EVM memory; consume events offchain instead and fall back to loading slots if needed
-        Checkpoints.Trace224 liquidityModifications;
-        mapping(uint32 => FeeGrowthCheckpoint) feeGrowthCheckpoints;
+        Checkpoints.Trace208 liquidityModifications;
+        mapping(uint48 => FeeGrowthCheckpoint) feeGrowthCheckpoints;
     }
 
     /// @notice Struct to represent positions with more granular multipool data for external consumption
@@ -63,7 +63,7 @@ interface IPositionRegistry {
     event PoolInitialized(PoolKey indexed poolKey);
 
     /// @notice Emitted when the weight configuration is updated
-    event WeightsConfigured(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight);
+    event WeightsConfigured(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight, uint256 passiveWeight);
 
     /// @notice Emitted at each liquidity modification for offchain consumption
     event Checkpoint(
@@ -78,10 +78,18 @@ interface IPositionRegistry {
     event Subscribed(uint256 indexed tokenId, address indexed owner);
 
     /// @notice Emitted when a subscription is removed
-    event Unsubscribed(
-        uint256 indexed tokenId,
-        address indexed owner
-    );
+    event Unsubscribed(uint256 indexed tokenId, address indexed owner);
+
+    error Untracked(uint256 tokenId);
+    error InvalidPool(PoolId poolId);
+    error LiquidityBelowThreshold(uint128 currentLiquidity);
+    error MaxSubscriptions();
+    error MaxSubscribed();
+    error ArityMismatch();
+    error AmountMismatch();
+    error NoClaimableRewards();
+    error OnlyAdmin();
+    error AlreadyInitialized();
 
     /**
      * @notice Updates the stored index of TEL in a specific Uniswap V4 pool.
@@ -141,20 +149,16 @@ interface IPositionRegistry {
      * @notice Computes currency0 & currency1 amounts for given liquidity at current tick price
      * @dev Exposes Uniswap V3/V4 concentrated liquidity math publicly for TELx frontend use
      */
-    function getAmountsForLiquidity(
-        PoolId poolId,
-        uint128 liquidity,
-        int24 tickLower,
-        int24 tickUpper
-    ) external view returns (uint256 amount0, uint256 amount1, uint160 sqrtPriceX96);
+    function getAmountsForLiquidity(PoolId poolId, uint128 liquidity, int24 tickLower, int24 tickUpper)
+        external
+        view
+        returns (uint256 amount0, uint256 amount1, uint160 sqrtPriceX96);
 
     /// @notice Returns position metadata for a given tokenId
-    function getPosition(uint256 tokenId) external view returns (
-        address owner,
-        PoolId poolId,
-        int24 tickLower,
-        int24 tickUpper
-    );
+    function getPosition(uint256 tokenId)
+        external
+        view
+        returns (address owner, PoolId poolId, int24 tickLower, int24 tickUpper);
 
     /// @notice Returns position with more granular multipool data for external consumption
     function getPositionDetails(uint256 tokenId) external view returns (PositionDetails memory);
@@ -175,9 +179,6 @@ interface IPositionRegistry {
      * @return True if the pool has a non-zero currency0 or currency1 address.
      */
     function validPool(PoolId id) external view returns (bool);
-
-    /// @dev Returns whether `tokenId` is currently subscribed
-    function isTokenSubscribed(uint256 tokenId) external view returns (bool);
 
     /// @notice Returns the list of all addresses that have active subscriptions
     function getSubscribed() external view returns (address[] memory);
@@ -203,7 +204,12 @@ interface IPositionRegistry {
     function getUnclaimedRewards(address user) external view returns (uint256);
 
     /// @notice Configures JIT | Active | Passive lifetimes and weights for offchain consumption
-    function configureWeights(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight) external;
+    function configureWeights(
+        uint256 minPassiveLifetime,
+        uint256 jitWeight,
+        uint256 activeWeight,
+        uint256 passiveWeight
+    ) external;
 
     /**
      * @notice Admin function to recover ERC20 tokens sent to contract in error
