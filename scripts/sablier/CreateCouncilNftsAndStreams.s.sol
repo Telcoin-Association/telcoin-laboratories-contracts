@@ -28,7 +28,8 @@ contract CreateCouncilNftsAndStreams is Script {
         uint256 streamId;
     }
 
-    /// @notice deploys implementation, proxies and streams.'connects' each stream to corresponding proxy. sablierSender will have governance council role. This needs to be transferred to the respective governance council at the end
+    /// @notice deploys implementation, proxies and streams with streams connected to its corresponding proxy. 
+    /// sablierSender will have governance council role which must be transferred to respective governance safe at end
     /// @param sablierSender Address that funds streams and is msg.sender in Sablier stream creation.
     /// @param tel TEL token interface.
     /// @param sablier Sablier Lockup interface for creating streams.
@@ -44,8 +45,9 @@ contract CreateCouncilNftsAndStreams is Script {
         public
         returns (address implementation, CouncilConfig[] memory updatedConfigs)
     {
-        // Deploy implementation
-        implementation = _deployImplementation();
+        // Deploy implementation, initializing it and granting `taoSafe` the default admin role
+        address taoSafe = councilConfigs[0].safeAddress;
+        implementation = _deployImplementation(sablierSender, taoSafe);
 
         // Deploy proxies and create streams
         (updatedConfigs) = _deployProxiesAndStreams(
@@ -59,18 +61,26 @@ contract CreateCouncilNftsAndStreams is Script {
     }
 
     /// @notice deploys Council Member (implementation) contract.
+    /// @dev NOTE: The current audited CouncilMember version does **NOT** initialize in its constructor
+    /// so it must be done explicitly here until further notice (fixes & follow-up security audit)
+    /// @param deployer The deployer address running this script using the environment's `PRIVATE_KEY`
+    /// @param implAdmin The address which should end up with the `DEFAULT_ADMIN_ROLE` after deployment
+    function _deployImplementation(address deployer, address implAdmin) internal returns (address) {
+        CouncilMember impl = new CouncilMember();
+        /// @dev explicitly initialize and handle `DEFAULT_ADMIN_ROLE` granted to caller 
+        impl.initialize(IERC20(address(0)), "IMPL", "IMPL", ISablierV2Lockup(address(0)), 0);
+        bytes32 adminRole = impl.DEFAULT_ADMIN_ROLE();
+        impl.grantRole(adminRole, implAdmin);
+        impl.revokeRole(adminRole, deployer);
 
-    function _deployImplementation() internal returns (address) {
-        CouncilMember impl = new CouncilMember(true);
-        // NOTE: CouncilMemberDeployed has no constructor (which should call _disableInitializers())
-        // impl._disableInitializers();
         address implementation = address(impl);
-        console.log("implementation deployed to: ", implementation);
+        console2.log("implementation deployed to: ", implementation);
 
         return implementation;
     }
 
-    /// @notice deploys proxies and streams.'connects' each stream to corresponding proxy. sablierSender will have governance council role. This needs to be transferred to the respective governance council at the end
+    /// @notice deploys all proxies and streams, connecting streams to their corresponding proxies
+    /// sablierSender will have governance council role which must be transferred to respective governance safe at end
     /// @param sablierSender Address that funds streams and is msg.sender in Sablier stream creation.
     /// @param tel TEL token interface.
     /// @param sablier Sablier Lockup interface for creating streams.
@@ -100,7 +110,8 @@ contract CreateCouncilNftsAndStreams is Script {
         }
     }
 
-    /// @notice deploys a single Transparent Upgradeable Proxy and its corresponding stream.'connects' each stream to corresponding proxy. sablierSender will have governance council role. This needs to be transferred to the respective governance council at the end
+    /// @notice deploys a single Transparent Upgradeable Proxy and connects its corresponding stream
+    /// `sablierSender` will have governance council role, which must be transferred to respective council safe at end
     /// @param sablierSender Address that funds streams and is msg.sender in Sablier stream creation.
     /// @param tel TEL token interface.
     /// @param sablier Sablier Lockup interface for creating streams.
@@ -115,7 +126,7 @@ contract CreateCouncilNftsAndStreams is Script {
         address implementation,
         CouncilConfig memory councilConfig
     ) internal returns (CouncilConfig memory updatedConfig) {
-        // Initialize CouncilMember
+        // Initialize CouncilMember, using placeholder `streamId == 0` first
         bytes memory initData = abi.encodeWithSelector(
             CouncilMember.initialize.selector,
             tel,
@@ -202,11 +213,9 @@ contract CreateCouncilNftsAndStreams is Script {
         returns (CouncilConfig[] memory councilConfigs)
     {
         uint256 councilCount = 6;
-
         councilConfigs = new CouncilConfig[](councilCount);
 
         // TAO Config
-
         councilConfigs[0].name = "Telcoin Autonomous Ops";
         councilConfigs[0].symbol = "TAONFT";
         councilConfigs[0].deposit = 454545450; // based on previous year streams
@@ -214,7 +223,6 @@ contract CreateCouncilNftsAndStreams is Script {
             .safeAddress = 0xF4bC288d616C4f57071a57f5A4050B5e516fe7e5; //TAO: new safe
 
         address[] memory members0 = new address[](5);
-
         members0[0] = 0x9246B2C653015e28087b63dB3B9A7afE4c6eb408;
         members0[1] = 0xc1612C97537c2CC62a11FC4516367AB6F62d4B23;
         members0[2] = 0x20422E99303E9Fc438f1ce733E97E780a9877851;
@@ -224,7 +232,6 @@ contract CreateCouncilNftsAndStreams is Script {
         councilConfigs[0].members = members0;
 
         // Platform Council Config
-
         councilConfigs[1].name = "Telcoin Association - Platform Council";
         councilConfigs[1].symbol = "PcNFT";
         councilConfigs[1].deposit = 727272720; // based on previous year streams
@@ -232,7 +239,6 @@ contract CreateCouncilNftsAndStreams is Script {
             .safeAddress = 0x6e130C92E6F4d71B081C4d5B664Cb210E55dBAcf; //Platform Council safe
 
         address[] memory members1 = new address[](8);
-
         members1[0] = 0x5C49F2fBf52C81d48cE95BB82efA7e760AA2F7de;
         members1[1] = 0x50360eE480809A5361439DA5d009a907e2ABf4B9;
         members1[2] = 0x36AC0C07f05E52A749e1E6Cc58ab52d1c5437556;
@@ -245,7 +251,6 @@ contract CreateCouncilNftsAndStreams is Script {
         councilConfigs[1].members = members1;
 
         // Treasury Council Config
-
         councilConfigs[2].name = "Telcoin Association - Treasury Council";
         councilConfigs[2].symbol = "TcNFT";
         councilConfigs[2].deposit = 363636360; // based on previous year streams
@@ -253,7 +258,6 @@ contract CreateCouncilNftsAndStreams is Script {
             .safeAddress = 0x2580CCB2BE946AD98eFfA7f4B76148Bed319011c; //Treasury safe
 
         address[] memory members2 = new address[](4);
-
         members2[0] = 0x8154Ea33a9428a952371a2cf62BE8dcd0FDf7D9e;
         members2[1] = 0xcA48Aa498282bFB1161C4ce450F142E6335Edaf0;
         members2[2] = 0xc1612C97537c2CC62a11FC4516367AB6F62d4B23;
@@ -262,7 +266,6 @@ contract CreateCouncilNftsAndStreams is Script {
         councilConfigs[2].members = members2;
 
         // Compliance Council Config
-
         councilConfigs[3].name = "Telcoin Association - Compliance Council";
         councilConfigs[3].symbol = "CcNFT";
         councilConfigs[3].deposit = 363636360; // based on previous year streams
@@ -270,7 +273,6 @@ contract CreateCouncilNftsAndStreams is Script {
             .safeAddress = 0x0454D03C2010862277262Cb306749e829ee97591; //Compliance safe
 
         address[] memory members3 = new address[](4);
-
         members3[0] = 0x5e671bB9F225F3090DA69BB374a648d0F15fF3fB;
         members3[1] = 0x19BeC353c5eFdEBEEdfA88698BcF89225F9325EE;
         members3[2] = 0x51b2695e7f21fcB56f34a3eC7d44B482C2eFE4d9;
@@ -279,7 +281,6 @@ contract CreateCouncilNftsAndStreams is Script {
         councilConfigs[3].members = members3;
 
         // TAN Council Config
-
         councilConfigs[4].name = "Telcoin Association - TAN Council";
         councilConfigs[4].symbol = "TANNFT";
         councilConfigs[4].deposit = 545454540; // based on previous year streams
@@ -287,7 +288,6 @@ contract CreateCouncilNftsAndStreams is Script {
             .safeAddress = 0x8Dcf8d134F22aC625A7aFb39514695801CD705b5; //TAN safe
 
         address[] memory members4 = new address[](6);
-
         members4[0] = 0x20422E99303E9Fc438f1ce733E97E780a9877851;
         members4[1] = 0x8f0D4Cd6F0Dc60E315188Ccc1C42F266E8dE86Ae;
         members4[2] = 0x20422E99303E9Fc438f1ce733E97E780a9877851;
@@ -298,7 +298,6 @@ contract CreateCouncilNftsAndStreams is Script {
         councilConfigs[4].members = members4;
 
         // TELx Council Config
-
         councilConfigs[5].name = "Telcoin Association - TELx Council";
         councilConfigs[5].symbol = "TELxNFT";
         councilConfigs[5].deposit = 545454540; // based on previous year streams
@@ -306,7 +305,6 @@ contract CreateCouncilNftsAndStreams is Script {
             .safeAddress = 0x583D596b0a79C0e83C87851eA9FB1A91e80290B2; //TELx safe
 
         address[] memory members5 = new address[](6);
-
         members5[0] = 0x5490f0c24a452dFB62Bb8414A3E7aeAc1ecd19C9;
         members5[1] = 0x9DFB70a80709266C33988EEEE15f68E137CE392b;
         members5[2] = 0x20422E99303E9Fc438f1ce733E97E780a9877851;
@@ -319,16 +317,26 @@ contract CreateCouncilNftsAndStreams is Script {
 
     /// @notice Production entry point – thin wrapper around `deploy`.
     function run() external {
-        uint256 pk = vm.envOr("PRIVATE_KEY", uint256(0));
-        address sablierSender;
-        if (pk == 0) {
-            sablierSender = 0x576b81F0c21EDBc920ad63FeEEB2b0736b018A58;
+        address sablierSender; // the deployer address for this script context
+
+        // Check if we're running with a ledger or private key
+        address ethFrom = vm.envOr("ETH_FROM", address(0));
+        if (ethFrom != address(0)) {
+            sablierSender = ethFrom;
+            vm.startBroadcast(sablierSender);
         } else {
-            sablierSender = vm.addr(pk);
+            // Fallback to private key env check
+            uint256 pk = vm.envOr("PRIVATE_KEY", uint256(0));
+            if (pk == 0) {
+                /// @dev runs outside private key/ledger use MEXC address since it reliably holds enough TEL
+                sablierSender = 0x576b81F0c21EDBc920ad63FeEEB2b0736b018A58;
+            } else {
+                sablierSender = vm.addr(pk);
+            }
         }
+        console2.log("Running with msg.sender: ", sablierSender);
 
         IERC20 tel = IERC20(0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32);
-
         address sablierLockupAddr = 0x8D87c5eddb5644D1a714F85930Ca940166e465f0;
 
         // Same on-chain contract, two interfaces:
@@ -339,7 +347,7 @@ contract CreateCouncilNftsAndStreams is Script {
 
         CouncilConfig[] memory councilConfigs = getCouncilsInfo();
 
-        vm.startBroadcast(sablierSender); //(pk)
+        vm.startBroadcast(sablierSender);
 
         address implementation;
         (implementation, councilConfigs) = deploy(
@@ -361,19 +369,16 @@ contract CreateCouncilNftsAndStreams is Script {
             }
 
             // revoke sablierSender GOVERNANCE_COUNCIL_ROLE
-
             council.revokeRole(
                 council.GOVERNANCE_COUNCIL_ROLE(),
                 sablierSender
             );
 
             // grant GOVERNANCE_COUNCIL_ROLE and SUPPORT_ROLE to specific council safe
-
             council.grantRole(
                 council.GOVERNANCE_COUNCIL_ROLE(),
                 councilConfigs[i].safeAddress
             );
-
             council.grantRole(
                 council.SUPPORT_ROLE(),
                 councilConfigs[i].safeAddress
@@ -394,7 +399,6 @@ contract CreateCouncilNftsAndStreams is Script {
                 0
             )
         );
-
         require(
             !success,
             "CRITICAL: implementation initializer is NOT disabled"
