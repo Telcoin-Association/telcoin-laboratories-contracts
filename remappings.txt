@@ -1,1 +1,2 @@
 @uniswap/=node_modules/@uniswap/
+@prb/math/=lib/prb-math/
