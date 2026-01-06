@@ -48,7 +48,7 @@ To protect the system from Denial-of-Service (DoS) attacks where malicious actor
 ---
 
 ## How to Participate (Step-by-Step)
-
+The following provies a brief overview of the processes of position creation and subscription. For more detailed instructions, please see the TELx [providing liquidity](https://www.telx.network/about/how-do-i-provide-liquidity) and [staking liquidity](https://www.telx.network/about/how-do-i-stake-my-liquidity) guides.
 1.  **Create Position:** Provide liquidity to a supported TELx pool on Uniswap v4. A list of live TELx pools can be found [here](https://www.telx.network/pools).
     > **Note:** Add liquidity to the desired TELx pool by selecting the pool and clicking 'Add Liquidity On Uniswap' on the specific pool page on TELx. This will take you to the specific TELx pool's page, with important fields (such as hook contract address) pre populated. this is the only 'official' TELx pool in each case.
 2.  **Subscribe (Required):** You must explicitly click **"Subscribe"** on the TELx interface. Simply holding the NFT is not enough; you must opt-in.
