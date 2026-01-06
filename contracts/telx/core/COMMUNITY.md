@@ -5,13 +5,14 @@ To ensure fair distribution and a secure ecosystem, this program uses specific r
 
 ## 🚨 The Golden Rule: Patience Pays (Current Configuration)
 The goal of this program is to reward **long-term, stable liquidity**. We categorize Liquidity Miner behavior into three categories:
-* Just In time
-* Active
+
 * Passive 
+* Active
+* Just in Time
 
 **Currently, only "Passive" behavior is rewarded.**
 
-> **Note:** The below weights (0% vs 100%) and the time thresholds (24 hours) are set by the TELx Council. They can be changed at any time, via TELxIP, to adapt to market conditions, though we expect the current configuration to remain stable.
+> **Note:** The below weights (0% vs 100%) and the time thresholds (24 hours) are set by the TELx Council. They can be changed at any time, via TELxIP, to adapt to market conditions.
 
 ### 1. Passive Liquidity (✅ Rewarded)
 * **Definition:** You add liquidity and **do not modify it more than once in any ~24 hour period**.
@@ -49,6 +50,7 @@ To protect the system from Denial-of-Service (DoS) attacks where malicious actor
 ## How to Participate (Step-by-Step)
 
 1.  **Create Position:** Provide liquidity to a supported TELx pool on Uniswap v4. A list of live TELx pools can be found [here](https://www.telx.network/pools).
+    > **Note:** Add liquidity to the desired TELx pool by selecting the pool and clicking 'Add Liquidity On Uniswap' on the specific pool page on TELx. This will take you to the specific TELx pool's page, with important fields (such as hook contract address) pre populated. this is the only 'official' TELx pool in each case.
 2.  **Subscribe (Required):** You must explicitly click **"Subscribe"** on the TELx interface. Simply holding the NFT is not enough; you must opt-in.
 3.  **Stay Passive:** Avoid modifying your position more than once a day.
 4.  **Monitor Ownership:** If you transfer your NFT to a new wallet or sell it, the position is automatically unsubscribed. The new owner must re-subscribe.
