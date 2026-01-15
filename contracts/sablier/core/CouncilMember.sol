@@ -97,13 +97,13 @@ contract CouncilMember is
         // Retrieve and distribute any pending TELCOIN for all council members
         _retrieve();
 
+        uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
+
         // Ensure the requested amount doesn't exceed the balance of the council member
         require(
-            amount <= balances[tokenId],
+            amount <= balances[balanceIndex],
             "CouncilMember: withdrawal amount is higher than balance"
         );
-
-        uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
 
         // Deduct the claimed amount from the token's balance
         balances[balanceIndex] -= amount;
