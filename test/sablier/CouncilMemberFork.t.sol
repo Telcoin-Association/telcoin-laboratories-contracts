@@ -8,6 +8,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ISablierV2Lockup} from "../../contracts/sablier/interfaces/ISablierV2Lockup.sol";
 import {TestSablierV2Lockup} from "../../contracts/sablier/test/TestSablierV2Lockup.sol";
+import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 contract RevertingLockup is ISablierV2Lockup {
     function withdrawMax(uint256, address) external pure returns (uint128) {
@@ -77,14 +78,22 @@ contract CouncilMemberForkTest is Test {
         id = 0;
 
         vm.startPrank(admin);
-        councilMemberContract = new CouncilMember();
-        councilMemberContract.initialize(
-            telcoin,
-            "Test Council",
-            "TC",
-            ISablierV2Lockup(address(sablierLockup)),
-            id
+        CouncilMember impl = new CouncilMember();
+        TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(
+            address(impl),
+            admin,
+            abi.encodeCall(
+                CouncilMember.initialize,
+                (
+                    IERC20(address(telcoin)),
+                    "Test Council",
+                    "TC",
+                    ISablierV2Lockup(address(sablierLockup)),
+                    id
+                )
+            )
         );
+        councilMemberContract = CouncilMember(address(proxy));
         councilMemberContract.grantRole(GOVERNANCE_COUNCIL_ROLE, admin);
         councilMemberContract.grantRole(SUPPORT_ROLE, support);
         vm.stopPrank();

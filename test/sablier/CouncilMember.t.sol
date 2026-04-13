@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ISablierV2Lockup} from "../../contracts/sablier/interfaces/ISablierV2Lockup.sol";
 import {TestSablierV2Lockup} from "../../contracts/sablier/test/TestSablierV2Lockup.sol";
+import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 /**
  * @title MockTelcoin
@@ -87,23 +88,31 @@ contract CouncilMemberTest is Test {
         sablierLockup = new TestSablierV2Lockup(telcoin);
         id = uint256(0);
 
-        // Deploy CouncilMember (assuming it has a constructor that takes disableInitializers)
-        // For testing, we'll deploy and initialize
         vm.startPrank(admin);
-        councilMemberContract = new CouncilMember();
-        councilMemberContract.initialize(
-            IERC20(address(telcoin)),
-            "Test Council",
-            "TC",
-            ISablierV2Lockup(address(sablierLockup)),
-            id
+
+        // Deploy implementation (constructor disables initializers)
+        CouncilMember impl = new CouncilMember();
+
+        // Deploy proxy matching production: TransparentUpgradeableProxy
+        TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(
+            address(impl),
+            admin,
+            abi.encodeCall(
+                CouncilMember.initialize,
+                (
+                    IERC20(address(telcoin)),
+                    "Test Council",
+                    "TC",
+                    ISablierV2Lockup(address(sablierLockup)),
+                    id
+                )
+            )
         );
+        councilMemberContract = CouncilMember(address(proxy));
+
         councilMemberContract.grantRole(GOVERNANCE_COUNCIL_ROLE, admin);
         councilMemberContract.grantRole(SUPPORT_ROLE, support);
         vm.stopPrank();
-
-        // Fund the sablierLockup with tokens
-        //telcoin.mint(address(sablierLockup), 1_000_000);
     }
 
     /*//////////////////////////////////////////////////////////////

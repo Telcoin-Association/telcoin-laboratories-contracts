@@ -53,6 +53,10 @@ contract CouncilMember is
     // Support role for additional functionality
     bytes32 public constant SUPPORT_ROLE = keccak256("SUPPORT_ROLE");
 
+    constructor() {
+        _disableInitializers();
+    }
+
     /* ========== INITIALIZER ========== */
     function initialize(
         IERC20 telcoin,
@@ -122,9 +126,9 @@ contract CouncilMember is
         address to,
         uint256 tokenId
     ) public override(ERC721Upgradeable, IERC721) {
-        address previousApproval = _getApproved(tokenId);
+        // address previousApproval = _getApproved(tokenId);
         super.transferFrom(from, to, tokenId);
-        _approve(previousApproval, tokenId, address(0), false);
+        // _approve(previousApproval, tokenId, address(0), false);
 
         uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
         TELCOIN.safeTransfer(from, balances[balanceIndex]);
