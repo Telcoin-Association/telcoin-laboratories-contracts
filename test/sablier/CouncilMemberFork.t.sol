@@ -511,6 +511,8 @@ contract CouncilMemberForkTest is Test {
         assertEq(councilMemberContract.balances(1), 133);
 
         vm.prank(member2);
+        vm.expectEmit(true, true, true, true);
+        emit CouncilMember.Claim(1, member2, 133);
         councilMemberContract.claim(1, 133);
         assertEq(telcoin.balanceOf(member2), 133);
 

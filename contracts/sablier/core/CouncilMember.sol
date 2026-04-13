@@ -25,6 +25,12 @@ contract CouncilMember is
     event LockupUpdated(ISablierV2Lockup newLockup);
     // Event fired when the ID is updated
     event IDUpdated(uint256 newID);
+    // Event fired when a council member claims vested tokens
+    event Claim(
+        uint256 indexed tokenId,
+        address indexed recipient,
+        uint256 amount
+    );
 
     /* ========== STATE VARIABLES ========== */
     // The main token of this ecosystem
@@ -113,6 +119,7 @@ contract CouncilMember is
         balances[balanceIndex] -= amount;
         // Safely transfer the claimed amount of TELCOIN to the function caller
         TELCOIN.safeTransfer(_msgSender(), amount);
+        emit Claim(tokenId, _msgSender(), amount);
     }
 
     /**
