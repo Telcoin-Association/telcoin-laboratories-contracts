@@ -22,7 +22,10 @@ contract CouncilMember is
 
     /* ========== ERRORS ========== */
     error CouncilMember__NotTokenOwner(address caller, uint256 tokenId);
-    error CouncilMember__InsufficientBalance(uint256 requested, uint256 available);
+    error CouncilMember__InsufficientBalance(
+        uint256 requested,
+        uint256 available
+    );
     error CouncilMember__MustMaintainCouncil();
     error CouncilMember__NotAuthorized(address caller);
 
@@ -46,11 +49,11 @@ contract CouncilMember is
     // the id associated with the sablier NFT
     uint256 public _id;
     // balance left over from last rebalancing
-    uint256 private runningBalance;
+    uint256 public runningBalance;
     // current uncliamed members balances
     uint256[] public balances;
     // index counter
-    uint private counter;
+    uint256 public counter;
     // mapping to new index
     mapping(uint256 tokenId => uint256 balanceIndex)
         public tokenIdToBalanceIndex;
@@ -115,7 +118,10 @@ contract CouncilMember is
 
         // Ensure the requested amount doesn't exceed the balance of the council member
         if (amount > balances[balanceIndex])
-            revert CouncilMember__InsufficientBalance(amount, balances[balanceIndex]);
+            revert CouncilMember__InsufficientBalance(
+                amount,
+                balances[balanceIndex]
+            );
 
         // Deduct the claimed amount from the token's balance
         balances[balanceIndex] -= amount;
@@ -300,7 +306,7 @@ contract CouncilMember is
             runningBalance = finalBalance % totalSupply();
 
             // Add the individual balance to each council member's balance
-            for (uint i = 0; i < balances.length; i++) {
+            for (uint256 i; i < balances.length; i++) {
                 balances[i] += individualBalance;
             }
         } catch {}
