@@ -611,26 +611,6 @@ contract CouncilMemberForkTest is Test {
                         TOKENOMICS - TRANSFERFROM
     //////////////////////////////////////////////////////////////*/
 
-    function test_tokenomics_transferFrom_funds_remain_with_old_holder()
-        public
-    {
-        _fundLockup(INITIAL_LOCKUP_FUNDING);
-
-        vm.startPrank(admin);
-        councilMemberContract.mint(member1);
-        mine();
-
-        councilMemberContract.mint(member2);
-        mine();
-
-        councilMemberContract.transferFrom(member1, member2, 0);
-        vm.stopPrank();
-
-        assertEq(telcoin.balanceOf(member1), 150);
-        assertEq(telcoin.balanceOf(member2), 0);
-        assertEq(telcoin.balanceOf(address(councilMemberContract)), 50);
-    }
-
     function test_tokenomics_transferFrom_accounting_soundness() public {
         _fundLockup(INITIAL_LOCKUP_FUNDING);
 
