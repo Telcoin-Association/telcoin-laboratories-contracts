@@ -20,6 +20,12 @@ contract CouncilMember is
 {
     using SafeERC20 for IERC20;
 
+    /* ========== ERRORS ========== */
+    error CouncilMember__NotTokenOwner(address caller, uint256 tokenId);
+    error CouncilMember__InsufficientBalance(uint256 requested, uint256 available);
+    error CouncilMember__MustMaintainCouncil();
+    error CouncilMember__NotAuthorized(address caller);
+
     /* ========== EVENTS ========== */
     // Event fired when the lockup address is updated
     event LockupUpdated(ISablierV2Lockup newLockup);
@@ -100,20 +106,16 @@ contract CouncilMember is
      */
     function claim(uint256 tokenId, uint256 amount) external {
         // Ensure the function caller is the owner of the token (council member) they're trying to claim for
-        require(
-            _msgSender() == ownerOf(tokenId),
-            "CouncilMember: caller is not council member holding this NFT index"
-        );
+        if (_msgSender() != ownerOf(tokenId))
+            revert CouncilMember__NotTokenOwner(_msgSender(), tokenId);
         // Retrieve and distribute any pending TELCOIN for all council members
         _retrieve();
 
         uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
 
         // Ensure the requested amount doesn't exceed the balance of the council member
-        require(
-            amount <= balances[balanceIndex],
-            "CouncilMember: withdrawal amount is higher than balance"
-        );
+        if (amount > balances[balanceIndex])
+            revert CouncilMember__InsufficientBalance(amount, balances[balanceIndex]);
 
         // Deduct the claimed amount from the token's balance
         balances[balanceIndex] -= amount;
@@ -232,7 +234,7 @@ contract CouncilMember is
         uint256 tokenId,
         address recipient
     ) external onlyRole(GOVERNANCE_COUNCIL_ROLE) {
-        require(totalSupply() > 1, "CouncilMember: must maintain council");
+        if (totalSupply() <= 1) revert CouncilMember__MustMaintainCouncil();
 
         _burn(tokenId);
         uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
@@ -368,11 +370,10 @@ contract CouncilMember is
      * @dev This modifier is used to restrict certain operations to council members or governance personnel.
      */
     modifier OnlyAuthorized() {
-        require(
-            hasRole(GOVERNANCE_COUNCIL_ROLE, _msgSender()) ||
-                ERC721Upgradeable.balanceOf(_msgSender()) >= 1,
-            "CouncilMember: caller is not council member or owner"
-        );
+        if (
+            !hasRole(GOVERNANCE_COUNCIL_ROLE, _msgSender()) &&
+            ERC721Upgradeable.balanceOf(_msgSender()) < 1
+        ) revert CouncilMember__NotAuthorized(_msgSender());
         _;
     }
 }

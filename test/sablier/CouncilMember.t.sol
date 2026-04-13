@@ -266,7 +266,11 @@ contract CouncilMemberTest is Test {
         councilMemberContract.burn(0, member2);
         councilMemberContract.burn(1, member3);
 
-        vm.expectRevert("CouncilMember: must maintain council");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CouncilMember.CouncilMember__MustMaintainCouncil.selector
+            )
+        );
         councilMemberContract.burn(2, member1);
         vm.stopPrank();
     }
