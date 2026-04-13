@@ -14,6 +14,10 @@ contract RevertingLockup is ISablierV2Lockup {
     function withdrawMax(uint256, address) external pure returns (uint128) {
         revert("withdraw failed");
     }
+
+    function withdrawableAmountOf(uint256) external pure returns (uint128) {
+        revert("withdrawableAmountOf failed");
+    }
 }
 
 /**
@@ -259,6 +263,8 @@ contract CouncilMemberForkTest is Test {
     }
 
     function test_approve_success() public {
+        _fundLockup(INITIAL_LOCKUP_FUNDING);
+
         vm.prank(admin);
         councilMemberContract.mint(member1);
 
@@ -278,6 +284,8 @@ contract CouncilMemberForkTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_burn_revertsWhenLastMember() public {
+        _fundLockup(INITIAL_LOCKUP_FUNDING);
+
         vm.startPrank(admin);
         councilMemberContract.mint(member1);
         councilMemberContract.mint(member2);
@@ -296,6 +304,8 @@ contract CouncilMemberForkTest is Test {
     }
 
     function test_burn_success() public {
+        _fundLockup(INITIAL_LOCKUP_FUNDING);
+
         vm.startPrank(admin);
         councilMemberContract.mint(member1);
         councilMemberContract.mint(member2);
@@ -318,6 +328,8 @@ contract CouncilMemberForkTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_transferFrom_success() public {
+        _fundLockup(INITIAL_LOCKUP_FUNDING);
+
         vm.startPrank(admin);
         councilMemberContract.mint(member1);
         councilMemberContract.mint(member2);
@@ -359,6 +371,8 @@ contract CouncilMemberForkTest is Test {
     }
 
     function test_non_admin_TransferFrom_fails() public {
+        _fundLockup(INITIAL_LOCKUP_FUNDING);
+
         vm.startPrank(admin);
         councilMemberContract.mint(member1);
         councilMemberContract.mint(member2);
@@ -525,7 +539,7 @@ contract CouncilMemberForkTest is Test {
         assertEq(telcoin.balanceOf(member3), 83);
     }
 
-    function test_tokenomics_burn_general(
+    function testFuzz_tokenomics_burn_general(
         uint256 memberCount,
         uint256 burnIndex
     ) public {
@@ -819,30 +833,108 @@ contract CouncilMemberForkTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////
-                     RETRIEVE - LOCKUP REVERT RESILIENCE
+                     RETRIEVE - LOCKUP REVERT BEHAVIOR
     //////////////////////////////////////////////////////////////*/
 
-    function test_retrieve_succeeds_when_lockup_reverts() public {
+    function test_retrieve_noop_when_zero_withdrawable() public {
         _fundLockup(INITIAL_LOCKUP_FUNDING);
 
         vm.prank(admin);
         councilMemberContract.mint(member1);
         mine();
 
-        // Deploy lockup contract which will revert on withdrawMax to simulate a failure in the lockup during retrieve()
+        // First retrieve pulls 100 TEL
+        vm.prank(admin);
+        councilMemberContract.retrieve();
+
+        assertEq(councilMemberContract.balances(0), 100);
+
+        // Second retrieve in same block — withdrawableAmountOf returns 0, should be a no-op
+        vm.prank(admin);
+        councilMemberContract.retrieve();
+
+        // Balance unchanged
+        assertEq(councilMemberContract.balances(0), 100);
+    }
+
+    function test_retrieve_reverts_when_lockup_reverts() public {
+        _fundLockup(INITIAL_LOCKUP_FUNDING);
+
+        vm.prank(admin);
+        councilMemberContract.mint(member1);
+        mine();
+
+        // Deploy lockup contract where withdrawableAmountOf reverts
         RevertingLockup badLockup = new RevertingLockup();
 
-        // Swap lockup to an address with no code — withdrawMax will revert
+        // Swap lockup to the reverting contract
         vm.prank(admin);
         councilMemberContract.updateLockup(
             ISablierV2Lockup(address(badLockup))
         );
 
-        // retrieve() should not revert thanks to try/catch
+        // retrieve() should revert
         vm.prank(admin);
+        vm.expectRevert();
         councilMemberContract.retrieve();
+    }
 
-        // Balances unchanged since the lockup call failed silently
-        assertEq(councilMemberContract.balances(0), 100);
+    function test_retrieve_reverts_propagate_to_claim() public {
+        _fundLockup(INITIAL_LOCKUP_FUNDING);
+
+        vm.prank(admin);
+        councilMemberContract.mint(member1);
+        mine();
+
+        RevertingLockup badLockup = new RevertingLockup();
+        vm.prank(admin);
+        councilMemberContract.updateLockup(
+            ISablierV2Lockup(address(badLockup))
+        );
+
+        // claim() calls _retrieve() internally — should also revert
+        vm.prank(member1);
+        vm.expectRevert();
+        councilMemberContract.claim(0, 0);
+    }
+
+    function test_retrieve_reverts_propagate_to_mint() public {
+        _fundLockup(INITIAL_LOCKUP_FUNDING);
+
+        vm.prank(admin);
+        councilMemberContract.mint(member1);
+        mine();
+
+        RevertingLockup badLockup = new RevertingLockup();
+        vm.prank(admin);
+        councilMemberContract.updateLockup(
+            ISablierV2Lockup(address(badLockup))
+        );
+
+        // mint() calls _retrieve() internally — should also revert
+        vm.prank(admin);
+        vm.expectRevert();
+        councilMemberContract.mint(member2);
+    }
+
+    function test_retrieve_reverts_propagate_to_burn() public {
+        _fundLockup(INITIAL_LOCKUP_FUNDING);
+
+        vm.startPrank(admin);
+        councilMemberContract.mint(member1);
+        councilMemberContract.mint(member2);
+        mine();
+        vm.stopPrank();
+
+        RevertingLockup badLockup = new RevertingLockup();
+        vm.prank(admin);
+        councilMemberContract.updateLockup(
+            ISablierV2Lockup(address(badLockup))
+        );
+
+        // burn() calls _retrieve() via _update() — should also revert
+        vm.prank(admin);
+        vm.expectRevert();
+        councilMemberContract.burn(0, admin);
     }
 }

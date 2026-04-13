@@ -103,21 +103,21 @@ contract UpgradeCouncilMember is Script {
         address newImplementation = address(newImpl);
         console2.log("New implementation deployed:", newImplementation);
 
-        // Initialize the implementation to prevent attackers from calling initialize
-        newImpl.initialize(
-            IERC20(address(0)),
-            "IMPL",
-            "IMPL",
-            ISablierV2Lockup(address(0)),
-            0
+        // Verify the constructor has disabled initializers
+        (bool initSuccess, ) = newImplementation.call(
+            abi.encodeWithSelector(
+                CouncilMember.initialize.selector,
+                IERC20(address(0)),
+                "",
+                "",
+                ISablierV2Lockup(address(0)),
+                0
+            )
         );
-
-        // Hand off DEFAULT_ADMIN_ROLE on the implementation to avoid the deployer retaining it
-        bytes32 adminRole = newImpl.DEFAULT_ADMIN_ROLE();
-        // Grant to TAO safe, then revoke from signer
-        address implAdmin = 0xF4bC288d616C4f57071a57f5A4050B5e516fe7e5; //TAO: New Safe
-        newImpl.grantRole(adminRole, implAdmin);
-        newImpl.revokeRole(adminRole, signer);
+        require(
+            !initSuccess,
+            "CRITICAL: implementation initializer is NOT disabled"
+        );
 
         // Upgrade each proxy
         for (uint256 i = 0; i < proxies.length; i++) {

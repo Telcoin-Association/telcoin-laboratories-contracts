@@ -6,4 +6,8 @@ interface ISablierV2Lockup {
         uint256 streamId,
         address to
     ) external returns (uint128 withdrawnAmount);
+
+    function withdrawableAmountOf(
+        uint256 streamId
+    ) external view returns (uint128 withdrawableAmount);
 }

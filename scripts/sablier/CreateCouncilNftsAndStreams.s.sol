@@ -61,18 +61,9 @@ contract CreateCouncilNftsAndStreams is Script {
     }
 
     /// @notice deploys Council Member (implementation) contract.
-    /// @dev NOTE: The current audited CouncilMember version does **NOT** initialize in its constructor
-    /// so it must be done explicitly here until further notice (fixes & follow-up security audit)
-    /// @param deployer The deployer address running this script using the environment's `PRIVATE_KEY`
-    /// @param implAdmin The address which should end up with the `DEFAULT_ADMIN_ROLE` after deployment
-    function _deployImplementation(address deployer, address implAdmin) internal returns (address) {
+    /// @dev Constructor calls `_disableInitializers()`, permanently locking the implementation.
+    function _deployImplementation(address, address) internal returns (address) {
         CouncilMember impl = new CouncilMember();
-        /// @dev explicitly initialize and handle `DEFAULT_ADMIN_ROLE` granted to caller 
-        impl.initialize(IERC20(address(0)), "IMPL", "IMPL", ISablierV2Lockup(address(0)), 0);
-        bytes32 adminRole = impl.DEFAULT_ADMIN_ROLE();
-        impl.grantRole(adminRole, implAdmin);
-        impl.revokeRole(adminRole, deployer);
-
         address implementation = address(impl);
         console2.log("implementation deployed to: ", implementation);
 

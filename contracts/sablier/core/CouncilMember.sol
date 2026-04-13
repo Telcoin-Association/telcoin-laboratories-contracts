@@ -297,19 +297,23 @@ contract CouncilMember is
      * @dev It also updates the running balance to ensure accurate distribution during subsequent calls.
      */
     function _retrieve() internal {
-        // Execute the withdrawal from the _lockup
-        try _lockup.withdrawMax(_id, address(this)) returns (uint128 amount) {
-            uint256 finalBalance = uint256(amount) + runningBalance;
-            // Distribute the TELCOIN equally among all council members
-            uint256 individualBalance = finalBalance / totalSupply();
-            // Update the running balance which keeps track of any TELCOIN that can't be evenly distributed
-            runningBalance = finalBalance % totalSupply();
+        // Skip if there are no council members to distribute to
+        if (totalSupply() == 0) return;
+        // Skip if nothing to withdraw
+        if (_lockup.withdrawableAmountOf(_id) == 0) return;
 
-            // Add the individual balance to each council member's balance
-            for (uint256 i; i < balances.length; i++) {
-                balances[i] += individualBalance;
-            }
-        } catch {}
+        // Execute the withdrawal from the _lockup
+        uint128 amount = _lockup.withdrawMax(_id, address(this));
+        uint256 finalBalance = uint256(amount) + runningBalance;
+        // Distribute the TELCOIN equally among all council members
+        uint256 individualBalance = finalBalance / totalSupply();
+        // Update the running balance which keeps track of any TELCOIN that can't be evenly distributed
+        runningBalance = finalBalance % totalSupply();
+
+        // Add the individual balance to each council member's balance
+        for (uint256 i; i < balances.length; i++) {
+            balances[i] += individualBalance;
+        }
     }
 
     /**

@@ -24,4 +24,13 @@ contract TestSablierV2Lockup is ISablierV2Lockup {
         }
         return 0;
     }
+
+    function withdrawableAmountOf(
+        uint256
+    ) external view override returns (uint128 withdrawableAmount) {
+        if (lastBlock != block.timestamp) {
+            return 100;
+        }
+        return 0;
+    }
 }
