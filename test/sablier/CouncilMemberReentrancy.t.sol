@@ -346,7 +346,6 @@ contract CouncilMemberReentrancyTest is Test {
         );
 
         // EXPECTED: balance is zero during the callback (effects before interactions)
-        // ACTUAL:   balance is still the full accrued amount → test FAILS
         assertEq(
             attacker.staleBalanceDuringCallback(),
             0,

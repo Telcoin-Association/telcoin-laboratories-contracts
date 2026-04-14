@@ -146,8 +146,9 @@ contract CouncilMember is
         // _approve(previousApproval, tokenId, address(0), false);
 
         uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
-        TELCOIN.safeTransfer(from, balances[balanceIndex]);
+        uint256 payout = balances[balanceIndex];
         balances[balanceIndex] = 0;
+        TELCOIN.safeTransfer(from, payout);
     }
 
     /************************************************
@@ -244,8 +245,7 @@ contract CouncilMember is
 
         _burn(tokenId);
         uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
-
-        TELCOIN.safeTransfer(recipient, balances[balanceIndex]);
+        uint256 payout = balances[balanceIndex];
 
         balances[balanceIndex] = balances[balances.length - 1];
         balances[balances.length - 1] = 0;
@@ -261,6 +261,8 @@ contract CouncilMember is
         balanceIndexToTokenId[balances.length - 1] = 0;
 
         balances.pop();
+
+        TELCOIN.safeTransfer(recipient, payout);
     }
 
     /**
