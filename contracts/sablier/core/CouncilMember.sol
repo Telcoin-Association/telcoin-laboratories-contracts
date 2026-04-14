@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ERC721EnumerableUpgradeable, ERC721Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
 import {AccessControlEnumerableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlEnumerableUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ISablierV2Lockup} from "../interfaces/ISablierV2Lockup.sol";
 
@@ -16,7 +17,8 @@ import {ISablierV2Lockup} from "../interfaces/ISablierV2Lockup.sol";
  */
 contract CouncilMember is
     ERC721EnumerableUpgradeable,
-    AccessControlEnumerableUpgradeable
+    AccessControlEnumerableUpgradeable,
+    ReentrancyGuardUpgradeable
 {
     using SafeERC20 for IERC20;
 
@@ -82,6 +84,8 @@ contract CouncilMember is
     ) external initializer {
         _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
         __ERC721_init(name_, symbol_);
+        __ReentrancyGuard_init();
+
         TELCOIN = telcoin;
         _lockup = lockup_;
         _id = id_;
@@ -97,7 +101,7 @@ contract CouncilMember is
      * @dev This function should be called before any significant state changes to ensure accurate distribution.
      * @dev Only the owner council members can call this function
      */
-    function retrieve() external OnlyAuthorized {
+    function retrieve() external OnlyAuthorized nonReentrant {
         _retrieve();
     }
 
@@ -107,7 +111,7 @@ contract CouncilMember is
      * @param tokenId The NFT index associated with a council member.
      * @param amount Amount of TELCOIN the council member wants to withdraw.
      */
-    function claim(uint256 tokenId, uint256 amount) external {
+    function claim(uint256 tokenId, uint256 amount) external nonReentrant {
         // Ensure the function caller is the owner of the token (council member) they're trying to claim for
         if (_msgSender() != ownerOf(tokenId))
             revert CouncilMember__NotTokenOwner(_msgSender(), tokenId);
@@ -140,7 +144,7 @@ contract CouncilMember is
         address from,
         address to,
         uint256 tokenId
-    ) public override(ERC721Upgradeable, IERC721) {
+    ) public override(ERC721Upgradeable, IERC721) nonReentrant {
         // address previousApproval = _getApproved(tokenId);
         super.transferFrom(from, to, tokenId);
         // _approve(previousApproval, tokenId, address(0), false);
@@ -240,7 +244,7 @@ contract CouncilMember is
     function burn(
         uint256 tokenId,
         address recipient
-    ) external onlyRole(GOVERNANCE_COUNCIL_ROLE) {
+    ) external onlyRole(GOVERNANCE_COUNCIL_ROLE) nonReentrant {
         if (totalSupply() <= 1) revert CouncilMember__MustMaintainCouncil();
 
         _burn(tokenId);
