@@ -47,9 +47,8 @@ contract UpgradeCouncilMember is Script {
         return address(uint160(uint256(raw)));
     }
 
-    function run() external {
+    function _resolveSigner() internal view returns (address signer) {
         // ---- Resolve signer (same pattern as CreateCouncilNftsAndStreams) ----
-        address signer;
         address ethFrom = vm.envOr("ETH_FROM", address(0));
         if (ethFrom != address(0)) {
             signer = ethFrom;
@@ -58,6 +57,18 @@ contract UpgradeCouncilMember is Script {
             require(pk != 0, "Set ETH_FROM (ledger) or PRIVATE_KEY");
             signer = vm.addr(pk);
         }
+        return signer;
+    }
+
+    function run() external {
+        address signer = _resolveSigner();
+        runWithSigner(signer);
+        console2.log("===== All upgrades complete =====");
+    }
+
+    function runWithSigner(
+        address signer
+    ) public returns (address newImplementation) {
         console2.log("Signer:", signer);
 
         address[] memory proxies = getProxies();
@@ -100,7 +111,7 @@ contract UpgradeCouncilMember is Script {
 
         // Deploy single new implementation
         CouncilMember newImpl = new CouncilMember();
-        address newImplementation = address(newImpl);
+        newImplementation = address(newImpl);
         console2.log("New implementation deployed:", newImplementation);
 
         // Verify the constructor has disabled initializers
@@ -142,7 +153,7 @@ contract UpgradeCouncilMember is Script {
         console2.log("===== Post-upgrade verification =====");
 
         // Ensure implementation initializer is disabled
-        (bool initSuccess, ) = newImplementation.call(
+        (bool initSuccessPost, ) = newImplementation.call(
             abi.encodeWithSelector(
                 CouncilMember.initialize.selector,
                 IERC20(address(0)),
@@ -153,7 +164,7 @@ contract UpgradeCouncilMember is Script {
             )
         );
         require(
-            !initSuccess,
+            !initSuccessPost,
             "CRITICAL: implementation initializer is NOT disabled"
         );
         console2.log("Implementation initializer locked: OK");
@@ -196,7 +207,6 @@ contract UpgradeCouncilMember is Script {
 
             console2.log("Proxy", proxies[i], "verified OK");
         }
-
-        console2.log("===== All upgrades complete =====");
+        return newImplementation;
     }
 }

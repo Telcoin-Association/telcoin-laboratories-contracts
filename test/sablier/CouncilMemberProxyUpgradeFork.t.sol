@@ -1,40 +1,47 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Test, console2} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
+
+import {UpgradeCouncilMember} from "../../scripts/sablier/UpgradeCouncilMember.s.sol";
 import {CouncilMember} from "../../contracts/sablier/core/CouncilMember.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-interface ICouncilMemberImplementationLike {
-    function getRoleMembers(
-        bytes32 role,
-        uint256 index
-    ) external view returns (address[] memory);
-}
+import {ISablierV2Lockup} from "../../contracts/sablier/interfaces/ISablierV2Lockup.sol";
 
 interface IProxyAdminLike {
     function owner() external view returns (address);
 
     function upgradeAndCall(
-        ITransparentUpgradeableProxyLike proxy,
+        address proxy,
         address implementation,
         bytes memory data
     ) external payable;
 }
 
-interface ITransparentUpgradeableProxyLike {
-    function upgradeToAndCall(
-        address newImplementation,
-        bytes calldata data
-    ) external payable;
+contract UpgradeCouncilMemberHarness is UpgradeCouncilMember {
+    function exposed_getProxies() external pure returns (address[] memory) {
+        return getProxies();
+    }
+
+    function exposed_readAddressSlot(
+        address target,
+        bytes32 slot
+    ) external view returns (address) {
+        return _readAddressSlot(target, slot);
+    }
+
+    function exposed_runWithSigner(
+        address signer
+    ) external returns (address newImplementation) {
+        return runWithSigner(signer);
+    }
 }
 
-contract CouncilMemberProxyUpgradeForkTest is Test {
+contract CouncilMemberUpgradeForkTest is Test {
     /*//////////////////////////////////////////////////////////////
                                 CONSTANTS
     //////////////////////////////////////////////////////////////*/
 
-    // EIP-1967 slots
     bytes32 internal constant IMPLEMENTATION_SLOT =
         0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
 
@@ -45,35 +52,66 @@ contract CouncilMemberProxyUpgradeForkTest is Test {
         keccak256("GOVERNANCE_COUNCIL_ROLE");
 
     /*//////////////////////////////////////////////////////////////
-                                  CONFIG
+                         REPRESENTATIVE PROXY CONFIG
     //////////////////////////////////////////////////////////////*/
 
-    address internal constant PROXY =
-        0x24A7F8E40d2ACB8599f0C7343A68FD32f261C9Cf; // Compliance council year 2
+    // Compliance Council proxy (example) from UpgradeCouncilMember::getProxies()[3]
+    // the representative proxy we run functional behavior tests against
+    address internal constant BEHAVIOUR_PROXY =
+        0x24A7F8E40d2ACB8599f0C7343A68FD32f261C9Cf;
 
-    uint256 internal forkBlock;
-    uint256 internal tokenId;
+    // Address of compliance council's safe, which should have both GOVERNANCE_COUNCIL_ROLE and SUPPORT_ROLE
+    address internal constant EXPECTED_SAFE =
+        0x0454D03C2010862277262Cb306749e829ee97591;
 
-    address internal from;
-    address internal to;
-    address internal governanceActor;
+    // From getCouncilsInfo() compliance council (behaviour proxy) members
+    address internal constant MEMBER_0 =
+        0x5e671bB9F225F3090DA69BB374a648d0F15fF3fB;
+    address internal constant MEMBER_1 =
+        0x19BeC353c5eFdEBEEdfA88698BcF89225F9325EE;
+    address internal constant MEMBER_2 =
+        0x51b2695e7f21fcB56f34a3eC7d44B482C2eFE4d9;
+    address internal constant MEMBER_3 =
+        0x51b2695e7f21fcB56f34a3eC7d44B482C2eFE4d9;
 
     /*//////////////////////////////////////////////////////////////
                                   STATE
     //////////////////////////////////////////////////////////////*/
 
-    CouncilMember internal council;
-    IERC20 internal telcoin;
+    UpgradeCouncilMemberHarness internal script;
+    uint256 internal forkId;
 
-    address internal proxyAdmin;
-    address internal proxyAdminOwner;
-    address internal currentImplementation;
+    CouncilMember internal behaviourCouncil;
+    IERC20 internal behaviourTelcoin;
+
+    address internal behaviourProxyAdmin;
+    address internal behaviourProxyAdminOwner;
+    address internal behaviourCurrentImplementation;
+    address internal behaviourGovernanceActor;
+
+    uint256 internal behaviourTokenId;
+    address internal behaviourFrom;
+    address internal behaviourTo;
 
     /*//////////////////////////////////////////////////////////////
                                   TYPES
     //////////////////////////////////////////////////////////////*/
 
-    struct Snapshot {
+    struct GlobalSnapshot {
+        address proxy;
+        address proxyAdmin;
+        address implBefore;
+        uint256 totalSupply;
+        address tel;
+        address lockup;
+        uint256 streamId;
+        uint256[] tokenIds;
+        address[] tokenOwners;
+        uint256[] tokenBalanceIndexes;
+        uint256[] internalOwed;
+    }
+
+    struct BehaviourSnapshot {
         address implementation;
         address proxyAdmin;
         address proxyAdminOwner;
@@ -82,41 +120,53 @@ contract CouncilMemberProxyUpgradeForkTest is Test {
         address lockup;
         uint256 streamId;
         uint256 totalSupply;
-        address tokenOwner;
-        uint256 tokenBalanceIndex;
-        uint256 internalOwed;
+        uint256[] tokenIds;
+        address[] tokenOwners;
+        uint256[] tokenBalanceIndexes;
+        uint256[] internalOwed;
         uint256 proxyTelBalance;
         uint256 fromTelBalance;
         uint256 toTelBalance;
         uint256 fromNftBalance;
         uint256 toNftBalance;
         bool governanceHasRole;
+        bool safeHasGovernanceRole;
+        bool safeHasSupportRole;
     }
 
     /*//////////////////////////////////////////////////////////////
                                    SETUP
     //////////////////////////////////////////////////////////////*/
 
-    // proxyAdmin 0xc9ae3C464F67e0cF9EcEE6a4DAd7C78983a9A9A9
-    // proxyAdminOwner 0xd7e88D492Dc992127384215b8555C9305C218299
+    function setUp() external {
+        string memory rpcUrl = vm.envString("POLYGON_RPC_URL");
+        uint256 forkBlock = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
 
-    function setUp() public {
-        forkBlock = 84352545;
-        tokenId = 3;
+        if (forkBlock == 0) {
+            forkId = vm.createFork(rpcUrl, uint256(84352545));
+        } else {
+            forkId = vm.createFork(rpcUrl, forkBlock);
+        }
+        vm.selectFork(forkId);
 
-        from = 0x51b2695e7f21fcB56f34a3eC7d44B482C2eFE4d9;
-        to = 0x4EF34f7B73FE070e007813DBcf62A426eaa45E73;
+        script = new UpgradeCouncilMemberHarness();
 
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), forkBlock);
+        behaviourCouncil = CouncilMember(BEHAVIOUR_PROXY);
+        behaviourProxyAdmin = _readAddressSlot(BEHAVIOUR_PROXY, ADMIN_SLOT);
+        behaviourCurrentImplementation = _readAddressSlot(
+            BEHAVIOUR_PROXY,
+            IMPLEMENTATION_SLOT
+        );
+        behaviourProxyAdminOwner = IProxyAdminLike(behaviourProxyAdmin).owner();
+        behaviourGovernanceActor = behaviourCouncil.getRoleMembers(
+            GOVERNANCE_COUNCIL_ROLE
+        )[0];
+        behaviourTelcoin = behaviourCouncil.TELCOIN();
 
-        council = CouncilMember(PROXY);
-
-        proxyAdmin = _readAddressSlot(PROXY, ADMIN_SLOT);
-        currentImplementation = _readAddressSlot(PROXY, IMPLEMENTATION_SLOT);
-        proxyAdminOwner = IProxyAdminLike(proxyAdmin).owner();
-        governanceActor = council.getRoleMembers(GOVERNANCE_COUNCIL_ROLE)[0];
-
-        telcoin = council.TELCOIN();
+        // Representative transfer scenario on compliance council
+        behaviourTokenId = 3;
+        behaviourFrom = MEMBER_2;
+        behaviourTo = makeAddr("behaviourTo");
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -136,174 +186,430 @@ contract CouncilMemberProxyUpgradeForkTest is Test {
         return address(uint160(uint256(raw)));
     }
 
-    function _snapshot() internal view returns (Snapshot memory s) {
-        uint256 idx = council.tokenIdToBalanceIndex(tokenId);
+    function _assertImplementationInitializerLocked(
+        address implementation
+    ) internal {
+        (bool success, ) = implementation.call(
+            abi.encodeWithSelector(
+                CouncilMember.initialize.selector,
+                IERC20(address(0)),
+                "",
+                "",
+                ISablierV2Lockup(address(0)),
+                0
+            )
+        );
+        assertFalse(success, "implementation initializer is not locked");
+    }
 
-        s.implementation = _readAddressSlot(PROXY, IMPLEMENTATION_SLOT);
-        s.proxyAdmin = _readAddressSlot(PROXY, ADMIN_SLOT);
-        s.proxyAdminOwner = IProxyAdminLike(s.proxyAdmin).owner();
-        s.governanceActor = council.getRoleMembers(GOVERNANCE_COUNCIL_ROLE)[0];
+    function _snapshotGlobalProxy(
+        address proxy,
+        address proxyAdmin
+    ) internal view returns (GlobalSnapshot memory s) {
+        CouncilMember council = CouncilMember(proxy);
 
-        s.telcoin = address(council.TELCOIN());
+        s.proxy = proxy;
+        s.proxyAdmin = proxyAdmin;
+        s.implBefore = _readAddressSlot(proxy, IMPLEMENTATION_SLOT);
+        s.totalSupply = council.totalSupply();
+        s.tel = address(council.TELCOIN());
         s.lockup = address(council._lockup());
         s.streamId = council._id();
-        s.totalSupply = council.totalSupply();
 
-        s.tokenOwner = council.ownerOf(tokenId);
-        s.tokenBalanceIndex = idx;
-        s.internalOwed = council.balances(idx);
+        s.tokenIds = new uint256[](s.totalSupply);
+        s.tokenOwners = new address[](s.totalSupply);
+        s.tokenBalanceIndexes = new uint256[](s.totalSupply);
+        s.internalOwed = new uint256[](s.totalSupply);
 
-        s.proxyTelBalance = IERC20(s.telcoin).balanceOf(PROXY);
-        s.fromTelBalance = IERC20(s.telcoin).balanceOf(from);
-        s.toTelBalance = IERC20(s.telcoin).balanceOf(to);
+        for (uint256 j = 0; j < s.totalSupply; j++) {
+            uint256 tid = council.tokenByIndex(j);
+            uint256 balIdx = council.tokenIdToBalanceIndex(tid);
 
-        s.fromNftBalance = council.balanceOf(from);
-        s.toNftBalance = council.balanceOf(to);
+            s.tokenIds[j] = tid;
+            s.tokenOwners[j] = council.ownerOf(tid);
+            s.tokenBalanceIndexes[j] = balIdx;
+            s.internalOwed[j] = council.balances(balIdx);
+        }
+    }
 
-        s.governanceHasRole = council.hasRole(
+    function _snapshotBehaviour()
+        internal
+        view
+        returns (BehaviourSnapshot memory s)
+    {
+        s.implementation = _readAddressSlot(
+            BEHAVIOUR_PROXY,
+            IMPLEMENTATION_SLOT
+        );
+        s.proxyAdmin = _readAddressSlot(BEHAVIOUR_PROXY, ADMIN_SLOT);
+        s.proxyAdminOwner = IProxyAdminLike(s.proxyAdmin).owner();
+        s.governanceActor = behaviourCouncil.getRoleMembers(
+            GOVERNANCE_COUNCIL_ROLE
+        )[0];
+
+        s.telcoin = address(behaviourCouncil.TELCOIN());
+        s.lockup = address(behaviourCouncil._lockup());
+        s.streamId = behaviourCouncil._id();
+        s.totalSupply = behaviourCouncil.totalSupply();
+
+        s.tokenIds = new uint256[](s.totalSupply);
+        s.tokenOwners = new address[](s.totalSupply);
+        s.tokenBalanceIndexes = new uint256[](s.totalSupply);
+        s.internalOwed = new uint256[](s.totalSupply);
+
+        for (uint256 i = 0; i < s.totalSupply; i++) {
+            uint256 tid = behaviourCouncil.tokenByIndex(i);
+            uint256 balIdx = behaviourCouncil.tokenIdToBalanceIndex(tid);
+
+            s.tokenIds[i] = tid;
+            s.tokenOwners[i] = behaviourCouncil.ownerOf(tid);
+            s.tokenBalanceIndexes[i] = balIdx;
+            s.internalOwed[i] = behaviourCouncil.balances(balIdx);
+        }
+
+        s.proxyTelBalance = IERC20(s.telcoin).balanceOf(BEHAVIOUR_PROXY);
+        s.fromTelBalance = IERC20(s.telcoin).balanceOf(behaviourFrom);
+        s.toTelBalance = IERC20(s.telcoin).balanceOf(behaviourTo);
+        s.fromNftBalance = behaviourCouncil.balanceOf(behaviourFrom);
+        s.toNftBalance = behaviourCouncil.balanceOf(behaviourTo);
+
+        s.governanceHasRole = behaviourCouncil.hasRole(
             GOVERNANCE_COUNCIL_ROLE,
             s.governanceActor
         );
-    }
-
-    function _logSnapshot(
-        string memory label,
-        Snapshot memory s
-    ) internal pure {
-        console2.log("-----");
-        console2.log(label);
-        console2.log("implementation", s.implementation);
-        console2.log("proxyAdmin", s.proxyAdmin);
-        console2.log("proxyAdminOwner", s.proxyAdminOwner);
-        console2.log("governanceActor", s.governanceActor);
-        console2.log("telcoin", s.telcoin);
-        console2.log("lockup", s.lockup);
-        console2.log("streamId", s.streamId);
-        console2.log("totalSupply", s.totalSupply);
-        console2.log("tokenOwner", s.tokenOwner);
-        console2.log("tokenBalanceIndex", s.tokenBalanceIndex);
-        console2.log("internalOwed", s.internalOwed);
-        console2.log("proxyTelBalance", s.proxyTelBalance);
-        console2.log("fromTelBalance", s.fromTelBalance);
-        console2.log("toTelBalance", s.toTelBalance);
-        console2.log("fromNftBalance", s.fromNftBalance);
-        console2.log("toNftBalance", s.toNftBalance);
-        console2.log("governanceHasRole", s.governanceHasRole);
-        console2.log("-----");
-    }
-
-    function _deployNewImplementation() internal returns (address) {
-        CouncilMember newImpl = new CouncilMember();
-        return address(newImpl);
-    }
-
-    function _upgradeProxy(address newImplementation) internal {
-        vm.prank(proxyAdminOwner);
-        IProxyAdminLike(proxyAdmin).upgradeAndCall(
-            ITransparentUpgradeableProxyLike(PROXY),
-            newImplementation,
-            bytes("")
+        s.safeHasGovernanceRole = behaviourCouncil.hasRole(
+            GOVERNANCE_COUNCIL_ROLE,
+            EXPECTED_SAFE
+        );
+        s.safeHasSupportRole = behaviourCouncil.hasRole(
+            behaviourCouncil.SUPPORT_ROLE(),
+            EXPECTED_SAFE
         );
     }
 
-    function transferAsGovernance() internal {
-        vm.prank(governanceActor);
-        council.transferFrom(from, to, tokenId);
+    function _transferAsGovernance() internal {
+        vm.prank(behaviourGovernanceActor);
+        behaviourCouncil.transferFrom(
+            behaviourFrom,
+            behaviourTo,
+            behaviourTokenId
+        );
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            SANITY / DISCOVERY
-    //////////////////////////////////////////////////////////////*/
-
-    function testFork_readsLiveProxyMetadata() public view {
-        assertEq(address(council), PROXY);
-        assertGt(proxyAdmin.code.length, 0, "proxyAdmin has no code");
-        assertGt(
-            currentImplementation.code.length,
-            0,
-            "implementation has no code"
-        );
-
-        // This confirms the governance actor we're impersonating
-        // really has the role on this forked state.
-        assertTrue(
-            council.hasRole(GOVERNANCE_COUNCIL_ROLE, governanceActor),
-            "governance actor lacks role"
-        );
-
-        // Confirm expected owner for the chosen NFT.
+    function _assertBehaviourStaticStateMatchesSnapshot(
+        BehaviourSnapshot memory beforeSnap
+    ) internal view {
         assertEq(
-            council.ownerOf(tokenId),
-            from,
-            "from is not current owner of token"
+            address(behaviourCouncil.TELCOIN()),
+            beforeSnap.telcoin,
+            "TELCOIN changed"
         );
-    }
+        assertEq(
+            address(behaviourCouncil._lockup()),
+            beforeSnap.lockup,
+            "lockup changed"
+        );
+        assertEq(behaviourCouncil._id(), beforeSnap.streamId, "_id changed");
+        assertEq(
+            behaviourCouncil.totalSupply(),
+            beforeSnap.totalSupply,
+            "totalSupply changed"
+        );
 
-    function testFork_logsCurrentState() public view {
-        Snapshot memory s = _snapshot();
-        _logSnapshot("current state", s);
+        assertEq(
+            behaviourCouncil.hasRole(GOVERNANCE_COUNCIL_ROLE, EXPECTED_SAFE),
+            beforeSnap.safeHasGovernanceRole,
+            "safe governance role changed"
+        );
+        assertEq(
+            behaviourCouncil.hasRole(
+                behaviourCouncil.SUPPORT_ROLE(),
+                EXPECTED_SAFE
+            ),
+            beforeSnap.safeHasSupportRole,
+            "safe support role changed"
+        );
+
+        for (uint256 i = 0; i < beforeSnap.totalSupply; i++) {
+            uint256 tid = beforeSnap.tokenIds[i];
+
+            assertEq(
+                behaviourCouncil.tokenByIndex(i),
+                tid,
+                "tokenByIndex changed"
+            );
+            assertEq(
+                behaviourCouncil.ownerOf(tid),
+                beforeSnap.tokenOwners[i],
+                "ownerOf changed"
+            );
+            assertEq(
+                behaviourCouncil.tokenIdToBalanceIndex(tid),
+                beforeSnap.tokenBalanceIndexes[i],
+                "tokenIdToBalanceIndex changed"
+            );
+            assertEq(
+                behaviourCouncil.balances(
+                    behaviourCouncil.tokenIdToBalanceIndex(tid)
+                ),
+                beforeSnap.internalOwed[i],
+                "balances changed"
+            );
+        }
     }
 
     /*//////////////////////////////////////////////////////////////
-                          UPGRADE PRESERVES STATE
+                        SCRIPT-LEVEL REAL COVERAGE
     //////////////////////////////////////////////////////////////*/
 
-    function testFork_upgradePreservesState() public {
-        Snapshot memory beforeSnap = _snapshot();
-        _logSnapshot("before upgrade", beforeSnap);
+    function test_liveFork_scriptRun_upgradesAllProxiesAndPreservesState()
+        external
+    {
+        address[] memory proxies = script.exposed_getProxies();
+        uint256 len = proxies.length;
+        assertEq(len, 6, "unexpected proxy count");
 
-        address newImplementation = _deployNewImplementation();
+        GlobalSnapshot[] memory beforeState = new GlobalSnapshot[](len);
+
+        // assume same signer owns all ProxyAdmins, and infer that signer from first ProxyAdmin owner
+        address expectedSigner = IProxyAdminLike(
+            script.exposed_readAddressSlot(proxies[0], ADMIN_SLOT)
+        ).owner();
+
+        for (uint256 i = 0; i < len; i++) {
+            address proxy = proxies[i];
+            assertTrue(proxy != address(0), "proxy is zero");
+            assertGt(proxy.code.length, 0, "proxy has no code");
+
+            address proxyAdmin = script.exposed_readAddressSlot(
+                proxy,
+                ADMIN_SLOT
+            );
+            assertTrue(proxyAdmin != address(0), "proxy admin is zero");
+            assertGt(proxyAdmin.code.length, 0, "proxy admin has no code");
+
+            address owner = IProxyAdminLike(proxyAdmin).owner();
+            assertEq(
+                owner,
+                expectedSigner,
+                string.concat(
+                    "proxy admin owner mismatch at index ",
+                    vm.toString(i)
+                )
+            );
+
+            beforeState[i] = _snapshotGlobalProxy(proxy, proxyAdmin);
+        }
+
+        address newImplementation = script.exposed_runWithSigner(
+            expectedSigner
+        );
+
+        assertTrue(
+            newImplementation != address(0),
+            "new implementation is zero"
+        );
+        assertTrue(
+            newImplementation != beforeState[0].implBefore, // all proxies point to same implementation, just use first
+            "implementation did not change"
+        );
         assertGt(
             newImplementation.code.length,
             0,
             "new implementation has no code"
         );
 
-        _upgradeProxy(newImplementation);
+        _assertImplementationInitializerLocked(newImplementation);
 
-        Snapshot memory afterSnap = _snapshot();
-        _logSnapshot("after upgrade", afterSnap);
+        for (uint256 i = 0; i < len; i++) {
+            GlobalSnapshot memory snap = beforeState[i];
+            CouncilMember council = CouncilMember(snap.proxy);
+
+            address implAfter = script.exposed_readAddressSlot(
+                snap.proxy,
+                IMPLEMENTATION_SLOT
+            );
+            assertEq(
+                implAfter,
+                newImplementation,
+                "implementation slot mismatch"
+            );
+
+            address adminAfter = script.exposed_readAddressSlot(
+                snap.proxy,
+                ADMIN_SLOT
+            );
+            assertEq(adminAfter, snap.proxyAdmin, "proxy admin changed");
+
+            assertEq(
+                council.totalSupply(),
+                snap.totalSupply,
+                "totalSupply changed"
+            );
+            assertEq(address(council.TELCOIN()), snap.tel, "TELCOIN changed");
+            assertEq(address(council._lockup()), snap.lockup, "lockup changed");
+            assertEq(council._id(), snap.streamId, "streamId changed");
+
+            assertEq(
+                council.totalSupply(),
+                snap.tokenIds.length,
+                "snapshot supply mismatch"
+            );
+
+            for (uint256 j = 0; j < snap.totalSupply; j++) {
+                uint256 tidAfter = council.tokenByIndex(j);
+                assertEq(tidAfter, snap.tokenIds[j], "tokenByIndex changed");
+
+                address ownerAfter = council.ownerOf(tidAfter);
+                assertEq(ownerAfter, snap.tokenOwners[j], "ownerOf changed");
+
+                uint256 balIdxAfter = council.tokenIdToBalanceIndex(tidAfter);
+                assertEq(
+                    balIdxAfter,
+                    snap.tokenBalanceIndexes[j],
+                    "tokenIdToBalanceIndex changed"
+                );
+
+                assertEq(
+                    council.balances(balIdxAfter),
+                    snap.internalOwed[j],
+                    "balances changed"
+                );
+            }
+        }
+    }
+
+    function test_liveFork_reverts_ifSignerIsNotProxyAdminOwner() external {
+        address badSigner = makeAddr("badSigner");
+
+        vm.expectRevert();
+        script.exposed_runWithSigner(badSigner);
+    }
+
+    /// @dev Exercises the full script entrypoint (`run()`), which drives
+    ///      `_resolveSigner` through the ETH_FROM env path. This is the
+    ///      only coverage for signer resolution; the other script tests
+    ///      call `runWithSigner` directly and would miss a regression in
+    ///      `_resolveSigner`.
+    function test_liveFork_scriptRun_viaEthFromEnv() external {
+        address[] memory proxies = script.exposed_getProxies();
+        address expectedSigner = IProxyAdminLike(
+            script.exposed_readAddressSlot(proxies[0], ADMIN_SLOT)
+        ).owner();
+
+        address implBefore = script.exposed_readAddressSlot(
+            proxies[0],
+            IMPLEMENTATION_SLOT
+        );
+
+        vm.setEnv("ETH_FROM", vm.toString(expectedSigner));
+        script.run();
+
+        address implAfter = script.exposed_readAddressSlot(
+            proxies[0],
+            IMPLEMENTATION_SLOT
+        );
+        assertTrue(
+            implAfter != address(0),
+            "implementation slot is zero after run()"
+        );
+        assertTrue(
+            implAfter != implBefore,
+            "implementation did not change after run()"
+        );
+        assertGt(implAfter.code.length, 0, "new implementation has no code");
+        _assertImplementationInitializerLocked(implAfter);
+
+        for (uint256 i = 1; i < proxies.length; i++) {
+            assertEq(
+                script.exposed_readAddressSlot(proxies[i], IMPLEMENTATION_SLOT),
+                implAfter,
+                "proxy not at new implementation after run()"
+            );
+        }
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                      REPRESENTATIVE PROXY SANITY
+    //////////////////////////////////////////////////////////////*/
+
+    function testFork_representative_readsLiveProxyMetadata() external view {
+        assertEq(address(behaviourCouncil), BEHAVIOUR_PROXY);
+        assertGt(behaviourProxyAdmin.code.length, 0, "proxyAdmin has no code");
+        assertGt(
+            behaviourCurrentImplementation.code.length,
+            0,
+            "implementation has no code"
+        );
+
+        assertTrue(
+            behaviourCouncil.hasRole(
+                GOVERNANCE_COUNCIL_ROLE,
+                behaviourGovernanceActor
+            ),
+            "governance actor lacks role"
+        );
+
+        assertTrue(
+            behaviourCouncil.hasRole(GOVERNANCE_COUNCIL_ROLE, EXPECTED_SAFE),
+            "expected safe lacks governance role"
+        );
+
+        assertTrue(
+            behaviourCouncil.hasRole(
+                behaviourCouncil.SUPPORT_ROLE(),
+                EXPECTED_SAFE
+            ),
+            "expected safe lacks support role"
+        );
 
         assertEq(
-            afterSnap.implementation,
+            behaviourCouncil.totalSupply(),
+            4,
+            "unexpected compliance supply"
+        );
+
+        assertEq(behaviourCouncil.ownerOf(0), MEMBER_0, "owner(0) mismatch");
+        assertEq(behaviourCouncil.ownerOf(1), MEMBER_1, "owner(1) mismatch");
+        assertEq(behaviourCouncil.ownerOf(2), MEMBER_2, "owner(2) mismatch");
+        assertEq(behaviourCouncil.ownerOf(3), MEMBER_3, "owner(3) mismatch");
+
+        assertEq(
+            behaviourCouncil.ownerOf(behaviourTokenId),
+            behaviourFrom,
+            "from is not current owner of token"
+        );
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                 REPRESENTATIVE PROXY POST-SCRIPT BEHAVIOUR
+    //////////////////////////////////////////////////////////////*/
+
+    /// @dev Ensure TEL/NFT balances for proxy/from/to and the governance/safe roles are preserved.
+    function testFork_scriptUpgrade_representativeBalanceAndRoleDeltas()
+        external
+    {
+        BehaviourSnapshot memory beforeSnap = _snapshotBehaviour();
+
+        address[] memory proxies = script.exposed_getProxies();
+        address expectedSigner = IProxyAdminLike(
+            script.exposed_readAddressSlot(proxies[0], ADMIN_SLOT)
+        ).owner();
+
+        // Run the script with the expected signer
+        address newImplementation = script.exposed_runWithSigner(
+            expectedSigner
+        );
+
+        assertEq(
+            _readAddressSlot(BEHAVIOUR_PROXY, IMPLEMENTATION_SLOT),
             newImplementation,
-            "implementation slot not updated"
-        );
-        assertEq(
-            afterSnap.proxyAdmin,
-            beforeSnap.proxyAdmin,
-            "proxy admin changed unexpectedly"
-        );
-        assertEq(
-            afterSnap.proxyAdminOwner,
-            beforeSnap.proxyAdminOwner,
-            "proxy admin owner changed unexpectedly"
+            "representative proxy not upgraded"
         );
 
-        // Storage/state preservation checks
-        assertEq(afterSnap.telcoin, beforeSnap.telcoin, "TELCOIN changed");
-        assertEq(afterSnap.lockup, beforeSnap.lockup, "lockup changed");
-        assertEq(afterSnap.streamId, beforeSnap.streamId, "_id changed");
-        assertEq(
-            afterSnap.totalSupply,
-            beforeSnap.totalSupply,
-            "totalSupply changed"
-        );
-        assertEq(
-            afterSnap.tokenOwner,
-            beforeSnap.tokenOwner,
-            "token owner changed"
-        );
-        assertEq(
-            afterSnap.tokenBalanceIndex,
-            beforeSnap.tokenBalanceIndex,
-            "balance index changed"
-        );
-        assertEq(
-            afterSnap.internalOwed,
-            beforeSnap.internalOwed,
-            "internal owed changed"
-        );
+        BehaviourSnapshot memory afterSnap = _snapshotBehaviour();
+
+        // ensure change of implementation did not affect any of these balances or roles, which are critical for the representative transfer scenario
         assertEq(
             afterSnap.proxyTelBalance,
             beforeSnap.proxyTelBalance,
@@ -329,227 +635,125 @@ contract CouncilMemberProxyUpgradeForkTest is Test {
             beforeSnap.toNftBalance,
             "to NFT balance changed"
         );
+
         assertEq(
             afterSnap.governanceHasRole,
             beforeSnap.governanceHasRole,
             "governance role changed"
         );
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                    GETTER COMPARISONS
-    //////////////////////////////////////////////////////////////*/
-
-    function testFork_upgradeDoesNotChangeKeyReadPaths() public {
-        Snapshot memory beforeSnap = _snapshot();
-
-        address newImplementation = _deployNewImplementation();
-        _upgradeProxy(newImplementation);
-
-        // Re-bind through same proxy address after upgrade
-        CouncilMember upgraded = CouncilMember(PROXY);
-
-        assertEq(address(upgraded.TELCOIN()), beforeSnap.telcoin);
-        assertEq(address(upgraded._lockup()), beforeSnap.lockup);
-        assertEq(upgraded._id(), beforeSnap.streamId);
-        assertEq(upgraded.totalSupply(), beforeSnap.totalSupply);
-        assertEq(upgraded.ownerOf(tokenId), beforeSnap.tokenOwner);
         assertEq(
-            upgraded.balances(upgraded.tokenIdToBalanceIndex(tokenId)),
-            beforeSnap.internalOwed
+            afterSnap.safeHasGovernanceRole,
+            beforeSnap.safeHasGovernanceRole,
+            "safe governance role changed"
+        );
+        assertEq(
+            afterSnap.safeHasSupportRole,
+            beforeSnap.safeHasSupportRole,
+            "safe support role changed"
         );
     }
 
-    /*//////////////////////////////////////////////////////////////
-         TRANSFER + CLAIM ACCOUNTING — OLD + NEW IMPL
-    //////////////////////////////////////////////////////////////*/
+    // final run through test, covered by Council Member unit tests
+    function testFork_scriptUpgrade_thenRepresentative_transferThenClaimAll()
+        external
+    {
+        BehaviourSnapshot memory beforeSnap = _snapshotBehaviour();
 
-    function testFork_transferThenClaimAll_currentImplementation() public {
-        vm.prank(governanceActor);
-        council.retrieve();
+        address[] memory proxies = script.exposed_getProxies();
+        address expectedSigner = IProxyAdminLike(
+            script.exposed_readAddressSlot(proxies[0], ADMIN_SLOT)
+        ).owner();
 
-        uint256 supply = council.totalSupply();
+        address newImplementation = script.exposed_runWithSigner(
+            expectedSigner
+        );
+        _assertImplementationInitializerLocked(newImplementation);
 
-        // snapshot owed balances and TEL balances for every token
-        uint256[] memory tokenIds = new uint256[](supply);
-        address[] memory owners = new address[](supply);
-        uint256[] memory owed = new uint256[](supply);
-
-        for (uint256 i = 0; i < supply; i++) {
-            uint256 tid = council.tokenByIndex(i);
-            tokenIds[i] = tid;
-            owners[i] = council.ownerOf(tid);
-            owed[i] = council.balances(council.tokenIdToBalanceIndex(tid));
-        }
-
-        // transfer tokenId 3
-        uint256 fromTelBefore = telcoin.balanceOf(from);
-        transferAsGovernance();
-
-        // from got paid their owed balance
+        // confirm static state preserved on representative proxy before exercising behaviour
         assertEq(
-            telcoin.balanceOf(from),
-            fromTelBefore + owed[tokenId], // tokenId 3 is at enum index 3
-            "transfer payout mismatch"
+            _readAddressSlot(BEHAVIOUR_PROXY, IMPLEMENTATION_SLOT),
+            newImplementation,
+            "representative proxy not upgraded"
         );
+        _assertBehaviourStaticStateMatchesSnapshot(beforeSnap);
 
-        // every other holder tries to claim their full owed amount
-        for (uint256 i = 0; i < supply; i++) {
-            if (tokenIds[i] == tokenId) continue; // do not claim from newly transferred token
+        vm.prank(behaviourGovernanceActor);
+        behaviourCouncil.retrieve();
 
-            uint256 ownerTelBefore = telcoin.balanceOf(owners[i]);
-
-            vm.prank(owners[i]);
-            (bool success, ) = address(council).call(
-                abi.encodeWithSelector(
-                    council.claim.selector,
-                    tokenIds[i],
-                    owed[i]
-                )
-            );
-
-            if (success) {
-                assertEq(
-                    telcoin.balanceOf(owners[i]),
-                    ownerTelBefore + owed[i],
-                    "claim payout mismatch"
-                );
-            } else {
-                console2.log("OLD IMPL: claim failed for tokenId", tokenIds[i]);
-            }
-        }
-
-        assertEq(
-            telcoin.balanceOf(PROXY),
-            0,
-            "proxy should have zero TEL after claims"
-        );
-
-        mine();
-        vm.prank(governanceActor);
-        council.retrieve();
-
-        for (uint256 i = 0; i < supply; i++) {
-            address currentOwner = council.ownerOf(tokenIds[i]);
-            // re-read current owed after new accrual
-            uint256 currentOwed = council.balances(
-                council.tokenIdToBalanceIndex(tokenIds[i])
-            );
-            uint256 ownerTelBefore = telcoin.balanceOf(currentOwner);
-
-            vm.prank(currentOwner);
-            (bool success, ) = address(council).call(
-                abi.encodeWithSelector(
-                    council.claim.selector,
-                    tokenIds[i],
-                    currentOwed
-                )
-            );
-
-            if (success) {
-                assertEq(
-                    telcoin.balanceOf(currentOwner),
-                    ownerTelBefore + currentOwed,
-                    "claim payout mismatch"
-                );
-            } else {
-                console2.log("OLD IMPL: claim failed for tokenId", tokenIds[i]);
-            }
-        }
-
-        assertLt(
-            telcoin.balanceOf(PROXY),
-            council.totalSupply(),
-            "proxy should have zero TEL after claims"
-        );
-    }
-
-    function testFork_transferThenClaimAll_afterUpgrade() public {
-        _upgradeProxy(_deployNewImplementation());
-
-        vm.prank(governanceActor);
-        council.retrieve();
-
-        uint256 supply = council.totalSupply();
+        uint256 supply = behaviourCouncil.totalSupply();
 
         uint256[] memory tokenIds = new uint256[](supply);
         address[] memory owners = new address[](supply);
         uint256[] memory owed = new uint256[](supply);
 
         for (uint256 i = 0; i < supply; i++) {
-            uint256 tid = council.tokenByIndex(i);
+            uint256 tid = behaviourCouncil.tokenByIndex(i);
             tokenIds[i] = tid;
-            owners[i] = council.ownerOf(tid);
-            owed[i] = council.balances(council.tokenIdToBalanceIndex(tid));
+            owners[i] = behaviourCouncil.ownerOf(tid);
+            owed[i] = behaviourCouncil.balances(
+                behaviourCouncil.tokenIdToBalanceIndex(tid)
+            );
         }
 
-        // transfer tokenId 3
-        uint256 fromTelBefore = telcoin.balanceOf(from);
-        transferAsGovernance();
+        uint256 transferTokenOwed = behaviourCouncil.balances(
+            behaviourCouncil.tokenIdToBalanceIndex(behaviourTokenId)
+        );
+
+        uint256 fromTelBefore = behaviourTelcoin.balanceOf(behaviourFrom);
+        _transferAsGovernance();
 
         assertEq(
-            telcoin.balanceOf(from),
-            fromTelBefore + owed[tokenId],
+            behaviourTelcoin.balanceOf(behaviourFrom),
+            fromTelBefore + transferTokenOwed,
             "transfer payout mismatch"
         );
 
-        // every other holder claims — all must succeed on new impl
         for (uint256 i = 0; i < supply; i++) {
-            if (tokenIds[i] == tokenId) continue;
+            if (tokenIds[i] == behaviourTokenId) continue;
 
-            uint256 ownerTelBefore = telcoin.balanceOf(owners[i]);
+            uint256 ownerTelBefore = behaviourTelcoin.balanceOf(owners[i]);
 
             vm.prank(owners[i]);
-            council.claim(tokenIds[i], owed[i]);
+            behaviourCouncil.claim(tokenIds[i], owed[i]);
 
             assertEq(
-                telcoin.balanceOf(owners[i]),
+                behaviourTelcoin.balanceOf(owners[i]),
                 ownerTelBefore + owed[i],
                 "claim payout mismatch"
             );
         }
+
         assertEq(
-            telcoin.balanceOf(PROXY),
+            behaviourTelcoin.balanceOf(BEHAVIOUR_PROXY),
             0,
             "proxy should have zero TEL after claims"
         );
 
         mine();
 
-        vm.prank(governanceActor);
-        council.retrieve();
+        vm.prank(behaviourGovernanceActor);
+        behaviourCouncil.retrieve();
 
         for (uint256 i = 0; i < supply; i++) {
-            address currentOwner = council.ownerOf(tokenIds[i]);
-            // re-read current owed after new accrual
-            uint256 currentOwed = council.balances(
-                council.tokenIdToBalanceIndex(tokenIds[i])
+            address currentOwner = behaviourCouncil.ownerOf(tokenIds[i]);
+            uint256 currentOwed = behaviourCouncil.balances(
+                behaviourCouncil.tokenIdToBalanceIndex(tokenIds[i])
             );
-            uint256 ownerTelBefore = telcoin.balanceOf(currentOwner);
+            uint256 ownerTelBefore = behaviourTelcoin.balanceOf(currentOwner);
 
             vm.prank(currentOwner);
-            (bool success, ) = address(council).call(
-                abi.encodeWithSelector(
-                    council.claim.selector,
-                    tokenIds[i],
-                    currentOwed
-                )
-            );
+            behaviourCouncil.claim(tokenIds[i], currentOwed);
 
-            if (success) {
-                assertEq(
-                    telcoin.balanceOf(currentOwner),
-                    ownerTelBefore + currentOwed,
-                    "claim payout mismatch"
-                );
-            } else {
-                console2.log("NEW IMPL: claim failed for tokenId", tokenIds[i]);
-            }
+            assertEq(
+                behaviourTelcoin.balanceOf(currentOwner),
+                ownerTelBefore + currentOwed,
+                "post-upgrade claim payout mismatch"
+            );
         }
 
         assertLe(
-            telcoin.balanceOf(PROXY),
-            council.totalSupply(),
+            behaviourTelcoin.balanceOf(BEHAVIOUR_PROXY),
+            behaviourCouncil.totalSupply(),
             "proxy holds more than running balance dust"
         );
     }

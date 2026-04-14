@@ -28,7 +28,7 @@ contract CreateCouncilNftsAndStreams is Script {
         uint256 streamId;
     }
 
-    /// @notice deploys implementation, proxies and streams with streams connected to its corresponding proxy. 
+    /// @notice deploys implementation, proxies and streams with streams connected to its corresponding proxy.
     /// sablierSender will have governance council role which must be transferred to respective governance safe at end
     /// @param sablierSender Address that funds streams and is msg.sender in Sablier stream creation.
     /// @param tel TEL token interface.
@@ -62,7 +62,10 @@ contract CreateCouncilNftsAndStreams is Script {
 
     /// @notice deploys Council Member (implementation) contract.
     /// @dev Constructor calls `_disableInitializers()`, permanently locking the implementation.
-    function _deployImplementation(address, address) internal returns (address) {
+    function _deployImplementation(
+        address,
+        address
+    ) internal returns (address) {
         CouncilMember impl = new CouncilMember();
         address implementation = address(impl);
         console2.log("implementation deployed to: ", implementation);
@@ -314,7 +317,6 @@ contract CreateCouncilNftsAndStreams is Script {
         address ethFrom = vm.envOr("ETH_FROM", address(0));
         if (ethFrom != address(0)) {
             sablierSender = ethFrom;
-            vm.startBroadcast(sablierSender);
         } else {
             // Fallback to private key env check
             uint256 pk = vm.envOr("PRIVATE_KEY", uint256(0));
