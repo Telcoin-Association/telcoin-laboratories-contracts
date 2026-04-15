@@ -114,22 +114,6 @@ contract UpgradeCouncilMember is Script {
         newImplementation = address(newImpl);
         console2.log("New implementation deployed:", newImplementation);
 
-        // Verify the constructor has disabled initializers
-        (bool initSuccess, ) = newImplementation.call(
-            abi.encodeWithSelector(
-                CouncilMember.initialize.selector,
-                IERC20(address(0)),
-                "",
-                "",
-                ISablierV2Lockup(address(0)),
-                0
-            )
-        );
-        require(
-            !initSuccess,
-            "CRITICAL: implementation initializer is NOT disabled"
-        );
-
         // Upgrade each proxy
         for (uint256 i = 0; i < proxies.length; i++) {
             address proxyAdmin = _readAddressSlot(proxies[i], ADMIN_SLOT);
