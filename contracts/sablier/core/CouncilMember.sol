@@ -145,9 +145,7 @@ contract CouncilMember is
         address to,
         uint256 tokenId
     ) public override(ERC721Upgradeable, IERC721) nonReentrant {
-        // address previousApproval = _getApproved(tokenId);
         super.transferFrom(from, to, tokenId);
-        // _approve(previousApproval, tokenId, address(0), false);
 
         uint256 balanceIndex = tokenIdToBalanceIndex[tokenId];
         uint256 payout = balances[balanceIndex];
