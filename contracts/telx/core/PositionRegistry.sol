@@ -152,8 +152,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl, ReentrancyGuard {
         (amount0, amount1) = LiquidityAmounts.getAmountsForLiquidity(
             sqrtPriceX96, TickMath.getSqrtPriceAtTick(tickLower), TickMath.getSqrtPriceAtTick(tickUpper), liquidity
         );
-
-        return (amount0, amount1, sqrtPriceX96);
     }
 
     /// @inheritdoc IPositionRegistry

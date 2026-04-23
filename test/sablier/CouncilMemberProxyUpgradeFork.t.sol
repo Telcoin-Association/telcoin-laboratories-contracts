@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 
-import {UpgradeCouncilMember} from "../../scripts/sablier/UpgradeCouncilMember.s.sol";
+import {UpgradeCouncilMember} from "../../script/sablier/UpgradeCouncilMember.s.sol";
 import {CouncilMember} from "../../contracts/sablier/core/CouncilMember.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISablierV2Lockup} from "../../contracts/sablier/interfaces/ISablierV2Lockup.sol";
@@ -757,4 +757,5 @@ contract CouncilMemberUpgradeForkTest is Test {
             "proxy holds more than running balance dust"
         );
     }
+
 }

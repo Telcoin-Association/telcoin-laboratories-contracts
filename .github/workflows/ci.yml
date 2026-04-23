@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Build
+        run: forge build
+
+      - name: Test
+        # Fork tests require an archive RPC (free public RPCs only serve
+        # recent state, not historical blocks like Polygon 84M). If the
+        # POLYGON_RPC_URL secret is configured (paid Alchemy/Infura with
+        # archive), we run the full suite. Otherwise we skip fork tests —
+        # they remain fully runnable locally via `.env`. This matches the
+        # CI pattern in sibling Telcoin repos (tel-v3-staking, tel-v3,
+        # tn-contracts). GitHub does not pass repo secrets to workflows
+        # triggered by PRs from forks, so adding keys here is safe on a
+        # public repo.
+        run: |
+          if [ -z "${POLYGON_RPC_URL}" ]; then
+            echo "::notice::RPC secrets not configured. Skipping fork-dependent tests (everything matching contract name 'Fork' or 'Polygon'). Add POLYGON_RPC_URL, BASE_RPC_URL, SEPOLIA_RPC_URL repo secrets to run the full suite."
+            forge test --no-match-contract "(Fork|Polygon)" -vvv
+          else
+            forge test -vvv
+          fi
+        env:
+          POLYGON_RPC_URL: ${{ secrets.POLYGON_RPC_URL }}
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
+
+      - name: Gas Report
+        if: ${{ env.POLYGON_RPC_URL != '' }}
+        run: forge test --gas-report
+        env:
+          POLYGON_RPC_URL: ${{ secrets.POLYGON_RPC_URL }}
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}

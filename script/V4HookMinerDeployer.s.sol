@@ -80,9 +80,14 @@ contract V4HookMinerDeployer is Script {
     address hookAddress;
 
     function setUp() public {
-        uint256 deployerPk = vm.envUint("DEPLOYER_PK");
-        deployer = vm.addr(deployerPk);
+        _loadChainConfigs();
+    }
 
+    /// @dev Test-friendly config loader that does not require DEPLOYER_PK.
+    ///      `setUp()` and tests both call this. Production `run()` resolves
+    ///      the signer from env AFTER setUp; tests bypass env entirely by
+    ///      calling `runWithSigner` with a controlled address.
+    function _loadChainConfigs() internal {
         // Polygon Config
         uint256 polygonChainId = 137;
         chainConfigs[polygonChainId] = ChainConfig({
@@ -139,7 +144,20 @@ contract V4HookMinerDeployer is Script {
 
     /// @notice Valid inputs for `targetPool` are supported pools named by `CHAIN_CURRENCY0_CURRENCY1`, ie:
     /// `"BASE_ETH_TEL" || "POLYGON_WETH_TEL" || "POLYGON_USDC_EMXN"`
+    ///
+    /// @dev Production entrypoint. Resolves the signer from `DEPLOYER_PK` and
+    ///      delegates to `runWithSigner`.
     function run(string memory targetPool, uint160 sqrtPriceX96) public {
+        uint256 deployerPk = vm.envUint("DEPLOYER_PK");
+        runWithSigner(targetPool, sqrtPriceX96, vm.addr(deployerPk));
+    }
+
+    /// @notice Explicit-signer entrypoint. Production `run()` delegates here,
+    ///         and fork tests call this directly with a controlled signer.
+    ///         Mirrors the `runWithSigner` pattern in UpgradeCouncilMember.s.sol.
+    function runWithSigner(string memory targetPool, uint160 sqrtPriceX96, address signer) public {
+        deployer = signer;
+
         // 1. Determine Target Chain/Pool & Load Config
         uint256 chainId = block.chainid;
         ChainConfig storage config = _getChainConfig(chainId);
