@@ -7,17 +7,7 @@ import {PositionRegistry} from "../../contracts/telx/core/PositionRegistry.sol";
 import {TELxIncentiveHook} from "../../contracts/telx/core/TELxIncentiveHook.sol";
 import {TELxSubscriber} from "../../contracts/telx/core/TELxSubscriber.sol";
 import {TestConstants} from "../util/TestConstants.sol";
-
-/// @notice Harness exposing internal state accessors and calls for the script.
-contract V4HookMinerDeployerHarness is V4HookMinerDeployer {
-    function exposed_positionRegistry() external view returns (PositionRegistry) {
-        return positionRegistry;
-    }
-
-    function exposed_hookAddress() external view returns (address) {
-        return hookAddress;
-    }
-}
+import {V4HookMinerDeployerHarness} from "./harnesses/V4HookMinerDeployerHarness.sol";
 
 /// @notice Tests of V4HookMinerDeployer's guard + validation logic.
 ///
@@ -112,9 +102,9 @@ contract V4HookMinerDeployerForkTest is Test {
         script.run("POLYGON_WETH_TEL", 0);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                HELPERS
-    //////////////////////////////////////////////////////////////*/
+    // -------
+    // HELPERS
+    // -------
 
     /// @dev Asserts every address field of `script.chainConfigs(chainId)` is
     ///      populated. Because `_setAllEnvPlaceholders` sets every env var

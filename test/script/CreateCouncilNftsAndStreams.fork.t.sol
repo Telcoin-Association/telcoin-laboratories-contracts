@@ -6,6 +6,7 @@ import {CreateCouncilNftsAndStreams} from "../../script/sablier/CreateCouncilNft
 import {CouncilMember} from "../../contracts/sablier/core/CouncilMember.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {TestConstants} from "../util/TestConstants.sol";
+import {PolygonConstants} from "../util/PolygonConstants.sol";
 
 /// @notice Polygon-fork test of CreateCouncilNftsAndStreams.
 /// @dev    The script reads hard-coded Polygon addresses for TEL and the
@@ -14,9 +15,9 @@ import {TestConstants} from "../util/TestConstants.sol";
 ///         We use `deal` to front-load TEL on the signer, mirroring how the
 ///         MEXC fallback address ships with balance on-chain.
 contract CreateCouncilNftsAndStreamsForkTest is Test {
-    // Polygon mainnet constants lifted directly from the script.
-    address internal constant TEL_TOKEN = 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32;
-    address internal constant SABLIER_LOCKUP = 0x8D87c5eddb5644D1a714F85930Ca940166e465f0;
+    // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
+    address internal constant TEL_TOKEN = PolygonConstants.TEL;
+    address internal constant SABLIER_LOCKUP = PolygonConstants.SABLIER_LOCKUP;
 
     CreateCouncilNftsAndStreams internal script;
     address internal sablierSender;

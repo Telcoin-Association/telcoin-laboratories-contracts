@@ -9,6 +9,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {TelcoinDistributor} from "contracts/protocol/core/TelcoinDistributor.sol";
 import {CouncilMember} from "contracts/sablier/core/CouncilMember.sol";
 import {ISablierV2Lockup} from "contracts/sablier/interfaces/ISablierV2Lockup.sol";
+import {PolygonConstants} from "../util/PolygonConstants.sol";
 
 /**
  * @title TelcoinDistributor Polygon Fork Tests
@@ -17,19 +18,21 @@ import {ISablierV2Lockup} from "contracts/sablier/interfaces/ISablierV2Lockup.so
  *         No mocks -- every external dependency is the real on-chain contract.
  */
 contract TelcoinDistributorForkTest is Test {
-    /* ======== constants ======== */
+    // ---------
+    // constants
+    // ---------
     uint256 constant FORK_BLOCK = 85_621_947;
 
-    // On-chain Polygon addresses
-    IERC20 constant TELCOIN = IERC20(0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32);
-    ISablierV2Lockup constant SABLIER_LOCKUP = ISablierV2Lockup(0x8D87c5eddb5644D1a714F85930Ca940166e465f0);
-
-    // TAO Council NFT proxy (deployed on Polygon) -- used as the councilNft
-    IERC721 constant TAO_COUNCIL_NFT = IERC721(0x1dfd0fB84c405780e4Eabe868A0F14107f7B46B3);
+    // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
+    IERC20 constant TELCOIN = IERC20(PolygonConstants.TEL);
+    ISablierV2Lockup constant SABLIER_LOCKUP = ISablierV2Lockup(PolygonConstants.SABLIER_LOCKUP);
+    IERC721 constant TAO_COUNCIL_NFT = IERC721(PolygonConstants.TAO_COUNCIL_NFT);
 
     uint256 constant CHALLENGE_PERIOD = 1 days;
 
-    /* ======== state ======== */
+    // -----
+    // state
+    // -----
     TelcoinDistributor distributor;
 
     address owner;         // deployer & owner of the distributor
@@ -40,7 +43,9 @@ contract TelcoinDistributorForkTest is Test {
     address recipient2;
     address recipient3;
 
-    /* ======== setup ======== */
+    // -----
+    // setup
+    // -----
     function setUp() public {
         vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), FORK_BLOCK);
 
@@ -61,17 +66,19 @@ contract TelcoinDistributorForkTest is Test {
         vm.prank(owner);
         distributor = new TelcoinDistributor(TELCOIN, CHALLENGE_PERIOD, TAO_COUNCIL_NFT);
 
-        // Fund the owner with TEL so they can act as the "Safe" that approves withdrawals
-        deal(address(TELCOIN), owner, 100_000_000e2);
-
-        // Owner approves the distributor to pull TEL (batchTelcoin does safeTransferFrom(owner, ...))
+        // Fund the owner with TEL and approve the distributor for the exact funded amount —
+        // mirrors the production pattern where a Safe is funded with N and approves the
+        // distributor for that same N (not type(uint256).max). Bounds per-test pulls to the
+        // owner's balance and surfaces a regression where the distributor would over-pull.
+        uint256 ownerFunding = 100_000_000e2;
+        deal(address(TELCOIN), owner, ownerFunding);
         vm.prank(owner);
-        TELCOIN.approve(address(distributor), type(uint256).max);
+        TELCOIN.approve(address(distributor), ownerFunding);
     }
 
-    /* ================================================================
-     *                       CONSTRUCTOR
-     * ================================================================ */
+    // -----------
+    // CONSTRUCTOR
+    // -----------
 
     function test_constructor_setsImmutables() public view {
         assertEq(address(distributor.TELCOIN()), address(TELCOIN));
@@ -95,9 +102,9 @@ contract TelcoinDistributorForkTest is Test {
         new TelcoinDistributor(TELCOIN, 0, TAO_COUNCIL_NFT);
     }
 
-    /* ================================================================
-     *                    onlyCouncilMember MODIFIER
-     * ================================================================ */
+    // --------------------------
+    // onlyCouncilMember MODIFIER
+    // --------------------------
 
     function test_onlyCouncilMember_revertsNonMember() public {
         address[] memory dests = new address[](1);
@@ -110,9 +117,9 @@ contract TelcoinDistributorForkTest is Test {
         distributor.proposeTransaction(100, dests, amts);
     }
 
-    /* ================================================================
-     *                    proposeTransaction
-     * ================================================================ */
+    // ------------------
+    // proposeTransaction
+    // ------------------
 
     function test_proposeTransaction_happyPath() public {
         address[] memory dests = new address[](2);
@@ -198,9 +205,9 @@ contract TelcoinDistributorForkTest is Test {
         assertEq(tw2, 300);
     }
 
-    /* ================================================================
-     *                    challengeTransaction
-     * ================================================================ */
+    // --------------------
+    // challengeTransaction
+    // --------------------
 
     function test_challengeTransaction_happyPath() public {
         _propose(1000, recipient1, 1000);
@@ -266,9 +273,9 @@ contract TelcoinDistributorForkTest is Test {
         assertTrue(challenged);
     }
 
-    /* ================================================================
-     *                    executeTransaction
-     * ================================================================ */
+    // ------------------
+    // executeTransaction
+    // ------------------
 
     function test_executeTransaction_happyPath() public {
         uint256 amount = 5000;
@@ -439,9 +446,9 @@ contract TelcoinDistributorForkTest is Test {
         distributor.executeTransaction(0);
     }
 
-    /* ================================================================
-     *                    setChallengePeriod
-     * ================================================================ */
+    // ------------------
+    // setChallengePeriod
+    // ------------------
 
     function test_setChallengePeriod_ownerOnly() public {
         vm.prank(owner);
@@ -502,9 +509,9 @@ contract TelcoinDistributorForkTest is Test {
         assertTrue(executed);
     }
 
-    /* ================================================================
-     *                       recoverERC20
-     * ================================================================ */
+    // ------------
+    // recoverERC20
+    // ------------
 
     function test_recoverERC20_happyPath() public {
         // Send some TEL to the distributor "by accident"
@@ -525,9 +532,9 @@ contract TelcoinDistributorForkTest is Test {
         distributor.recoverERC20(TELCOIN, 5000, recipient1);
     }
 
-    /* ================================================================
-     *                     pause / unpause
-     * ================================================================ */
+    // ---------------
+    // pause / unpause
+    // ---------------
 
     function test_pause_ownerOnly() public {
         vm.prank(owner);
@@ -575,9 +582,9 @@ contract TelcoinDistributorForkTest is Test {
         assertTrue(challenged);
     }
 
-    /* ================================================================
-     *        Ownership transfer (Ownable2Step)
-     * ================================================================ */
+    // ---------------------------------
+    // Ownership transfer (Ownable2Step)
+    // ---------------------------------
 
     function test_ownershipTransfer_twoStep() public {
         address newOwner = makeAddr("newOwner");
@@ -651,9 +658,9 @@ contract TelcoinDistributorForkTest is Test {
         assertEq(TELCOIN.balanceOf(recipient1), 0);
     }
 
-    /* ================================================================
-     *                      HELPERS
-     * ================================================================ */
+    // -------
+    // HELPERS
+    // -------
 
     /// @dev Helper: propose a single-destination transaction
     function _propose(uint256 total, address dest, uint256 amount) internal {

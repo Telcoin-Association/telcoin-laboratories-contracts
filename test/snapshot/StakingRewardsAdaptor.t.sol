@@ -10,18 +10,21 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IBalancerVault} from "contracts/snapshot/interfaces/IBalancerVault.sol";
 import {IBalancerPool} from "contracts/snapshot/interfaces/IBalancerPool.sol";
+import {PolygonConstants} from "../util/PolygonConstants.sol";
 
+/// @title StakingRewardsAdaptorTest
+/// @notice Polygon-fork tests for the StakingRewards voting-weight adaptor. Composes a fresh
+///         BalancerAdaptor (for pool-share-to-TEL conversion) with the live StakingRewards
+///         contract to surface staked LP positions as governance weight.
 contract StakingRewardsAdaptorTest is Test {
     uint256 constant FORK_BLOCK = 68_000_000;
 
-    // Production addresses (TEL80/WETH20 pool stack)
-    address constant TEL = 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32;
-    address constant BALANCER_VAULT = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
-    address constant BALANCER_POOL = 0xcA6EFA5704f1Ae445e0EE24D9c3Ddde34c5be1C2;
-    bytes32 constant POOL_ID = 0xca6efa5704f1ae445e0ee24d9c3ddde34c5be1c2000200000000000000000dbd;
-
-    // StakingRewards contract for TEL80/WETH20 pool on Polygon
-    address constant STAKING_REWARDS = 0x7fEb8FEbddB66189417f732B4221a52E23B926C4;
+    // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
+    address constant TEL = PolygonConstants.TEL;
+    address constant BALANCER_VAULT = PolygonConstants.BALANCER_VAULT;
+    address constant BALANCER_POOL = PolygonConstants.BALANCER_POOL;
+    bytes32 constant POOL_ID = PolygonConstants.BALANCER_POOL_ID;
+    address constant STAKING_REWARDS = PolygonConstants.STAKING_REWARDS;
 
     uint256 constant M_FACTOR = 5;
     uint256 constant D_FACTOR = 4;

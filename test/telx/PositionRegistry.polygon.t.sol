@@ -8,6 +8,7 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {TestConstants} from "../util/TestConstants.sol";
+import {PolygonConstants} from "../util/PolygonConstants.sol";
 
 /**
  * @title PositionRegistry Polygon Production Fork Tests
@@ -22,13 +23,15 @@ import {TestConstants} from "../util/TestConstants.sol";
  *      Fork block: 65000000+ (must be post-Dencun for transient storage on Polygon)
  */
 contract PositionRegistryPolygonTest is Test {
-    // Production addresses on Polygon mainnet
-    address constant PRODUCTION_REGISTRY = 0x2c33fC9c09CfAC5431e754b8fe708B1dA3F5B954;
-    address constant PRODUCTION_HOOK = 0xD77cC9230Ded5b6591730032975453744532a500;
-    address constant PRODUCTION_SUBSCRIBER = 0x3Bf9bAdC67573e7b4756547A2dC0C77368A2062b;
+    // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
+    // V4 PoolManager + PositionManager addresses are unique to this file (used only here),
+    // so they remain inline.
+    address constant PRODUCTION_REGISTRY = PolygonConstants.TELX_PRODUCTION_REGISTRY;
+    address constant PRODUCTION_HOOK = PolygonConstants.TELX_PRODUCTION_HOOK;
+    address constant PRODUCTION_SUBSCRIBER = PolygonConstants.TELX_PRODUCTION_SUBSCRIBER;
     address constant V4_POOL_MANAGER = 0x67366782805870060151383F4BbFF9daB53e5cD6;
     address constant V4_POSITION_MANAGER = 0x1Ec2eBf4F37E7363FDfe3551602425af0B3ceef9;
-    address constant TELCOIN = 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32;
+    address constant TELCOIN = PolygonConstants.TEL;
 
     // Known pool IDs
     bytes32 constant POOL_ID_USDC_EMXN = 0x37dafec81119c7987538ac000b8a8a16a7f4daeecf91626efc9956ccd5146246;
@@ -121,9 +124,9 @@ contract PositionRegistryPolygonTest is Test {
         // Limit iteration to prevent gas blowup on large subscriber lists
         uint256 limit = subscribers.length > 100 ? 100 : subscribers.length;
 
-        for (uint256 i = 0; i < limit; i++) {
+        for (uint256 i; i < limit; ++i) {
             uint256[] memory tokenIds = registry.getSubscriptions(subscribers[i]);
-            for (uint256 j = 0; j < tokenIds.length; j++) {
+            for (uint256 j; j < tokenIds.length; ++j) {
                 IPositionRegistry.PositionDetails memory details = registry.getPositionDetails(tokenIds[j]);
                 if (PoolId.unwrap(details.poolId) == PoolId.unwrap(targetPool)) {
                     matchCount++;

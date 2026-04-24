@@ -30,6 +30,12 @@ import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol"
 import {IPositionDescriptor} from "@uniswap/v4-periphery/src/interfaces/IPositionDescriptor.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 
+/// @title PositionRegistryTest
+/// @notice Sepolia-fork unit tests for PositionRegistry — fresh deploys with full branch coverage.
+///         Tests the LP subscription registry: pool config, weight rules, MAX_SUBSCRIBED /
+///         MAX_SUBSCRIPTIONS guards, and reward attribution math. Inherits PositionRegistry
+///         directly (with sentinel-zero constructor args) so internal helpers are testable.
+///         Companion file: PositionRegistry.polygon.t.sol (read-only production state checks).
 contract PositionRegistryTest is
     PositionRegistry(
         IERC20(address(0)), IPoolManager(address(0)), IPositionManager(address(0)), StateView(address(0)), address(0)
@@ -473,9 +479,9 @@ contract PositionRegistryTest is
         assertEq(outputCurrency.balanceOf(holder), initialOutputBal + amountOut);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            ADD REWARDS
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----------
+    // ADD REWARDS
+    // -----------
 
     function test_addRewards_happyPath() public {
         address[] memory lps = new address[](2);
@@ -556,9 +562,9 @@ contract PositionRegistryTest is
         positionRegistry.addRewards(lps, amounts, 100e18);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            CLAIM
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----
+    // CLAIM
+    // -----
 
     function test_claim_happyPath() public {
         // Add rewards first
@@ -611,9 +617,9 @@ contract PositionRegistryTest is
         positionRegistry.claim();
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                        GET UNCLAIMED REWARDS
-    //////////////////////////////////////////////////////////////////////////*/
+    // ---------------------
+    // GET UNCLAIMED REWARDS
+    // ---------------------
 
     function test_getUnclaimedRewards_initiallyZero() public view {
         assertEq(positionRegistry.getUnclaimedRewards(holder), 0);
@@ -634,9 +640,9 @@ contract PositionRegistryTest is
         assertEq(positionRegistry.getUnclaimedRewards(holder), 123e18);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                        CONFIGURE WEIGHTS
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----------------
+    // CONFIGURE WEIGHTS
+    // -----------------
 
     function test_configureWeights_happyPath() public {
         vm.expectEmit(true, true, true, true);
@@ -678,9 +684,9 @@ contract PositionRegistryTest is
         positionRegistry.configureWeights(100, 0, 2500, 7500);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            ERC20 RESCUE
-    //////////////////////////////////////////////////////////////////////////*/
+    // ------------
+    // ERC20 RESCUE
+    // ------------
 
     function test_erc20Rescue_happyPath() public {
         deal(address(tel), address(positionRegistry), 1000e18);
@@ -712,9 +718,9 @@ contract PositionRegistryTest is
         positionRegistry.erc20Rescue(tel, holder, 500e18);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                    SUBSCRIPTION THRESHOLD REMOVAL
-    //////////////////////////////////////////////////////////////////////////*/
+    // ------------------------------
+    // SUBSCRIPTION THRESHOLD REMOVAL
+    // ------------------------------
 
     function test_subscriptionThresholdRemoval() public {
         (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
@@ -746,9 +752,9 @@ contract PositionRegistryTest is
         }
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                    NEGATIVE TESTS
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------
+    // NEGATIVE TESTS
+    // --------------
 
     function test_invalidPool_validPool() public view {
         // The setUp pool should be valid

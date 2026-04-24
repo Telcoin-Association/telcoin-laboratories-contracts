@@ -7,15 +7,20 @@ import {StakingRewardsFactory} from "contracts/telx/core/StakingRewardsFactory.s
 import {StakingRewards} from "contracts/telx/core/StakingRewards.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {PolygonConstants} from "../util/PolygonConstants.sol";
 
+/// @title StakingRewardsManagerTest
+/// @notice Polygon-fork tests for the upgradeable StakingRewardsManager — coordinates the
+///         StakingRewardsFactory's per-pool deployments behind a single owner. Tests the BUILDER
+///         and SUPPORT role gates, factory address swap, and the `addStakingRewards` registry.
 contract StakingRewardsManagerTest is Test {
     StakingRewardsManager public manager;
     StakingRewardsFactory public factory;
 
-    // Polygon mainnet tokens
-    address public constant TEL = 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32;
-    address public constant USDC = 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359;
-    address public constant WETH = 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619;
+    // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
+    address public constant TEL = PolygonConstants.TEL;
+    address public constant USDC = PolygonConstants.USDC;
+    address public constant WETH = PolygonConstants.WETH;
 
     IERC20 public rewardToken;
     IERC20 public stakingToken;
@@ -75,9 +80,9 @@ contract StakingRewardsManagerTest is Test {
         manager.grantRole(EXECUTOR_ROLE, executor);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                                INITIALIZE
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----------
+    // INITIALIZE
+    // ----------
 
     function test_initialize() public view {
         assertEq(address(manager.rewardToken()), address(rewardToken));
@@ -110,9 +115,9 @@ contract StakingRewardsManagerTest is Test {
         manager.initialize(rewardToken, factory);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                        CREATE NEW STAKING REWARDS CONTRACT
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----------------------------------
+    // CREATE NEW STAKING REWARDS CONTRACT
+    // -----------------------------------
 
     function test_createNewStakingRewardsContract() public {
         StakingRewardsManager.StakingConfig memory config = StakingRewardsManager.StakingConfig({
@@ -144,9 +149,9 @@ contract StakingRewardsManagerTest is Test {
         manager.createNewStakingRewardsContract(stakingToken, config);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                        ADD STAKING REWARDS CONTRACT
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----------------------------
+    // ADD STAKING REWARDS CONTRACT
+    // ----------------------------
 
     function test_addStakingRewardsContract() public {
         // Create a staking contract externally (owned by deployer initially)
@@ -201,9 +206,9 @@ contract StakingRewardsManagerTest is Test {
         manager.addStakingRewardsContract(staking, config);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                        REMOVE STAKING REWARDS CONTRACT
-    //////////////////////////////////////////////////////////////////////////*/
+    // -------------------------------
+    // REMOVE STAKING REWARDS CONTRACT
+    // -------------------------------
 
     function test_removeStakingRewardsContract() public {
         _createManagedStaking(stakingToken);
@@ -253,9 +258,9 @@ contract StakingRewardsManagerTest is Test {
         manager.removeStakingRewardsContract(0);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            SET STAKING CONFIG
-    //////////////////////////////////////////////////////////////////////////*/
+    // ------------------
+    // SET STAKING CONFIG
+    // ------------------
 
     function test_setStakingConfig() public {
         _createManagedStaking(stakingToken);
@@ -313,9 +318,9 @@ contract StakingRewardsManagerTest is Test {
         manager.setStakingConfig(staking, config);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                        SET STAKING REWARDS FACTORY
-    //////////////////////////////////////////////////////////////////////////*/
+    // ---------------------------
+    // SET STAKING REWARDS FACTORY
+    // ---------------------------
 
     function test_setStakingRewardsFactory() public {
         StakingRewardsFactory newFactory = new StakingRewardsFactory(address(1));
@@ -343,9 +348,9 @@ contract StakingRewardsManagerTest is Test {
         manager.setStakingRewardsFactory(newFactory);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                                TOP UP
-    //////////////////////////////////////////////////////////////////////////*/
+    // ------
+    // TOP UP
+    // ------
 
     function test_topUp_happyPath() public {
         _createManagedStaking(stakingToken);
@@ -437,9 +442,9 @@ contract StakingRewardsManagerTest is Test {
         manager.topUp(alice, indices);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            RECOVER ERC20
-    //////////////////////////////////////////////////////////////////////////*/
+    // -------------
+    // RECOVER ERC20
+    // -------------
 
     function test_recoverERC20FromStaking() public {
         _createManagedStaking(stakingToken);
@@ -483,9 +488,9 @@ contract StakingRewardsManagerTest is Test {
         manager.recoverTokens(rewardToken, 500e18, alice);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                        TRANSFER STAKING OWNERSHIP
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------------------
+    // TRANSFER STAKING OWNERSHIP
+    // --------------------------
 
     function test_transferStakingOwnership() public {
         _createManagedStaking(stakingToken);
@@ -511,9 +516,9 @@ contract StakingRewardsManagerTest is Test {
         manager.transferStakingOwnership(staking, alice);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            ACCESS CONTROL COMPREHENSIVE
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----------------------------
+    // ACCESS CONTROL COMPREHENSIVE
+    // ----------------------------
 
     function test_accessControl_allRolesAssigned() public view {
         assertTrue(manager.hasRole(BUILDER_ROLE, builder));
@@ -570,9 +575,9 @@ contract StakingRewardsManagerTest is Test {
         manager.transferStakingOwnership(staking, alice);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            VIEW FUNCTIONS
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------
+    // VIEW FUNCTIONS
+    // --------------
 
     function test_stakingContractsLength() public {
         assertEq(manager.stakingContractsLength(), 0);
@@ -590,9 +595,9 @@ contract StakingRewardsManagerTest is Test {
         assertTrue(address(staking) != address(0));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            HELPERS
-    //////////////////////////////////////////////////////////////////////////*/
+    // -------
+    // HELPERS
+    // -------
 
     function _createManagedStaking(IERC20 _stakingToken) internal {
         StakingRewardsManager.StakingConfig memory config = StakingRewardsManager.StakingConfig({

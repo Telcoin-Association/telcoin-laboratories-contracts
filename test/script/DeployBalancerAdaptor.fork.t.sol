@@ -8,6 +8,7 @@ import {StakingRewardsAdaptor} from "../../contracts/snapshot/adaptors/StakingRe
 import {VotingWeightCalculator} from "../../contracts/snapshot/core/VotingWeightCalculator.sol";
 import {ISource} from "../../contracts/snapshot/interfaces/ISource.sol";
 import {TestConstants} from "../util/TestConstants.sol";
+import {PolygonConstants} from "../util/PolygonConstants.sol";
 
 /// @notice Polygon-fork test of DeployBalancerAdaptor. Exercises the full
 ///         `runWithSigner(signer)` flow: deploys VotingWeightCalculator,
@@ -27,8 +28,8 @@ contract DeployBalancerAdaptorForkTest is Test {
     // ever change, update BOTH. Consider this the single-source-of-truth
     // reference; the table below is the mirror.
     // ---------------------------------------------------------------------
-    address internal constant TELCOIN = 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32;
-    address internal constant BALANCER_VAULT = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
+    address internal constant TELCOIN = PolygonConstants.TEL;
+    address internal constant BALANCER_VAULT = PolygonConstants.BALANCER_VAULT;
     address internal constant PENDING_OWNER = 0xc1612C97537c2CC62a11FC4516367AB6F62d4B23;
 
     address internal constant POOL0 = 0xcA6EFA5704f1Ae445e0EE24D9c3Ddde34c5be1C2; // TEL80/WETH20
@@ -105,9 +106,9 @@ contract DeployBalancerAdaptorForkTest is Test {
         _assertSourceAtIndex(vwc, 2, POOL2, STAKING2);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                HELPERS
-    //////////////////////////////////////////////////////////////*/
+    // -------
+    // HELPERS
+    // -------
 
     function _assertSourceAtIndex(
         VotingWeightCalculator vwc,

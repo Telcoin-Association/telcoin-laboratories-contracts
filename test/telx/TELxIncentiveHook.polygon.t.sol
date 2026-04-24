@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {TELxIncentiveHook} from "../../contracts/telx/core/TELxIncentiveHook.sol";
 import {IPositionRegistry} from "../../contracts/telx/interfaces/IPositionRegistry.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {PolygonConstants} from "../util/PolygonConstants.sol";
 
 /**
  * @title TELxIncentiveHook Polygon Production Fork Tests
@@ -16,8 +17,8 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
  *      Fork block: 65000000+ (post-Dencun)
  */
 contract TELxIncentiveHookPolygonTest is Test {
-    address constant PRODUCTION_HOOK = 0xD77cC9230Ded5b6591730032975453744532a500;
-    address constant PRODUCTION_REGISTRY = 0x2c33fC9c09CfAC5431e754b8fe708B1dA3F5B954;
+    address constant PRODUCTION_HOOK = PolygonConstants.TELX_PRODUCTION_HOOK;
+    address constant PRODUCTION_REGISTRY = PolygonConstants.TELX_PRODUCTION_REGISTRY;
     address constant V4_POOL_MANAGER = 0x67366782805870060151383F4BbFF9daB53e5cD6;
     address constant V4_POSITION_MANAGER = 0x1Ec2eBf4F37E7363FDfe3551602425af0B3ceef9;
 

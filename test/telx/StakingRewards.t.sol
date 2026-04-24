@@ -5,13 +5,18 @@ import "forge-std/Test.sol";
 import {StakingRewards} from "contracts/telx/core/StakingRewards.sol";
 import {RewardsDistributionRecipient} from "contracts/telx/abstract/RewardsDistributionRecipient.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {PolygonConstants} from "../util/PolygonConstants.sol";
 
+/// @title StakingRewardsTest
+/// @notice Polygon-fork tests for the standalone StakingRewards contract (unstaked from the
+///         TELxIncentiveHook flow). Validates `notifyRewardAmount`, per-user `earned()`
+///         accounting, and the `recoverERC20` guard against draining the staking token.
 contract StakingRewardsTest is Test {
     StakingRewards public stakingRewards;
 
-    // Polygon mainnet tokens
-    address public constant TEL = 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32;
-    address public constant USDC = 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359;
+    // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
+    address public constant TEL = PolygonConstants.TEL;
+    address public constant USDC = PolygonConstants.USDC;
 
     IERC20 public rewardsToken;
     IERC20 public stakingToken;
@@ -55,9 +60,9 @@ contract StakingRewardsTest is Test {
         stakingToken.approve(address(stakingRewards), type(uint256).max);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                                CONSTRUCTOR
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----------
+    // CONSTRUCTOR
+    // -----------
 
     function test_constructor() public view {
         assertEq(address(stakingRewards.rewardsToken()), address(rewardsToken));
@@ -70,9 +75,9 @@ contract StakingRewardsTest is Test {
         assertEq(stakingRewards.EQUALIZING_FACTOR(), 1e18);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                                VIEW FUNCTIONS
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------
+    // VIEW FUNCTIONS
+    // --------------
 
     function test_totalSupply_initiallyZero() public view {
         assertEq(stakingRewards.totalSupply(), 0);
@@ -169,9 +174,9 @@ contract StakingRewardsTest is Test {
         assertApproxEqAbs(rewardForDuration, REWARD_AMOUNT, 1e18, "reward for duration should match reward amount");
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                                STAKE
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----
+    // STAKE
+    // -----
 
     function test_stake_happyPath() public {
         uint256 stakeAmount = 1000e6;
@@ -217,9 +222,9 @@ contract StakingRewardsTest is Test {
     // Note: StakingRewards inherits Pausable but does not expose pause()/unpause() publicly.
     // No testRevert_stake_whenPaused since pause() is not callable externally.
 
-    /*//////////////////////////////////////////////////////////////////////////
-                                WITHDRAW
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------
+    // WITHDRAW
+    // --------
 
     function test_withdraw_happyPath() public {
         vm.prank(alice);
@@ -268,9 +273,9 @@ contract StakingRewardsTest is Test {
         stakingRewards.withdraw(1001e6);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                                GET REWARD
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----------
+    // GET REWARD
+    // ----------
 
     function test_getReward_happyPath() public {
         vm.prank(alice);
@@ -344,9 +349,9 @@ contract StakingRewardsTest is Test {
         }
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                                EXIT
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----
+    // EXIT
+    // ----
 
     function test_exit_happyPath() public {
         vm.prank(alice);
@@ -365,9 +370,9 @@ contract StakingRewardsTest is Test {
         assertEq(stakingToken.balanceOf(alice), stakingBalBefore + 1000e6);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            NOTIFY REWARD AMOUNT
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------------
+    // NOTIFY REWARD AMOUNT
+    // --------------------
 
     function test_notifyRewardAmount_newPeriod() public {
         // Fund the staking contract
@@ -421,9 +426,9 @@ contract StakingRewardsTest is Test {
         stakingRewards.notifyRewardAmount(REWARD_AMOUNT);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            SET REWARDS DURATION
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------------
+    // SET REWARDS DURATION
+    // --------------------
 
     function test_setRewardsDuration_happyPath() public {
         // Period is not started (periodFinish == 0), so block.timestamp > 0 > 0 is true
@@ -465,9 +470,9 @@ contract StakingRewardsTest is Test {
         stakingRewards.setRewardsDuration(60 days);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            RECOVER ERC20
-    //////////////////////////////////////////////////////////////////////////*/
+    // -------------
+    // RECOVER ERC20
+    // -------------
 
     function test_recoverERC20_happyPath() public {
         // Send some reward tokens to the staking contract "by accident"
@@ -499,9 +504,9 @@ contract StakingRewardsTest is Test {
         stakingRewards.recoverERC20(alice, rewardsToken, 500e18);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            PAUSE / UNPAUSE
-    //////////////////////////////////////////////////////////////////////////*/
+    // ---------------
+    // PAUSE / UNPAUSE
+    // ---------------
 
     // Note: StakingRewards inherits Pausable but does not expose pause()/unpause() publicly.
     // The whenNotPaused modifier on stake() is only triggerable if a subclass exposes _pause().
@@ -518,9 +523,9 @@ contract StakingRewardsTest is Test {
         assertEq(stakingRewards.balanceOf(alice), 1000e6);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            REWARDS DISTRIBUTION
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------------
+    // REWARDS DISTRIBUTION
+    // --------------------
 
     function test_setRewardsDistribution_happyPath() public {
         vm.prank(owner);
@@ -541,9 +546,9 @@ contract StakingRewardsTest is Test {
         stakingRewards.setRewardsDistribution(bob);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            FULL LIFECYCLE
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------
+    // FULL LIFECYCLE
+    // --------------
 
     function test_fullLifecycle() public {
         // 1. Alice stakes
@@ -600,9 +605,9 @@ contract StakingRewardsTest is Test {
         assertTrue(aliceEarned > 0, "Alice should have earned some reward");
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            FUZZ TESTS
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----------
+    // FUZZ TESTS
+    // ----------
 
     function testFuzz_stake(uint128 amount) public {
         amount = uint128(bound(amount, 1, 100_000e6));
@@ -648,9 +653,9 @@ contract StakingRewardsTest is Test {
         assertTrue(earned <= rewardAmount + 1e18, "earned should not exceed total rewards");
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            UPDATE REWARD MODIFIER
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----------------------
+    // UPDATE REWARD MODIFIER
+    // ----------------------
 
     function test_updateReward_storesCorrectly() public {
         vm.prank(alice);
@@ -680,9 +685,9 @@ contract StakingRewardsTest is Test {
         assertEq(stakingRewards.rewards(address(0)), 0);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            OWNERSHIP TRANSFER
-    //////////////////////////////////////////////////////////////////////////*/
+    // ------------------
+    // OWNERSHIP TRANSFER
+    // ------------------
 
     function test_transferOwnership() public {
         vm.prank(owner);
@@ -697,9 +702,9 @@ contract StakingRewardsTest is Test {
         stakingRewards.transferOwnership(bob);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            HELPERS
-    //////////////////////////////////////////////////////////////////////////*/
+    // -------
+    // HELPERS
+    // -------
 
     function _notifyRewardAmount(uint256 amount) internal {
         deal(address(rewardsToken), address(stakingRewards), amount + rewardsToken.balanceOf(address(stakingRewards)));

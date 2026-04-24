@@ -9,6 +9,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ISablierV2Lockup} from "../../contracts/sablier/interfaces/ISablierV2Lockup.sol";
 import {TestSablierV2Lockup} from "../../contracts/sablier/test/TestSablierV2Lockup.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {PolygonConstants} from "../util/PolygonConstants.sol";
 
 contract RevertingLockup is ISablierV2Lockup {
     function withdrawMax(uint256, address) external pure returns (uint128) {
@@ -31,13 +32,12 @@ contract RevertingLockup is ISablierV2Lockup {
  *   forge test --match-contract CouncilMemberForkTest -vvv
  */
 contract CouncilMemberForkTest is Test {
-    /*//////////////////////////////////////////////////////////////
-                                 CONSTANTS
-    //////////////////////////////////////////////////////////////*/
+    // ---------
+    // CONSTANTS
+    // ---------
 
-    // Official/live Polygon TEL contract.
-    address internal constant TEL_ADDRESS =
-        0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32;
+    // Local alias for shared mainnet address (see test/util/PolygonConstants.sol).
+    address internal constant TEL_ADDRESS = PolygonConstants.TEL;
 
     bytes32 internal constant GOVERNANCE_COUNCIL_ROLE =
         keccak256("GOVERNANCE_COUNCIL_ROLE");
@@ -46,9 +46,9 @@ contract CouncilMemberForkTest is Test {
     uint256 internal constant INITIAL_LOCKUP_FUNDING = 100_000;
     uint256 internal constant DIRECT_RESCUE_FUNDING = 100_000;
 
-    /*//////////////////////////////////////////////////////////////
-                                  STATE
-    //////////////////////////////////////////////////////////////*/
+    // -----
+    // STATE
+    // -----
 
     CouncilMember public councilMemberContract;
     IERC20 public telcoin;
@@ -67,9 +67,9 @@ contract CouncilMemberForkTest is Test {
 
     uint256 internal forkId;
 
-    /*//////////////////////////////////////////////////////////////
-                                   SETUP
-    //////////////////////////////////////////////////////////////*/
+    // -----
+    // SETUP
+    // -----
 
     function setUp() public {
         forkId = vm.createSelectFork(vm.envString("POLYGON_RPC_URL"));
@@ -103,9 +103,9 @@ contract CouncilMemberForkTest is Test {
         vm.stopPrank();
     }
 
-    /*//////////////////////////////////////////////////////////////
-                               HELPERS
-    //////////////////////////////////////////////////////////////*/
+    // -------
+    // HELPERS
+    // -------
 
     function _fundLockup(uint256 amount) internal {
         // Uses forge-std helper to assign live-token balances on the fork.
@@ -134,9 +134,9 @@ contract CouncilMemberForkTest is Test {
         vm.roll(block.number + 1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                           FORK / TOKEN SANITY
-    //////////////////////////////////////////////////////////////*/
+    // -------------------
+    // FORK / TOKEN SANITY
+    // -------------------
 
     function testFork_usesLivePolygonTelcoin() public view {
         assertEq(address(councilMemberContract.TELCOIN()), TEL_ADDRESS);
@@ -150,9 +150,9 @@ contract CouncilMemberForkTest is Test {
         assertGt(TEL_ADDRESS.code.length, 0, "TEL token has no code");
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                VALUES - GETTERS
-    //////////////////////////////////////////////////////////////*/
+    // ----------------
+    // VALUES - GETTERS
+    // ----------------
 
     function test_GOVERNANCE_COUNCIL_ROLE() public view {
         assertEq(
@@ -183,9 +183,9 @@ contract CouncilMemberForkTest is Test {
         assertTrue(councilMemberContract.hasRole(SUPPORT_ROLE, support));
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            VALUES - SETTERS
-    //////////////////////////////////////////////////////////////*/
+    // ----------------
+    // VALUES - SETTERS
+    // ----------------
 
     function test_updateLockup_revertsWithoutRole() public {
         vm.prank(support);
@@ -217,9 +217,9 @@ contract CouncilMemberForkTest is Test {
         assertEq(councilMemberContract._id(), 1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                MUTATIVE - MINT
-    //////////////////////////////////////////////////////////////*/
+    // ---------------
+    // MUTATIVE - MINT
+    // ---------------
 
     function test_mint_singleNFT() public {
         vm.prank(admin);
@@ -232,9 +232,9 @@ contract CouncilMemberForkTest is Test {
         assertEq(councilMemberContract.ownerOf(0), member1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                MUTATIVE - APPROVE
-    //////////////////////////////////////////////////////////////*/
+    // ------------------
+    // MUTATIVE - APPROVE
+    // ------------------
 
     function test_approve_reverts_without_approval() public {
         vm.prank(admin);
@@ -279,9 +279,9 @@ contract CouncilMemberForkTest is Test {
         assertEq(councilMemberContract.balanceOf(support), 1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                MUTATIVE - BURN
-    //////////////////////////////////////////////////////////////*/
+    // ---------------
+    // MUTATIVE - BURN
+    // ---------------
 
     function test_burn_revertsWhenLastMember() public {
         _fundLockup(INITIAL_LOCKUP_FUNDING);
@@ -323,9 +323,9 @@ contract CouncilMemberForkTest is Test {
         councilMemberContract.ownerOf(1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            MUTATIVE - TRANSFERFROM
-    //////////////////////////////////////////////////////////////*/
+    // -----------------------
+    // MUTATIVE - TRANSFERFROM
+    // -----------------------
 
     function test_transferFrom_success() public {
         _fundLockup(INITIAL_LOCKUP_FUNDING);
@@ -383,9 +383,9 @@ contract CouncilMemberForkTest is Test {
         councilMemberContract.transferFrom(member1, member2, 0);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - MINT
-    //////////////////////////////////////////////////////////////*/
+    // -----------------
+    // TOKENOMICS - MINT
+    // -----------------
 
     function test_tokenomics_mint_correct_balance_accumulation() public {
         // Lockup drips 100 TEL per unique block via TestSablierV2Lockup.
@@ -424,9 +424,9 @@ contract CouncilMemberForkTest is Test {
         assertEq(councilMemberContract.balances(2), 0);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - BURN
-    //////////////////////////////////////////////////////////////*/
+    // -----------------
+    // TOKENOMICS - BURN
+    // -----------------
 
     function test_tokenomics_burn_correct_removal() public {
         // After _mintThreeMembers: balances = [150, 50, 0], contract holds 200 TEL
@@ -621,9 +621,9 @@ contract CouncilMemberForkTest is Test {
         councilMemberContract.claim(penultimateTokenId, 1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        TOKENOMICS - TRANSFERFROM
-    //////////////////////////////////////////////////////////////*/
+    // -------------------------
+    // TOKENOMICS - TRANSFERFROM
+    // -------------------------
 
     function test_tokenomics_transferFrom_accounting_soundness() public {
         _fundLockup(INITIAL_LOCKUP_FUNDING);
@@ -649,9 +649,9 @@ contract CouncilMemberForkTest is Test {
         assertEq(councilMemberContract.ownerOf(1), member2);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - CLAIM
-    //////////////////////////////////////////////////////////////*/
+    // ------------------
+    // TOKENOMICS - CLAIM
+    // ------------------
 
     function test_tokenomics_claim_claiming_rewards() public {
         _fundLockup(INITIAL_LOCKUP_FUNDING);
@@ -699,9 +699,9 @@ contract CouncilMemberForkTest is Test {
         assertEq(telcoin.balanceOf(member3), 0);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                           TOKENOMICS - RETRIEVE
-    //////////////////////////////////////////////////////////////*/
+    // ---------------------
+    // TOKENOMICS - RETRIEVE
+    // ---------------------
 
     function test_tokenomics_retrieve_minting_does_not_affect_claims_but_increases_balance()
         public
@@ -733,9 +733,9 @@ contract CouncilMemberForkTest is Test {
         assertEq(councilMemberContract.balances(1), 50);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        TOKENOMICS - ERC20 RESCUE
-    //////////////////////////////////////////////////////////////*/
+    // -------------------------
+    // TOKENOMICS - ERC20 RESCUE
+    // -------------------------
 
     function test_tokenomics_erc20Rescue() public {
         _fundCouncilDirect(DIRECT_RESCUE_FUNDING);
@@ -787,9 +787,9 @@ contract CouncilMemberForkTest is Test {
         );
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        CLAIM - NEGATIVE CASES
-    //////////////////////////////////////////////////////////////*/
+    // ----------------------
+    // CLAIM - NEGATIVE CASES
+    // ----------------------
 
     function test_claim_reverts_when_not_owner() public {
         _fundLockup(INITIAL_LOCKUP_FUNDING);
@@ -832,9 +832,9 @@ contract CouncilMemberForkTest is Test {
         councilMemberContract.claim(0, bal + 1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                     RETRIEVE - LOCKUP REVERT BEHAVIOR
-    //////////////////////////////////////////////////////////////*/
+    // ---------------------------------
+    // RETRIEVE - LOCKUP REVERT BEHAVIOR
+    // ---------------------------------
 
     function test_retrieve_noop_when_zero_withdrawable() public {
         _fundLockup(INITIAL_LOCKUP_FUNDING);

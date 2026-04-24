@@ -9,19 +9,23 @@ import {BalancerAdaptor} from "contracts/snapshot/adaptors/BalancerAdaptor.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IBalancerVault} from "contracts/snapshot/interfaces/IBalancerVault.sol";
 import {IBalancerPool} from "contracts/snapshot/interfaces/IBalancerPool.sol";
+import {PolygonConstants} from "../util/PolygonConstants.sol";
 
+/// @title VotingWeightCalculatorTest
+/// @notice Polygon-fork tests for the central voting-weight calculator that aggregates `ISource`
+///         adaptors (Balancer, StakingRewards, StakingModule) and computes a unified TEL weight.
+///         Covers source registration, removal, and weight summation. Companion to the per-source
+///         test files in this directory.
 contract VotingWeightCalculatorTest is Test {
     uint256 constant FORK_BLOCK = 68_000_000;
 
-    // Production addresses
-    address constant VOTING_WEIGHT_CALCULATOR = 0x3E95aA2605460E8c86166E78CaDab5e99ceaB0aA;
-    address constant TEL = 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32;
-    address constant BALANCER_VAULT = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
-    address constant WETH_POOL_ADAPTOR = 0x7b80BD3098b3D8ba887118E85fF8428231Bd7913;
-
-    // TEL80/WETH20 pool
-    address constant BALANCER_POOL = 0xcA6EFA5704f1Ae445e0EE24D9c3Ddde34c5be1C2;
-    bytes32 constant POOL_ID = 0xca6efa5704f1ae445e0ee24d9c3ddde34c5be1c2000200000000000000000dbd;
+    // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
+    address constant VOTING_WEIGHT_CALCULATOR = PolygonConstants.VOTING_WEIGHT_CALCULATOR;
+    address constant TEL = PolygonConstants.TEL;
+    address constant BALANCER_VAULT = PolygonConstants.BALANCER_VAULT;
+    address constant WETH_POOL_ADAPTOR = PolygonConstants.WETH_POOL_ADAPTOR;
+    address constant BALANCER_POOL = PolygonConstants.BALANCER_POOL;
+    bytes32 constant POOL_ID = PolygonConstants.BALANCER_POOL_ID;
 
     VotingWeightCalculator calculator;
     address owner;

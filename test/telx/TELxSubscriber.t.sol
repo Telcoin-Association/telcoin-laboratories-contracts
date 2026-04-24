@@ -22,9 +22,15 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 
+/// @title TELxSubscriberTest
+/// @notice Sepolia-fork unit tests for TELxSubscriber — the Uniswap v4 PositionManager subscriber
+///         that mirrors LP subscription state into PositionRegistry. Covers all four notify*
+///         callbacks (subscribe, unsubscribe, modifyLiquidity, burn) plus the position-transfer
+///         re-subscription flow. Companion: TELxSubscriber.polygon.t.sol (auth-only checks).
 contract TELxSubscriberTest is Test {
     using PoolIdLibrary for PoolKey;
 
@@ -97,18 +103,18 @@ contract TELxSubscriberTest is Test {
         poolMngr.initialize(poolKey, sqrtPriceX96);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            CONSTRUCTOR & IMMUTABLES
-    //////////////////////////////////////////////////////////////////////////*/
+    // ------------------------
+    // CONSTRUCTOR & IMMUTABLES
+    // ------------------------
 
     function test_constructorImmutables() public view {
         assertEq(address(telXSubscriber.registry()), address(positionRegistry));
         assertEq(telXSubscriber.positionManager(), address(positionMngr));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            NOTIFY SUBSCRIBE
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----------------
+    // NOTIFY SUBSCRIBE
+    // ----------------
 
     function test_notifySubscribe_happyPath() public {
         (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
@@ -152,9 +158,9 @@ contract TELxSubscriberTest is Test {
         assertEq(subscribedArr[0], holder);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            NOTIFY UNSUBSCRIBE
-    //////////////////////////////////////////////////////////////////////////*/
+    // ------------------
+    // NOTIFY UNSUBSCRIBE
+    // ------------------
 
     function test_notifyUnsubscribe_happyPath() public {
         (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
@@ -202,9 +208,9 @@ contract TELxSubscriberTest is Test {
         assertTrue(positionRegistry.isSubscribed(holder));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                        NOTIFY MODIFY LIQUIDITY (NO-OP)
-    //////////////////////////////////////////////////////////////////////////*/
+    // -------------------------------
+    // NOTIFY MODIFY LIQUIDITY (NO-OP)
+    // -------------------------------
 
     function test_notifyModifyLiquidity_isNoOp() public {
         // notifyModifyLiquidity is a no-op in the subscriber.
@@ -226,9 +232,9 @@ contract TELxSubscriberTest is Test {
         assertEq(subsBefore.length, subsAfter.length);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            NOTIFY BURN
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----------
+    // NOTIFY BURN
+    // -----------
 
     function test_notifyBurn() public {
         (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
@@ -276,9 +282,9 @@ contract TELxSubscriberTest is Test {
         assertTrue(positionRegistry.isSubscribed(holder));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            NOTIFY TRANSFER
-    //////////////////////////////////////////////////////////////////////////*/
+    // ---------------
+    // NOTIFY TRANSFER
+    // ---------------
 
     function test_notifyTransfer_unsubscribesOnTransfer() public {
         (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
@@ -292,10 +298,7 @@ contract TELxSubscriberTest is Test {
 
         // Transfer triggers unsubscribe via notifyUnsubscribe
         vm.prank(holder);
-        (bool success,) = address(positionMngr).call(
-            abi.encodeWithSignature("transferFrom(address,address,uint256)", holder, support, tokenId)
-        );
-        require(success);
+        IERC721(address(positionMngr)).transferFrom(holder, support, tokenId);
 
         // Position should be unsubscribed after transfer
         assertFalse(positionRegistry.isTokenSubscribed(tokenId));
@@ -313,10 +316,7 @@ contract TELxSubscriberTest is Test {
 
         // Transfer
         vm.prank(holder);
-        (bool success,) = address(positionMngr).call(
-            abi.encodeWithSignature("transferFrom(address,address,uint256)", holder, support, tokenId)
-        );
-        require(success);
+        IERC721(address(positionMngr)).transferFrom(holder, support, tokenId);
 
         // New owner resubscribes
         vm.prank(support);
@@ -329,9 +329,9 @@ contract TELxSubscriberTest is Test {
         assertEq(positionRegistry.getSubscriptions(holder).length, 0);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            ACCESS CONTROL
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------
+    // ACCESS CONTROL
+    // --------------
 
     function testRevert_notifySubscribe_onlyPositionManager() public {
         vm.expectRevert(PositionManagerAuth.OnlyPositionManager.selector);
@@ -357,9 +357,9 @@ contract TELxSubscriberTest is Test {
         telXSubscriber.notifyBurn(1, holder, PositionInfo.wrap(0), 0, BalanceDelta.wrap(0));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            UTILS
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----
+    // UTILS
+    // -----
 
     function mintPosition(
         address lp,

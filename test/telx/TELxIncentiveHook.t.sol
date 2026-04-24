@@ -24,6 +24,11 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 
+/// @title TELxIncentiveHookTest
+/// @notice Sepolia-fork unit tests for the TELxIncentiveHook — Uniswap v4 BaseHook that wires LP
+///         positions into the StakingRewards reward stream. Tests cover hook lifecycle callbacks
+///         (afterInitialize, afterAddLiquidity, etc.) and their interaction with PositionRegistry.
+///         Companion: TELxIncentiveHook.polygon.t.sol (read-only production checks).
 contract TELxIncentiveHookTest is Test {
     using PoolIdLibrary for PoolKey;
 
@@ -95,9 +100,9 @@ contract TELxIncentiveHookTest is Test {
         poolMngr.initialize(poolKey, sqrtPriceX96);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            HOOK PERMISSIONS
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----------------
+    // HOOK PERMISSIONS
+    // ----------------
 
     function test_getHookPermissions() public view {
         Hooks.Permissions memory perms = telXIncentiveHook.getHookPermissions();
@@ -118,18 +123,18 @@ contract TELxIncentiveHookTest is Test {
         assertFalse(perms.afterRemoveLiquidityReturnDelta, "afterRemoveLiquidityReturnDelta should be false");
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            CONSTRUCTOR & IMMUTABLES
-    //////////////////////////////////////////////////////////////////////////*/
+    // ------------------------
+    // CONSTRUCTOR & IMMUTABLES
+    // ------------------------
 
     function test_constructorImmutables() public view {
         assertEq(address(telXIncentiveHook.registry()), address(positionRegistry));
         assertEq(telXIncentiveHook.positionManager(), address(positionMngr));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                        AFTER ADD LIQUIDITY (via hook)
-    //////////////////////////////////////////////////////////////////////////*/
+    // ------------------------------
+    // AFTER ADD LIQUIDITY (via hook)
+    // ------------------------------
 
     function test_afterAddLiquidity_recordsCheckpoint() public {
         (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
@@ -168,9 +173,9 @@ contract TELxIncentiveHookTest is Test {
         assertEq(liquidityAfter, liquidityBefore + 3000, "liquidity should increase");
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                    AFTER REMOVE LIQUIDITY (via hook)
-    //////////////////////////////////////////////////////////////////////////*/
+    // ---------------------------------
+    // AFTER REMOVE LIQUIDITY (via hook)
+    // ---------------------------------
 
     function test_afterRemoveLiquidity_recordsCheckpoint() public {
         (, int24 currentTick,,) = StateLibrary.getSlot0(IPoolManager(address(poolMngr)), poolKey.toId());
@@ -206,9 +211,9 @@ contract TELxIncentiveHookTest is Test {
         assertEq(liquidityAfter, 0, "liquidity should be 0 after full removal");
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                POSITION REGISTRY INTEGRATION (via hook)
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----------------------------------------
+    // POSITION REGISTRY INTEGRATION (via hook)
+    // ----------------------------------------
 
     function test_hookRecordsPositionForInvalidPool() public {
         // Create a pool key that does not match an initialized pool in the registry
@@ -240,9 +245,9 @@ contract TELxIncentiveHookTest is Test {
         assertEq(ownerBefore, holder);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                        BEFORE INITIALIZE (via hook)
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----------------------------
+    // BEFORE INITIALIZE (via hook)
+    // ----------------------------
 
     function test_beforeInitialize_onlyAdmin() public {
         PoolKey memory newKey = PoolKey({
@@ -272,9 +277,9 @@ contract TELxIncentiveHookTest is Test {
         poolMngr.initialize(poolKey, 9.9827e27);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            ACCESS CONTROL
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------
+    // ACCESS CONTROL
+    // --------------
 
     function testRevert_afterAddLiquidity_onlyPositionManager() public pure {
         // Directly calling the hook's afterAddLiquidity should revert for non-PositionManager sender
@@ -286,9 +291,9 @@ contract TELxIncentiveHookTest is Test {
         assertTrue(true, "Access control verified via happy path and BaseHook protection");
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            UTILS
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----
+    // UTILS
+    // -----
 
     function mintPosition(
         address lp,

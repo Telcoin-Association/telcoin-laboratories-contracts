@@ -5,12 +5,17 @@ import {Test} from "forge-std/Test.sol";
 import {StakingModuleAdaptor} from "contracts/snapshot/adaptors/StakingModuleAdaptor.sol";
 import {IStakingModule} from "contracts/snapshot/interfaces/IStakingModule.sol";
 import {ISource} from "contracts/snapshot/interfaces/ISource.sol";
+import {PolygonConstants} from "../util/PolygonConstants.sol";
 
+/// @title StakingModuleAdaptorTest
+/// @notice Polygon-fork tests for the StakingModule voting-weight adaptor. The adaptor reads
+///         `stakedBy(account)` from the production StakingModule to surface staked TEL as
+///         governance weight. Tests verify the read path against live mainnet state.
 contract StakingModuleAdaptorTest is Test {
     uint256 constant FORK_BLOCK = 68_000_000;
 
-    // Production StakingModule on Polygon
-    address constant STAKING_MODULE = 0x92e43Aec69207755CB1E6A8Dc589aAE630476330;
+    // Local alias for shared mainnet address (see test/util/PolygonConstants.sol).
+    address constant STAKING_MODULE = PolygonConstants.STAKING_MODULE;
 
     StakingModuleAdaptor adaptor;
 

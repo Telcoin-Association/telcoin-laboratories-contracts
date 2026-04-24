@@ -3,6 +3,10 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {TELxSubscriber} from "../../contracts/telx/core/TELxSubscriber.sol";
+import {ISubscriber} from "@uniswap/v4-periphery/src/interfaces/ISubscriber.sol";
+import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {PositionInfo} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
+import {PolygonConstants} from "../util/PolygonConstants.sol";
 
 /**
  * @title TELxSubscriber Polygon Production Fork Tests
@@ -15,8 +19,8 @@ import {TELxSubscriber} from "../../contracts/telx/core/TELxSubscriber.sol";
  *      Fork block: 65000000+ (post-Dencun)
  */
 contract TELxSubscriberPolygonTest is Test {
-    address constant PRODUCTION_SUBSCRIBER = 0x3Bf9bAdC67573e7b4756547A2dC0C77368A2062b;
-    address constant PRODUCTION_REGISTRY = 0x2c33fC9c09CfAC5431e754b8fe708B1dA3F5B954;
+    address constant PRODUCTION_SUBSCRIBER = PolygonConstants.TELX_PRODUCTION_SUBSCRIBER;
+    address constant PRODUCTION_REGISTRY = PolygonConstants.TELX_PRODUCTION_REGISTRY;
     address constant V4_POSITION_MANAGER = 0x1Ec2eBf4F37E7363FDfe3551602425af0B3ceef9;
 
     uint256 constant FORK_BLOCK = 85_800_000;
@@ -61,30 +65,18 @@ contract TELxSubscriberPolygonTest is Test {
     }
 
     function test_notifyModifyLiquidity_revertsFromUnauthorized() public {
-        // Call via raw calldata to avoid type construction complexity
         address attacker = makeAddr("attacker");
         vm.prank(attacker);
-        (bool ok,) = address(subscriber).call(
-            abi.encodeWithSignature("notifyModifyLiquidity(uint256,int256,int256)", 1, int256(0), int256(0))
-        );
-        assertFalse(ok, "notifyModifyLiquidity should revert from unauthorized caller");
+        vm.expectRevert();
+        ISubscriber(address(subscriber)).notifyModifyLiquidity(1, int256(0), BalanceDelta.wrap(0));
     }
 
     function test_notifyBurn_revertsFromUnauthorized() public {
-        // Call via raw calldata — the full signature involves PositionInfo and BalanceDelta types
-        // that require Uniswap V4 imports; we just verify the auth check rejects unauthorized callers
         address attacker = makeAddr("attacker");
         vm.prank(attacker);
-        (bool ok,) = address(subscriber).call(
-            abi.encodeWithSignature(
-                "notifyBurn(uint256,address,uint256,uint256,int256)",
-                1,
-                address(0),
-                uint256(0),
-                uint256(0),
-                int256(0)
-            )
+        vm.expectRevert();
+        ISubscriber(address(subscriber)).notifyBurn(
+            1, address(0), PositionInfo.wrap(0), uint256(0), BalanceDelta.wrap(0)
         );
-        assertFalse(ok, "notifyBurn should revert from unauthorized caller");
     }
 }

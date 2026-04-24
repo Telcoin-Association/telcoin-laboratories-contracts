@@ -5,14 +5,19 @@ import "forge-std/Test.sol";
 import {StakingRewardsFactory} from "contracts/telx/core/StakingRewardsFactory.sol";
 import {StakingRewards} from "contracts/telx/core/StakingRewards.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {PolygonConstants} from "../util/PolygonConstants.sol";
 
+/// @title StakingRewardsFactoryTest
+/// @notice Polygon-fork tests for the StakingRewardsFactory — the deterministic-deployer for
+///         per-pool StakingRewards instances. Verifies that `deployStakingRewards` produces
+///         contracts with the correct (rewardsToken, stakingToken) pair and reverts on duplicates.
 contract StakingRewardsFactoryTest is Test {
     StakingRewardsFactory public factory;
 
-    // Polygon mainnet tokens
-    address public constant TEL = 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32;
-    address public constant USDC = 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359;
-    address public constant WETH = 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619;
+    // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
+    address public constant TEL = PolygonConstants.TEL;
+    address public constant USDC = PolygonConstants.USDC;
+    address public constant WETH = PolygonConstants.WETH;
 
     IERC20 public rewardsToken;
     IERC20 public stakingToken;
@@ -36,9 +41,9 @@ contract StakingRewardsFactoryTest is Test {
         factory = new StakingRewardsFactory(address(impl));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                                CONSTRUCTOR
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----------
+    // CONSTRUCTOR
+    // -----------
 
     function test_constructor() public view {
         assertTrue(factory.stakingRewardsImplementation() != address(0));
@@ -46,9 +51,9 @@ contract StakingRewardsFactoryTest is Test {
         assertEq(factory.getStakingRewardsContractCount(), 0);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            CREATE STAKING REWARDS
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----------------------
+    // CREATE STAKING REWARDS
+    // ----------------------
 
     function test_createStakingRewards_happyPath() public {
         StakingRewards created = factory.createStakingRewards(
@@ -116,9 +121,9 @@ contract StakingRewardsFactoryTest is Test {
         assertEq(factory.getStakingRewardsContractCount(), 2);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            ACCESS CONTROL
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------
+    // ACCESS CONTROL
+    // --------------
 
     function testRevert_createStakingRewards_onlyOwner() public {
         vm.expectRevert();
@@ -126,9 +131,9 @@ contract StakingRewardsFactoryTest is Test {
         factory.createStakingRewards(address(this), rewardsToken, stakingToken);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            CONTRACT ENUMERATION
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------------
+    // CONTRACT ENUMERATION
+    // --------------------
 
     function test_getStakingRewardsContract_returnsCorrectAddress() public {
         StakingRewards created = factory.createStakingRewards(
@@ -169,9 +174,9 @@ contract StakingRewardsFactoryTest is Test {
         assertEq(address(direct), address(created));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                            OWNERSHIP
-    //////////////////////////////////////////////////////////////////////////*/
+    // ---------
+    // OWNERSHIP
+    // ---------
 
     function test_transferOwnership() public {
         factory.transferOwnership(alice);
