@@ -22,9 +22,7 @@ contract CouncilMember is
 {
     using SafeERC20 for IERC20;
 
-    // ------
-    // ERRORS
-    // ------
+    /* ========== ERRORS ========== */
     error CouncilMember__NotTokenOwner(address caller, uint256 tokenId);
     error CouncilMember__InsufficientBalance(
         uint256 requested,
@@ -33,9 +31,7 @@ contract CouncilMember is
     error CouncilMember__MustMaintainCouncil();
     error CouncilMember__NotAuthorized(address caller);
 
-    // ------
-    // EVENTS
-    // ------
+    /* ========== EVENTS ========== */
     // Event fired when the lockup address is updated
     event LockupUpdated(ISablierV2Lockup newLockup);
     // Event fired when the ID is updated
@@ -47,9 +43,7 @@ contract CouncilMember is
         uint256 amount
     );
 
-    // ---------------
-    // STATE VARIABLES
-    // ---------------
+    /* ========== STATE VARIABLES ========== */
     // The main token of this ecosystem
     IERC20 public TELCOIN;
     // the location of tokens
@@ -69,9 +63,7 @@ contract CouncilMember is
     mapping(uint256 balanceIndex => uint256 tokenId)
         public balanceIndexToTokenId;
 
-    // -----
-    // ROLES
-    // -----
+    /* ========== ROLES ========== */
     // Role assigned for the governance council
     bytes32 public constant GOVERNANCE_COUNCIL_ROLE =
         keccak256("GOVERNANCE_COUNCIL_ROLE");
@@ -82,9 +74,7 @@ contract CouncilMember is
         _disableInitializers();
     }
 
-    // -----------
-    // INITIALIZER
-    // -----------
+    /* ========== INITIALIZER ========== */
     function initialize(
         IERC20 telcoin,
         string memory name_,

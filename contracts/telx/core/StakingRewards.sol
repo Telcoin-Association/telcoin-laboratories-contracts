@@ -21,9 +21,7 @@ contract StakingRewards is
     using Address for address;
     using SafeERC20 for IERC20;
 
-    // ---------------
-    // STATE VARIABLES
-    // ---------------
+    /* ========== STATE VARIABLES ========== */
 
     // Token that will be rewarded to the stakers
     IERC20 public rewardsToken;
@@ -50,9 +48,7 @@ contract StakingRewards is
 
     uint256 public constant EQUALIZING_FACTOR = 1e18;
 
-    // -----------
-    // CONSTRUCTOR
-    // -----------
+    /* ========== CONSTRUCTOR ========== */
 
     /**
      * @notice Constructor to set initial state variables.
@@ -70,9 +66,7 @@ contract StakingRewards is
         rewardsDistribution = rewardsDistribution_;
     }
 
-    // -----
-    // VIEWS
-    // -----
+    /* ========== VIEWS ========== */
 
     /**
      * @notice Returns total supply of the staking tokens.
@@ -139,9 +133,7 @@ contract StakingRewards is
         return (rewardRate * rewardsDuration) / EQUALIZING_FACTOR;
     }
 
-    // --------
-    // MUTATIVE
-    // --------
+    /* ========== MUTATIVE ========== */
 
     /**
      * @notice Stake a certain amount of tokens.
@@ -209,9 +201,7 @@ contract StakingRewards is
         getReward();
     }
 
-    // --------------------
-    // RESTRICTED FUNCTIONS
-    // --------------------
+    /* ========== RESTRICTED FUNCTIONS ========== */
 
     /**
      * @notice Notify the contract about the reward amount for the next period
@@ -298,9 +288,7 @@ contract StakingRewards is
         _;
     }
 
-    // ------
-    // EVENTS
-    // ------
+    /* ========== EVENTS ========== */
 
     event RewardAdded(uint256 reward);
     event Staked(address indexed user, uint256 amount);
