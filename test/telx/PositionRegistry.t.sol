@@ -1093,9 +1093,9 @@ contract PositionRegistryTest is
         return (inputCurrency, amountIn);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                    COVERAGE: addOrUpdatePosition branch paths
-    //////////////////////////////////////////////////////////////////////////*/
+    // ------------------------------------------
+    // COVERAGE: addOrUpdatePosition branch paths
+    // ------------------------------------------
 
     /// @dev Hits the early return in addOrUpdatePosition when poolId is invalid
     function test_addOrUpdatePosition_invalidPoolSkips() public {
@@ -1168,9 +1168,9 @@ contract PositionRegistryTest is
         assertEq(liquidityAfter, liquidityBefore);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                COVERAGE: _removeSubscription swap-and-pop path
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----------------------------------------------
+    // COVERAGE: _removeSubscription swap-and-pop path
+    // -----------------------------------------------
 
     /// @dev Tests removing a non-last subscription, triggering the swap-and-pop branch
     function test_removeSubscription_swapAndPop() public {
@@ -1242,9 +1242,9 @@ contract PositionRegistryTest is
         assertEq(subs[1], tokenId3);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-            COVERAGE: subscribed array swap-and-pop (multiple owners)
-    //////////////////////////////////////////////////////////////////////////*/
+    // ---------------------------------------------------------
+    // COVERAGE: subscribed array swap-and-pop (multiple owners)
+    // ---------------------------------------------------------
 
     /// @dev Tests removing a non-last owner from the subscribed array (swap-and-pop on global array)
     function test_subscribedArray_swapAndPop() public {
@@ -1298,9 +1298,9 @@ contract PositionRegistryTest is
         assertTrue(positionRegistry.isSubscribed(user3));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                    COVERAGE: isSubscribed false path
-    //////////////////////////////////////////////////////////////////////////*/
+    // ---------------------------------
+    // COVERAGE: isSubscribed false path
+    // ---------------------------------
 
     /// @dev Verifies isSubscribed returns false for a user with no subscriptions
     function test_isSubscribed_falsePath() public view {
@@ -1309,9 +1309,9 @@ contract PositionRegistryTest is
         assertFalse(positionRegistry.isSubscribed(holder));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-                    COVERAGE: isTokenSubscribed paths
-    //////////////////////////////////////////////////////////////////////////*/
+    // ---------------------------------
+    // COVERAGE: isTokenSubscribed paths
+    // ---------------------------------
 
     /// @dev Verifies isTokenSubscribed returns true after subscribing and false after unsubscribing
     function test_isTokenSubscribed_paths() public {
@@ -1336,9 +1336,9 @@ contract PositionRegistryTest is
         assertFalse(positionRegistry.isTokenSubscribed(tokenId));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-            COVERAGE: handleSubscribe edge cases
-    //////////////////////////////////////////////////////////////////////////*/
+    // ------------------------------------
+    // COVERAGE: handleSubscribe edge cases
+    // ------------------------------------
 
     /// @dev Tests handleSubscribe when pos.owner is stale (position was transferred outside of hook flow)
     function test_handleSubscribe_staleOwnerUpdate() public {
@@ -1366,9 +1366,9 @@ contract PositionRegistryTest is
         assertTrue(positionRegistry.isSubscribed(support));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-            COVERAGE: handleBurn direct path
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------------------------
+    // COVERAGE: handleBurn direct path
+    // --------------------------------
 
     /// @dev Tests handleBurn marks position UNTRACKED and removes subscription
     function test_handleBurn_marksUntracked() public {
@@ -1392,9 +1392,9 @@ contract PositionRegistryTest is
         assertFalse(positionRegistry.isSubscribed(holder));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-            COVERAGE: handleUnsubscribe direct path
-    //////////////////////////////////////////////////////////////////////////*/
+    // ---------------------------------------
+    // COVERAGE: handleUnsubscribe direct path
+    // ---------------------------------------
 
     /// @dev Tests handleUnsubscribe removes the token subscription
     function test_handleUnsubscribe_removesSubscription() public {
@@ -1417,9 +1417,9 @@ contract PositionRegistryTest is
         assertEq(positionRegistry.getSubscriptions(holder).length, 0);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-        COVERAGE: _resolveUser trusted router path (via initialize)
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----------------------------------------------------------
+    // COVERAGE: _resolveUser trusted router path (via initialize)
+    // -----------------------------------------------------------
 
     /// @dev Tests the _resolveUser path when msg.sender is a trusted router implementing IMsgSender
     function test_resolveUser_trustedRouterPath() public {
@@ -1489,9 +1489,9 @@ contract PositionRegistryTest is
         assertTrue(positionRegistry.validPool(newKey.toId()));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-            COVERAGE: validPool explicit false return
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----------------------------------------
+    // COVERAGE: validPool explicit false return
+    // -----------------------------------------
 
     /// @dev Hits the explicit `return false` in validPool when both currencies are address(0)
     function test_validPool_returnsFalse_bothCurrenciesZero() public view {
@@ -1500,9 +1500,9 @@ contract PositionRegistryTest is
         assertFalse(positionRegistry.validPool(unknownPool));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-            COVERAGE: configureWeights additional branch
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------------------------------------
+    // COVERAGE: configureWeights additional branch
+    // --------------------------------------------
 
     /// @dev Hits the branch where activeWeight exceeds 10000 bps
     function testRevert_configureWeights_activeWeightTooHigh() public {
@@ -1518,9 +1518,9 @@ contract PositionRegistryTest is
         positionRegistry.configureWeights(100, 0, 0, 10_001);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-        COVERAGE: subscription threshold - zero liquidity and small pool
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----------------------------------------------------------------
+    // COVERAGE: subscription threshold - zero liquidity and small pool
+    // ----------------------------------------------------------------
 
     /// @dev Tests that decreasing all liquidity on a subscribed position removes its subscription
     function test_subscriptionThreshold_zeroLiquidityRemoval() public {
@@ -1541,9 +1541,9 @@ contract PositionRegistryTest is
         assertEq(positionRegistry.getLiquidityLast(tokenId), 0);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-        COVERAGE: unsubscribe last element (no swap needed)
-    //////////////////////////////////////////////////////////////////////////*/
+    // ---------------------------------------------------
+    // COVERAGE: unsubscribe last element (no swap needed)
+    // ---------------------------------------------------
 
     /// @dev Tests removing the last subscription (no swap-and-pop needed, just pop)
     function test_removeSubscription_lastElement() public {
@@ -1568,9 +1568,9 @@ contract PositionRegistryTest is
         assertEq(subs[0], tokenId1);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-        COVERAGE: multiple operations in quick succession (checkpoint overwrites)
-    //////////////////////////////////////////////////////////////////////////*/
+    // -------------------------------------------------------------------------
+    // COVERAGE: multiple operations in quick succession (checkpoint overwrites)
+    // -------------------------------------------------------------------------
 
     /// @dev Tests multiple liquidity modifications triggering checkpoint behavior
     function test_multipleModifications_checkpointBehavior() public {
@@ -1587,10 +1587,10 @@ contract PositionRegistryTest is
         assertEq(positionRegistry.getLiquidityLast(tokenId), 8000);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-            COVERAGE: addOrUpdatePosition known position catch path
-                      (ownerOf reverts for non-subscribed known position)
-    //////////////////////////////////////////////////////////////////////////*/
+    // -------------------------------------------------------
+    // COVERAGE: addOrUpdatePosition known position catch path
+    // -------------------------------------------------------
+    // (ownerOf reverts for non-subscribed known position)
 
     /// @dev Tests the known-position catch block where the token is burned but NOT subscribed
     ///      This hits the `!isTokenSubscribed[tokenId]` branch that calls _setUntracked
@@ -1637,9 +1637,9 @@ contract PositionRegistryTest is
         assertFalse(positionRegistry.isTokenSubscribed(tokenId));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-        COVERAGE: handleSubscribe reverts
-    //////////////////////////////////////////////////////////////////////////*/
+    // ---------------------------------
+    // COVERAGE: handleSubscribe reverts
+    // ---------------------------------
 
     /// @dev Tests that subscribing a position in an invalid pool reverts
     function test_handleSubscribe_invalidPool_reverts() public {
@@ -1665,9 +1665,9 @@ contract PositionRegistryTest is
         positionRegistry.handleSubscribe(tokenId);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-        COVERAGE: initialize revert - OnlyAdmin from non-admin sender
-    //////////////////////////////////////////////////////////////////////////*/
+    // -------------------------------------------------------------
+    // COVERAGE: initialize revert - OnlyAdmin from non-admin sender
+    // -------------------------------------------------------------
 
     /// @dev Tests that initialize reverts when sender is not admin (direct call)
     function test_initialize_onlyAdmin_reverts() public {
@@ -1685,9 +1685,9 @@ contract PositionRegistryTest is
         positionRegistry.initialize(holder, newKey);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-        COVERAGE: multiple subscriptions then full unsubscribe sequence
-    //////////////////////////////////////////////////////////////////////////*/
+    // ---------------------------------------------------------------
+    // COVERAGE: multiple subscriptions then full unsubscribe sequence
+    // ---------------------------------------------------------------
 
     /// @dev Unsubscribe all positions one by one, verifying subscribed array cleanup
     function test_fullUnsubscribeSequence() public {
@@ -1721,9 +1721,9 @@ contract PositionRegistryTest is
         assertFalse(positionRegistry.isSubscribed(holder));
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-        COVERAGE: getPositionDetails for unregistered position
-    //////////////////////////////////////////////////////////////////////////*/
+    // ------------------------------------------------------
+    // COVERAGE: getPositionDetails for unregistered position
+    // ------------------------------------------------------
 
     /// @dev Tests getPositionDetails returns zero values for an unregistered position
     function test_getPositionDetails_unregistered() public view {
@@ -1732,9 +1732,9 @@ contract PositionRegistryTest is
         assertEq(details.liquidity, 0);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-            COVERAGE: getAmountsForLiquidity (public view helper)
-    //////////////////////////////////////////////////////////////////////////*/
+    // -----------------------------------------------------
+    // COVERAGE: getAmountsForLiquidity (public view helper)
+    // -----------------------------------------------------
 
     /// @dev getAmountsForLiquidity is a public read helper consumed by the
     ///      benchmark + off-chain tooling. It is not otherwise exercised.
@@ -1751,10 +1751,10 @@ contract PositionRegistryTest is
         assertTrue(amount0 > 0 || amount1 > 0, "non-zero liquidity requires tokens");
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-            COVERAGE: addOrUpdatePosition catch branch (new position whose
-                      tokenId does not exist in PositionManager)
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------------------------------------------------------
+    // COVERAGE: addOrUpdatePosition catch branch (new position whose
+    // --------------------------------------------------------------
+    // tokenId does not exist in PositionManager)
 
     /// @dev When the hook forwards a tokenId that PositionManager.ownerOf()
     ///      reverts on, addOrUpdatePosition must fall into its catch branch
@@ -1777,9 +1777,9 @@ contract PositionRegistryTest is
         assertEq(owner, address(type(uint160).max), "position should be UNTRACKED");
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-            COVERAGE: handleSubscribe revert paths (lines 318 / 331 / 334)
-    //////////////////////////////////////////////////////////////////////////*/
+    // --------------------------------------------------------------
+    // COVERAGE: handleSubscribe revert paths (lines 318 / 331 / 334)
+    // --------------------------------------------------------------
 
     /// @dev An unknown tokenId has pos.owner == address(0) (not UNTRACKED) and
     ///      pos.poolId == bytes32(0). That trips the InvalidPool branch.
@@ -1829,22 +1829,22 @@ contract PositionRegistryTest is
         positionRegistry.handleSubscribe(tokenId);
     }
 
-    /*//////////////////////////////////////////////////////////////////////////
-        Storage-layout helpers
-
-        These tests mutate `positionRegistry`'s internal storage via vm.store.
-        The slots are taken from `forge inspect contracts/telx/core/
-        PositionRegistry.sol:PositionRegistry storageLayout` at the time this
-        was written. If someone adds, removes, or reorders a state variable on
-        PositionRegistry, those slots shift — and vm.store would silently
-        corrupt unrelated state instead of writing the array length we intend.
-
-        The `_assertXSlotStillAt` helpers guard against that: they write a
-        small sentinel length to the slot, confirm via the contract's public
-        getter that we see the same length back, then restore the original
-        value. If the storage layout has drifted, these fail LOUDLY with a
-        message that points to the fix.
-    //////////////////////////////////////////////////////////////////////////*/
+    // ----------------------
+    // Storage-layout helpers
+    // ----------------------
+    //
+    // These tests mutate `positionRegistry`'s internal storage via vm.store.
+    // The slots are taken from `forge inspect contracts/telx/core/
+    // PositionRegistry.sol:PositionRegistry storageLayout` at the time this
+    // was written. If someone adds, removes, or reorders a state variable on
+    // PositionRegistry, those slots shift — and vm.store would silently
+    // corrupt unrelated state instead of writing the array length we intend.
+    //
+    // The `_assertXSlotStillAt` helpers guard against that: they write a
+    // small sentinel length to the slot, confirm via the contract's public
+    // getter that we see the same length back, then restore the original
+    // value. If the storage layout has drifted, these fail LOUDLY with a
+    // message that points to the fix.
 
     /// @dev Storage slot holding `subscribed.length`. Matches forge-inspect output.
     function _subscribedArrayLengthSlot() internal pure returns (bytes32) {

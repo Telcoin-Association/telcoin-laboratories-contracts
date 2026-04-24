@@ -38,9 +38,9 @@ contract UpgradeCouncilMemberHarness is UpgradeCouncilMember {
 }
 
 contract CouncilMemberUpgradeForkTest is Test {
-    /*//////////////////////////////////////////////////////////////
-                                CONSTANTS
-    //////////////////////////////////////////////////////////////*/
+    // ---------
+    // CONSTANTS
+    // ---------
 
     bytes32 internal constant IMPLEMENTATION_SLOT =
         0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
@@ -51,9 +51,9 @@ contract CouncilMemberUpgradeForkTest is Test {
     bytes32 internal constant GOVERNANCE_COUNCIL_ROLE =
         keccak256("GOVERNANCE_COUNCIL_ROLE");
 
-    /*//////////////////////////////////////////////////////////////
-                         REPRESENTATIVE PROXY CONFIG
-    //////////////////////////////////////////////////////////////*/
+    // ---------------------------
+    // REPRESENTATIVE PROXY CONFIG
+    // ---------------------------
 
     // Compliance Council proxy (example) from UpgradeCouncilMember::getProxies()[3]
     // the representative proxy we run functional behavior tests against
@@ -74,9 +74,9 @@ contract CouncilMemberUpgradeForkTest is Test {
     address internal constant MEMBER_3 =
         0x51b2695e7f21fcB56f34a3eC7d44B482C2eFE4d9;
 
-    /*//////////////////////////////////////////////////////////////
-                                  STATE
-    //////////////////////////////////////////////////////////////*/
+    // -----
+    // STATE
+    // -----
 
     UpgradeCouncilMemberHarness internal script;
     uint256 internal forkId;
@@ -93,9 +93,9 @@ contract CouncilMemberUpgradeForkTest is Test {
     address internal behaviourFrom;
     address internal behaviourTo;
 
-    /*//////////////////////////////////////////////////////////////
-                                  TYPES
-    //////////////////////////////////////////////////////////////*/
+    // -----
+    // TYPES
+    // -----
 
     struct GlobalSnapshot {
         address proxy;
@@ -134,9 +134,9 @@ contract CouncilMemberUpgradeForkTest is Test {
         bool safeHasSupportRole;
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                   SETUP
-    //////////////////////////////////////////////////////////////*/
+    // -----
+    // SETUP
+    // -----
 
     function setUp() external {
         string memory rpcUrl = vm.envString("POLYGON_RPC_URL");
@@ -169,9 +169,9 @@ contract CouncilMemberUpgradeForkTest is Test {
         behaviourTo = makeAddr("behaviourTo");
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                  HELPERS
-    //////////////////////////////////////////////////////////////*/
+    // -------
+    // HELPERS
+    // -------
 
     function mine() internal {
         vm.warp(block.timestamp + 1);
@@ -358,9 +358,9 @@ contract CouncilMemberUpgradeForkTest is Test {
         }
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        SCRIPT-LEVEL REAL COVERAGE
-    //////////////////////////////////////////////////////////////*/
+    // --------------------------
+    // SCRIPT-LEVEL REAL COVERAGE
+    // --------------------------
 
     function test_liveFork_scriptRun_upgradesAllProxiesAndPreservesState()
         external
@@ -529,9 +529,9 @@ contract CouncilMemberUpgradeForkTest is Test {
         }
     }
 
-    /*//////////////////////////////////////////////////////////////
-                      REPRESENTATIVE PROXY SANITY
-    //////////////////////////////////////////////////////////////*/
+    // ---------------------------
+    // REPRESENTATIVE PROXY SANITY
+    // ---------------------------
 
     function testFork_representative_readsLiveProxyMetadata() external view {
         assertEq(address(behaviourCouncil), BEHAVIOUR_PROXY);
@@ -581,9 +581,9 @@ contract CouncilMemberUpgradeForkTest is Test {
         );
     }
 
-    /*//////////////////////////////////////////////////////////////
-                 REPRESENTATIVE PROXY POST-SCRIPT BEHAVIOUR
-    //////////////////////////////////////////////////////////////*/
+    // ------------------------------------------
+    // REPRESENTATIVE PROXY POST-SCRIPT BEHAVIOUR
+    // ------------------------------------------
 
     /// @dev Ensure TEL/NFT balances for proxy/from/to and the governance/safe roles are preserved.
     function testFork_scriptUpgrade_representativeBalanceAndRoleDeltas()

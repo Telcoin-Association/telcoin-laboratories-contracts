@@ -187,12 +187,12 @@ contract TransferFromReentrancyAttacker is ITokenReceiver {
     }
 }
 
-/* ==============================================================
-   TEST CONTRACT
-   All three tests assert the EXPECTED safe behaviour.
-   They FAIL against the current CouncilMember, proving the
-   reentrancy vulnerability exists.
-   ============================================================== */
+// -------------
+// TEST CONTRACT
+// -------------
+// All three tests assert the EXPECTED safe behaviour.
+// They FAIL against the current CouncilMember, proving the
+// reentrancy vulnerability exists.
 contract CouncilMemberReentrancyTest is Test {
     CouncilMember public council;
     CallbackERC20 public token;

@@ -6,9 +6,9 @@ pragma solidity ^0.8.24;
 ///         so a single edit updates every fork test at once, and so reviewers
 ///         can audit the chosen values (and the rationale) in one place.
 library TestConstants {
-    /*//////////////////////////////////////////////////////////////////////////
-                                POLYGON FORK BLOCKS
-    //////////////////////////////////////////////////////////////////////////*/
+    // -------------------
+    // POLYGON FORK BLOCKS
+    // -------------------
 
     /// @notice Default Polygon fork block used by deploy-script fork tests
     ///         (`test/script/*.fork.t.sol`) and by

@@ -135,9 +135,9 @@ contract CouncilMemberTest is Test {
         vm.stopPrank();
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                VALUES - GETTERS
-    //////////////////////////////////////////////////////////////*/
+    // ----------------
+    // VALUES - GETTERS
+    // ----------------
 
     function test_GOVERNANCE_COUNCIL_ROLE() public view {
         assertEq(
@@ -168,9 +168,9 @@ contract CouncilMemberTest is Test {
         assertTrue(councilMemberContract.hasRole(SUPPORT_ROLE, support));
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            VALUES - SETTERS
-    //////////////////////////////////////////////////////////////*/
+    // ----------------
+    // VALUES - SETTERS
+    // ----------------
 
     function test_updateLockup_revertsWithoutRole() public {
         vm.prank(support);
@@ -204,9 +204,9 @@ contract CouncilMemberTest is Test {
         assertEq(councilMemberContract._id(), 1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                MUTATIVE - MINT
-        //////////////////////////////////////////////////////////////*/
+    // ---------------
+    // MUTATIVE - MINT
+    // ---------------
 
     function test_mint_singleNFT() public {
         vm.prank(admin);
@@ -219,9 +219,9 @@ contract CouncilMemberTest is Test {
         assertEq(councilMemberContract.ownerOf(0), member1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                MUTATIVE - APPROVE
-        //////////////////////////////////////////////////////////////*/
+    // ------------------
+    // MUTATIVE - APPROVE
+    // ------------------
 
     function test_approve_reverts_without_approval() public {
         vm.prank(admin);
@@ -261,9 +261,9 @@ contract CouncilMemberTest is Test {
         assertEq(councilMemberContract.balanceOf(support), 1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                MUTATIVE - BURN
-        //////////////////////////////////////////////////////////////*/
+    // ---------------
+    // MUTATIVE - BURN
+    // ---------------
 
     function test_burn_effect_on_totalSupply() public {
         telcoin.mint(address(sablierLockup), 100000);
@@ -321,9 +321,9 @@ contract CouncilMemberTest is Test {
         councilMemberContract.ownerOf(1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            MUTATIVE - TRANSFERFROM
-        //////////////////////////////////////////////////////////////*/
+    // -----------------------
+    // MUTATIVE - TRANSFERFROM
+    // -----------------------
 
     function test_transferFrom_success() public {
         telcoin.mint(address(sablierLockup), 100000);
@@ -374,9 +374,9 @@ contract CouncilMemberTest is Test {
         councilMemberContract.transferFrom(member1, member2, 0);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - MINT
-        //////////////////////////////////////////////////////////////*/
+    // -----------------
+    // TOKENOMICS - MINT
+    // -----------------
 
     function test_tokenomics_mint_correct_balance_accumulation() public {
         telcoin.mint(address(sablierLockup), 100000);
@@ -416,9 +416,9 @@ contract CouncilMemberTest is Test {
         assertEq(councilMemberContract.balances(2), 0); // just minted
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - BURN
-        //////////////////////////////////////////////////////////////*/
+    // -----------------
+    // TOKENOMICS - BURN
+    // -----------------
 
     function test_tokenomics_burn_correct_removal() public {
         telcoin.mint(address(sablierLockup), 100000);
@@ -658,9 +658,9 @@ contract CouncilMemberTest is Test {
         councilMemberContract.claim(penultimateTokenId, 1); // should revert as no balance
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - TRANSFERFROM
-        //////////////////////////////////////////////////////////////*/
+    // -------------------------
+    // TOKENOMICS - TRANSFERFROM
+    // -------------------------
 
     function test_tokenomics_transferFrom_accounting_soundness() public {
         telcoin.mint(address(sablierLockup), 100000);
@@ -682,9 +682,9 @@ contract CouncilMemberTest is Test {
         assertEq(telcoin.balanceOf(address(councilMemberContract)), 50); // member2's 50
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - CLAIM
-        //////////////////////////////////////////////////////////////*/
+    // ------------------
+    // TOKENOMICS - CLAIM
+    // ------------------
 
     function test_tokenomics_claim_claiming_rewards() public {
         telcoin.mint(address(sablierLockup), 100000);
@@ -737,9 +737,9 @@ contract CouncilMemberTest is Test {
         assertEq(telcoin.balanceOf(member3), 0); // hasn't claimed
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - RETRIEVE
-        //////////////////////////////////////////////////////////////*/
+    // ---------------------
+    // TOKENOMICS - RETRIEVE
+    // ---------------------
 
     function test_tokenomics_retrieve_minting_does_not_affect_claims_but_increases_balance()
         public
@@ -874,9 +874,9 @@ contract CouncilMemberTest is Test {
         councilMemberContract.burn(0, admin);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - ERC20 RESCUE
-        //////////////////////////////////////////////////////////////*/
+    // -------------------------
+    // TOKENOMICS - ERC20 RESCUE
+    // -------------------------
 
     function test_tokenomics_erc20Rescue() public {
         telcoin.mint(address(councilMemberContract), 100000);
@@ -898,9 +898,9 @@ contract CouncilMemberTest is Test {
         vm.roll(block.number + 1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                    INITIALIZE - extra safety checks
-    //////////////////////////////////////////////////////////////*/
+    // --------------------------------
+    // INITIALIZE - extra safety checks
+    // --------------------------------
 
     function test_initialize_cannotReinitialize() public {
         vm.expectRevert();
@@ -918,11 +918,11 @@ contract CouncilMemberTest is Test {
         assertEq(councilMemberContract.symbol(), "TC");
     }
 
-    /*//////////////////////////////////////////////////////////////
-                    EIP-165 - supportsInterface
-        NOTE: PR #87 fixed supportsInterface to delegate to super.
-        These tests lock in that behavior.
-    //////////////////////////////////////////////////////////////*/
+    // ---------------------------
+    // EIP-165 - supportsInterface
+    // ---------------------------
+    // NOTE: PR #87 fixed supportsInterface to delegate to super.
+    // These tests lock in that behavior.
 
     function test_supportsInterface_accessControlEnumerable() public view {
         bytes4 iface = type(IAccessControlEnumerable).interfaceId;
@@ -943,9 +943,9 @@ contract CouncilMemberTest is Test {
         assertFalse(councilMemberContract.supportsInterface(0xdeadbeef));
     }
 
-    /*//////////////////////////////////////////////////////////////
-                    ERC721Enumerable - conformance
-    //////////////////////////////////////////////////////////////*/
+    // ------------------------------
+    // ERC721Enumerable - conformance
+    // ------------------------------
 
     function test_erc721Enumerable_totalSupply() public {
         _mintThree();
@@ -974,9 +974,9 @@ contract CouncilMemberTest is Test {
         assertEq(councilMemberContract.balanceOf(externalAddress), 0);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                    APPROVAL - custom overrides
-    //////////////////////////////////////////////////////////////*/
+    // ---------------------------
+    // APPROVAL - custom overrides
+    // ---------------------------
 
     function test_setApprovalForAll_isNoop() public {
         // setApprovalForAll is overridden to be a no-op on CouncilMember.
@@ -988,9 +988,9 @@ contract CouncilMemberTest is Test {
         );
     }
 
-    /*//////////////////////////////////////////////////////////////
-                    AUTHORIZATION - _isAuthorized override
-    //////////////////////////////////////////////////////////////*/
+    // --------------------------------------
+    // AUTHORIZATION - _isAuthorized override
+    // --------------------------------------
 
     function test_isAuthorized_governanceCanTransfer() public {
         // GOVERNANCE_COUNCIL_ROLE holder can transfer any token without approval.
@@ -1011,9 +1011,9 @@ contract CouncilMemberTest is Test {
         assertEq(councilMemberContract.ownerOf(1), externalAddress);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                    _UPDATE HOOK - retrieve ordering
-    //////////////////////////////////////////////////////////////*/
+    // --------------------------------
+    // _UPDATE HOOK - retrieve ordering
+    // --------------------------------
 
     function test_update_callsRetrieveBeforeMint() public {
         // After first member is minted, subsequent mints invoke _retrieve via _update.
@@ -1064,9 +1064,9 @@ contract CouncilMemberTest is Test {
         assertEq(fresh.ownerOf(0), member1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                    LIFECYCLE - edge cases
-    //////////////////////////////////////////////////////////////*/
+    // ----------------------
+    // LIFECYCLE - edge cases
+    // ----------------------
 
     function test_burnAllButOne_thenMintAgain() public {
         _mintThree();
@@ -1091,9 +1091,9 @@ contract CouncilMemberTest is Test {
         assertEq(councilMemberContract.ownerOf(4), newB);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                    HELPERS
-    //////////////////////////////////////////////////////////////*/
+    // -------
+    // HELPERS
+    // -------
 
     function _mintThree() internal {
         telcoin.mint(address(sablierLockup), LOCKUP_FUND_AMOUNT);
@@ -1104,9 +1104,9 @@ contract CouncilMemberTest is Test {
         vm.stopPrank();
     }
 
-    /*//////////////////////////////////////////////////////////////
-                    APPROVAL - removeApproval
-    //////////////////////////////////////////////////////////////*/
+    // -------------------------
+    // APPROVAL - removeApproval
+    // -------------------------
 
     function test_removeApproval_clearsApproval() public {
         _mintThree();
@@ -1126,13 +1126,13 @@ contract CouncilMemberTest is Test {
         councilMemberContract.removeApproval(0);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                    TestSablierV2Lockup - direct mock coverage
-        The mock's same-block idempotency paths (withdrawMax returning 0,
-        withdrawableAmountOf returning 0) are not reachable through
-        CouncilMember._retrieve, since that always gates withdrawMax
-        behind withdrawableAmountOf. These tests exercise them directly.
-    //////////////////////////////////////////////////////////////*/
+    // ------------------------------------------
+    // TestSablierV2Lockup - direct mock coverage
+    // ------------------------------------------
+    // The mock's same-block idempotency paths (withdrawMax returning 0,
+    // withdrawableAmountOf returning 0) are not reachable through
+    // CouncilMember._retrieve, since that always gates withdrawMax
+    // behind withdrawableAmountOf. These tests exercise them directly.
 
     function test_testSablierV2Lockup_withdrawMax_returnsZeroOnSecondCallSameBlock() public {
         telcoin.mint(address(sablierLockup), 100000);
@@ -1159,9 +1159,9 @@ contract CouncilMemberTest is Test {
         assertEq(sablierLockup.withdrawableAmountOf(0), 0);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                    OnlyAuthorized modifier - retrieve()
-    //////////////////////////////////////////////////////////////*/
+    // ------------------------------------
+    // OnlyAuthorized modifier - retrieve()
+    // ------------------------------------
 
     function test_retrieve_revertsForUnauthorizedCaller() public {
         // retrieve() is gated by OnlyAuthorized, which requires the caller to

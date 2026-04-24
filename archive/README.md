@@ -27,6 +27,10 @@ The original Telcoin Labs "application layer" — `SimplePlugin.sol`, `StakingMo
 - There is a separate `tel-v3-staking` repository with its own `StakingModule.sol` / `SimplePlugin.sol` that share ancestry with these files. That repo is WIP, so it is not yet the canonical published source.
 - We haven't yet confirmed via bytecode comparison whether any deployed contract on Polygon/mainnet matches this exact source. Until that confirmation lands, we'd rather keep the source file in-tree for reference than lose it.
 
+**Version divergence with `tel-v3-staking` (open question, not blocking this PR):**
+
+The copies preserved here have features the `tel-v3-staking` versions lack — specifically `_disableInitializers()` in constructors, deactivation timelock checks in `SimplePlugin`, immutable `staking` and `tel`, and extra view functions (`owed`, `totalOwed`, `claimableAt`). Reconciling the two — deciding which version is canonical and back-porting the deltas to whichever loses the fork — is deferred to a follow-up PR with a clear owner. Until that reconciliation completes, **do not delete `archive/application/`** even if the "no off-repo dependency" question is resolved, because deletion would lose the newer features without a migration path.
+
 **Removal policy:**
 
-If no one raises an objection or identifies a dependency on this code within a reasonable review window, the folder can be deleted in a follow-up PR. The files are still retrievable from git history after deletion (`git show <commit>:archive/application/...`), so "archived then deleted" loses nothing that "never archived" wouldn't have.
+Deletion is gated on TWO conditions: (a) no off-repo deployment dependency identified within the review window, AND (b) the version-divergence question above has a resolution committed to `tel-v3-staking` (or wherever the canonical home lands). Files remain retrievable from git history after deletion (`git show <commit>:archive/application/...`), so deletion is reversible if a need surfaces later.

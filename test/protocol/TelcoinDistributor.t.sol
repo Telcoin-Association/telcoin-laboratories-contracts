@@ -391,9 +391,9 @@ contract TelcoinDistributorForkTest is Test {
         distributor.executeTransaction(0);
     }
 
-    /* ================================================================
-     *            batchTelcoin invariant: balance unchanged
-     * ================================================================ */
+    // -----------------------------------------
+    // batchTelcoin invariant: balance unchanged
+    // -----------------------------------------
 
     function test_batchTelcoin_balanceInvariant() public {
         // Seed the distributor itself with some "stray" TEL
