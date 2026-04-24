@@ -17,6 +17,8 @@ import {TELxIncentiveHook} from "contracts/telx/core/TELxIncentiveHook.sol";
 import {PositionRegistry} from "contracts/telx/core/PositionRegistry.sol";
 import {TELxSubscriber} from "contracts/telx/core/TELxSubscriber.sol";
 import {IPositionRegistry} from "contracts/telx/interfaces/IPositionRegistry.sol";
+import {PolygonAddresses} from "./shared/PolygonAddresses.sol";
+import {BaseAddresses} from "./shared/BaseAddresses.sol";
 
 /// @notice Mines the v4 hook address and deploys its infrastructure
 /**
@@ -88,19 +90,20 @@ contract V4HookMinerDeployer is Script {
     ///      the signer from env AFTER setUp; tests bypass env entirely by
     ///      calling `runWithSigner` with a controlled address.
     function _loadChainConfigs() internal {
-        // Polygon Config
+        // Polygon Config — defaults from `script/shared/PolygonAddresses.sol`. Per-environment
+        // overrides via env vars are still supported for testnet / staging deployments.
         uint256 polygonChainId = 137;
         chainConfigs[polygonChainId] = ChainConfig({
-            poolManager: vm.envAddress("POLYGON_POOL_MANAGER"),
-            positionManager: vm.envAddress("POLYGON_POSITION_MANAGER"),
-            universalRouter: vm.envAddress("POLYGON_UNIVERSAL_ROUTER"),
-            stateView: vm.envAddress("POLYGON_STATE_VIEW"),
-            telToken: vm.envAddress("POLYGON_TEL_TOKEN"),
-            wethToken: vm.envAddress("POLYGON_WETH_TOKEN"),
+            poolManager: vm.envOr("POLYGON_POOL_MANAGER", PolygonAddresses.POOL_MANAGER),
+            positionManager: vm.envOr("POLYGON_POSITION_MANAGER", PolygonAddresses.POSITION_MANAGER),
+            universalRouter: vm.envOr("POLYGON_UNIVERSAL_ROUTER", PolygonAddresses.UNIVERSAL_ROUTER),
+            stateView: vm.envOr("POLYGON_STATE_VIEW", PolygonAddresses.STATE_VIEW),
+            telToken: vm.envOr("POLYGON_TEL_TOKEN", PolygonAddresses.TEL),
+            wethToken: vm.envOr("POLYGON_WETH_TOKEN", PolygonAddresses.WETH),
             nativeToken: address(0x0), // NOT_APPLICABLE
-            usdcToken: vm.envAddress("POLYGON_USDC_TOKEN"),
-            emxnToken: vm.envAddress("POLYGON_EMXN_TOKEN"),
-            supportSafe: vm.envAddress("POLYGON_SUPPORT_SAFE")
+            usdcToken: vm.envOr("POLYGON_USDC_TOKEN", PolygonAddresses.USDC),
+            emxnToken: vm.envOr("POLYGON_EMXN_TOKEN", PolygonAddresses.EMXN),
+            supportSafe: vm.envOr("POLYGON_SUPPORT_SAFE", PolygonAddresses.SUPPORT_SAFE)
         });
         poolConfigs[keccak256("POLYGON_WETH_TEL")] = PoolConfig({
             currency0: chainConfigs[polygonChainId].wethToken, // WETH is currency0
@@ -120,16 +123,16 @@ contract V4HookMinerDeployer is Script {
         // --- Base Config ---
         uint256 baseChainId = 8453;
         chainConfigs[baseChainId] = ChainConfig({
-            poolManager: vm.envAddress("BASE_POOL_MANAGER"),
-            positionManager: vm.envAddress("BASE_POSITION_MANAGER"),
-            universalRouter: vm.envAddress("BASE_UNIVERSAL_ROUTER"),
-            stateView: vm.envAddress("BASE_STATE_VIEW"),
-            telToken: vm.envAddress("BASE_TEL_TOKEN"),
-            wethToken: vm.envAddress("BASE_WETH_TOKEN"), // NOT APPLICABLE
+            poolManager: vm.envOr("BASE_POOL_MANAGER", BaseAddresses.POOL_MANAGER),
+            positionManager: vm.envOr("BASE_POSITION_MANAGER", BaseAddresses.POSITION_MANAGER),
+            universalRouter: vm.envOr("BASE_UNIVERSAL_ROUTER", BaseAddresses.UNIVERSAL_ROUTER),
+            stateView: vm.envOr("BASE_STATE_VIEW", BaseAddresses.STATE_VIEW),
+            telToken: vm.envOr("BASE_TEL_TOKEN", BaseAddresses.TEL),
+            wethToken: vm.envOr("BASE_WETH_TOKEN", BaseAddresses.WETH), // NOT APPLICABLE
             nativeToken: address(0x0),
-            usdcToken: vm.envAddress("BASE_USDC_TOKEN"), // NOT APPLICABLE
-            emxnToken: vm.envAddress("BASE_EMXN_TOKEN"), // NOT APPLICABLE
-            supportSafe: vm.envAddress("BASE_SUPPORT_SAFE")
+            usdcToken: vm.envOr("BASE_USDC_TOKEN", BaseAddresses.USDC), // NOT APPLICABLE
+            emxnToken: vm.envOr("BASE_EMXN_TOKEN", BaseAddresses.EMXN), // NOT APPLICABLE
+            supportSafe: vm.envOr("BASE_SUPPORT_SAFE", BaseAddresses.SUPPORT_SAFE)
         });
         poolConfigs[keccak256("BASE_ETH_TEL")] = PoolConfig({
             currency0: chainConfigs[baseChainId].nativeToken,
