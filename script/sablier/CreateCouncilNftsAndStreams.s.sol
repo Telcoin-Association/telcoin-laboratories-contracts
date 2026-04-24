@@ -200,9 +200,12 @@ contract CreateCouncilNftsAndStreams is Script {
         streamId = lockupLinear.createWithDurations(params);
     }
 
-    /// @notice pure function to neaten writing of council NFT parameters to script
+    /// @notice Pure function returning the council-NFT parameter table for
+    ///         this deployment. Exposed as `public` (not `internal`) so fork
+    ///         tests can derive the total TEL deposit requirement at runtime
+    ///         from the same source-of-truth the deploy uses.
     function getCouncilsInfo()
-        internal
+        public
         pure
         returns (CouncilConfig[] memory councilConfigs)
     {
@@ -309,7 +312,8 @@ contract CreateCouncilNftsAndStreams is Script {
         councilConfigs[5].members = members5;
     }
 
-    /// @notice Production entry point – thin wrapper around `deploy`.
+    /// @notice Production entry point – resolves the signer from env and
+    ///         delegates to `runWithSigner`.
     function run() external {
         address sablierSender; // the deployer address for this script context
 
@@ -327,6 +331,13 @@ contract CreateCouncilNftsAndStreams is Script {
                 sablierSender = vm.addr(pk);
             }
         }
+        runWithSigner(sablierSender);
+    }
+
+    /// @notice Explicit-signer entry point. Production `run()` delegates here,
+    ///         and fork tests call this directly with a controlled signer.
+    ///         Mirrors the `runWithSigner` pattern in UpgradeCouncilMember.s.sol.
+    function runWithSigner(address sablierSender) public {
         console2.log("Running with msg.sender: ", sablierSender);
 
         IERC20 tel = IERC20(0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32);

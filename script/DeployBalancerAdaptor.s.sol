@@ -67,27 +67,51 @@ contract DeployBalancerAdaptor is Script {
         });
     }
 
+    /// @dev Production recipient of VotingWeightCalculator ownership.
+    address internal constant OWNERSHIP_TRANSFER_RECIPIENT = 0xc1612C97537c2CC62a11FC4516367AB6F62d4B23;
+
+    /// @notice Resolves the broadcast signer from environment in the same
+    ///         pattern used by UpgradeCouncilMember.s.sol — ETH_FROM for
+    ///         hardware wallets, PRIVATE_KEY for key-based signing.
+    function _resolveSigner() internal view returns (address signer) {
+        address ethFrom = vm.envOr("ETH_FROM", address(0));
+        if (ethFrom != address(0)) {
+            signer = ethFrom;
+        } else {
+            uint256 pk = vm.envOr("PRIVATE_KEY", uint256(0));
+            require(pk != 0, "Set ETH_FROM (ledger) or PRIVATE_KEY");
+            signer = vm.addr(pk);
+        }
+        return signer;
+    }
+
     // -------------------------------------------------------------------
-    // Main run() — deploys the chosen pool config
+    // Main run() — resolves signer from env and delegates to runWithSigner.
     // -------------------------------------------------------------------
-    function run() external {
+    function run() external returns (VotingWeightCalculator vwc) {
+        address signer = _resolveSigner();
+        vwc = runWithSigner(signer);
+    }
+
+    /// @notice Explicit-signer entry point. Production `run()` delegates here,
+    ///         and fork tests call this directly with a controlled signer so
+    ///         broadcast-recorded `msg.sender` matches the owner set on the
+    ///         VotingWeightCalculator. This mirrors the `runWithSigner` pattern
+    ///         in UpgradeCouncilMember.s.sol.
+    /// @return vwc The freshly-deployed VotingWeightCalculator.
+    function runWithSigner(address signer) public returns (VotingWeightCalculator vwc) {
         // deploy VotingWeightCalculator
-        vm.startBroadcast();
+        vm.startBroadcast(signer);
 
-        VotingWeightCalculator votingWeightCalculator = new VotingWeightCalculator{
-                salt: keccak256("VotingWeightCalculator")
-            }(msg.sender);
+        vwc = new VotingWeightCalculator{salt: keccak256("VotingWeightCalculator")}(signer);
 
-        require(
-            votingWeightCalculator.owner() == msg.sender,
-            "VWC: wrong owner"
-        );
+        require(vwc.owner() == signer, "VWC: wrong owner");
 
         vm.stopBroadcast();
 
         console2.log(
             " VotingWeightCalculator deployed to:",
-            address(votingWeightCalculator)
+            address(vwc)
         );
 
         PoolConfig[] memory cfgs = _getConfigs();
@@ -95,7 +119,7 @@ contract DeployBalancerAdaptor is Script {
         for (uint256 i = 0; i < cfgs.length; i++) {
             PoolConfig memory c = cfgs[i];
 
-            vm.startBroadcast();
+            vm.startBroadcast(signer);
             // deploy each source contract, matching exisiting parameters
             BalancerAdaptor balancerAdaptor = new BalancerAdaptor(
                 IERC20(c.telcoin),
@@ -130,12 +154,10 @@ contract DeployBalancerAdaptor is Script {
                 );
 
             // add stakingRewardsAdaptor to votingWeightCalculator as source
-
-            votingWeightCalculator.addSource(ISource(stakingRewardsAdaptor));
+            vwc.addSource(ISource(stakingRewardsAdaptor));
 
             require(
-                address(votingWeightCalculator.sources(i)) ==
-                    address(stakingRewardsAdaptor),
+                address(vwc.sources(i)) == address(stakingRewardsAdaptor),
                 "source not registered"
             );
 
@@ -163,11 +185,9 @@ contract DeployBalancerAdaptor is Script {
             );
         }
 
-        vm.startBroadcast();
-        // begin transfer of ownership to new address (recipeint must accept ownership)
-        votingWeightCalculator.transferOwnership(
-            0xc1612C97537c2CC62a11FC4516367AB6F62d4B23
-        );
+        vm.startBroadcast(signer);
+        // begin transfer of ownership to new address (recipient must accept ownership)
+        vwc.transferOwnership(OWNERSHIP_TRANSFER_RECIPIENT);
         vm.stopBroadcast();
     }
 }
