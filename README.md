@@ -3,6 +3,7 @@
 ![foundry](https://img.shields.io/badge/foundry-1.6-blue)
 ![solidity](https://img.shields.io/badge/solidity-0.8.24-red)
 ![OpenZeppelin](https://img.shields.io/badge/OpenZeppelin-5.4.0-brightgreen.svg)
+![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)
 
 **Telcoin Labs** is the blockchain research and development arm of Telcoin. Labs researches, develops, and documents Telcoin Association infrastructure, including Telcoin Network (an EVM-compatible, proof-of-stake blockchain secured by mobile network operators), TELx (a DeFi network), application-layer systems, and the Telcoin Platform governance system.
 
