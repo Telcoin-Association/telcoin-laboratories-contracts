@@ -4,7 +4,7 @@ The contract-level invariants every change to this repo must preserve, and the e
 
 ---
 
-## Part 1 — Protocol Invariants
+## Part 1 - Protocol Invariants
 
 These are the mathematical/behavioral properties of the deployed contracts that must hold across all execution paths. A change that violates any of these without an explicit migration plan should not be merged.
 
@@ -20,7 +20,7 @@ These are the mathematical/behavioral properties of the deployed contracts that 
 - `totalSupply()` MUST equal the count of non-burned tokens.
 - For all `tokenId`, `balances[tokenId] >= 0` and `sum(balances) <= TELCOIN.balanceOf(address(this))` at all times.
 - `claim(tokenId)` MUST deduct from the slot it checked, not a sibling slot. (Known bug: post-burn `balanceIndex` mismatch. Tracked.)
-- `_retrieve()` failures from Sablier MUST NOT silently lose accounting. The current empty-catch is intentional pending broader handling — do not extend it.
+- `_retrieve()` failures from Sablier MUST NOT silently lose accounting. The current empty-catch is intentional pending broader handling - do not extend it.
 - `SUPPORT_ROLE`-gated functions (`erc20Rescue`, debug setters) MUST NOT be exposed in production deploys. The current code paths exist for ops recovery; if a new SUPPORT-only function is added, it MUST exclude the reward token from drainage.
 
 ### `snapshot/` (BalancerAdaptor, StakingRewardsAdaptor, StakingModuleAdaptor, VotingWeightCalculator)
@@ -41,17 +41,17 @@ These are the mathematical/behavioral properties of the deployed contracts that 
 ### `telx/StakingRewards`
 
 - `rewardRate * rewardsDuration <= rewardsToken.balanceOf(contract)` MUST hold after `notifyRewardAmount`.
-- `earned(account)` MUST return a value scaled correctly — single division by 1e18, NOT double. (Known bug: current implementation double-divides.)
+- `earned(account)` MUST return a value scaled correctly - single division by 1e18, NOT double. (Known bug: current implementation double-divides.)
 - `recoverERC20` MUST protect both staking AND reward tokens. (Known bug: only staking is protected.)
 
 ### `zodiac/SafeGuard`
 
-- `checkTransaction` MUST complete in bounded gas. The current unbounded `nonces` array growth is a known DoS vector — any new feature affecting `nonces` must include pruning or O(1) lookup.
+- `checkTransaction` MUST complete in bounded gas. The current unbounded `nonces` array growth is a known DoS vector - any new feature affecting `nonces` must include pruning or O(1) lookup.
 - Vetoed transaction hashes MUST be deduplicated. (Known bug: production SafeGuard lacks the duplicate-veto check that MockSafeGuard has.)
 
 ---
 
-## Part 2 — Engineering Conventions
+## Part 2 - Engineering Conventions
 
 These are repo-wide rules. Mostly distilled from chasebrownn's PR #88 review and adopted org-wide. Reviewers should reject PRs that violate any of these without explicit justification in the PR body.
 
@@ -121,8 +121,8 @@ Multi-line descriptive blocks use the dash-bar heading + `//` body lines:
 - **Use typed interface calls, not `address(x).call(abi.encodeWithSignature(...))`.** Low-level calls hide signature mismatches. The typed variant gives compile-time signature verification and rename-safety.
   - Acceptable exceptions: testing access control on selectors that don't exist, Yul-assembly contracts with non-standard ABI dispatch.
 - **Avoid `type(uint256).max` approvals in tests.** Use the exact funded amount. Mirrors production Safe-funded patterns; surfaces over-pull regressions.
-- Use `for (uint256 i; i < n; ++i)` — no `= 0`, no `i++`.
-- Use `assertEq(a, b, "explanation")` with messages — bare `assertEq` makes failures opaque.
+- Use `for (uint256 i; i < n; ++i)` - no `= 0`, no `i++`.
+- Use `assertEq(a, b, "explanation")` with messages - bare `assertEq` makes failures opaque.
 
 ### Foundry config
 
@@ -133,7 +133,7 @@ Multi-line descriptive blocks use the dash-bar heading + `//` body lines:
 ### CI workflow
 
 - Use the secrets-aware fallback pattern: full suite when `POLYGON_RPC_URL` is set, non-fork only when absent (with `::notice::` explaining the skip).
-- Fork test naming: `*.polygon.t.sol`, `*.fork.t.sol`, or contracts matching `*Fork*` / `*Polygon*` — single-regex skip via `--no-match-contract "(Fork|Polygon)"`.
+- Fork test naming: `*.polygon.t.sol`, `*.fork.t.sol`, or contracts matching `*Fork*` / `*Polygon*` - single-regex skip via `--no-match-contract "(Fork|Polygon)"`.
 
 ### Deploy script pattern
 
@@ -163,8 +163,8 @@ Multi-line descriptive blocks use the dash-bar heading + `//` body lines:
 
 ## Lineage
 
-- **PR #88 review** by chasebrownn (2026-04-24) — established or formalized: OZ submodule pattern, `.env` vs constants split, header style, NatSpec on test contracts, shared test constants location, harness extraction, low-level call avoidance, MAX-approval avoidance, archive removal gates.
-- **`refactor/repo-restructure` migration** (2026-04-24) — established: `runWithSigner` pattern, fork-test naming convention, secrets-aware CI workflow, `solc_version` pinning, profile naming, lib-warning suppression, `test/util/TestConstants.sol`, `test/util/PolygonConstants.sol`.
-- **Sherlock audit findings** — protocol invariants in Part 1 cross-reference these.
+- **PR #88 review** by chasebrownn (2026-04-24) - established or formalized: OZ submodule pattern, `.env` vs constants split, header style, NatSpec on test contracts, shared test constants location, harness extraction, low-level call avoidance, MAX-approval avoidance, archive removal gates.
+- **`refactor/repo-restructure` migration** (2026-04-24) - established: `runWithSigner` pattern, fork-test naming convention, secrets-aware CI workflow, `solc_version` pinning, profile naming, lib-warning suppression, `test/util/TestConstants.sol`, `test/util/PolygonConstants.sol`.
+- **Sherlock audit findings** - protocol invariants in Part 1 cross-reference these.
 
 When new patterns emerge from PR reviews or audits, update this file. Each addition should cite its lineage so future maintainers can trace why it exists.
