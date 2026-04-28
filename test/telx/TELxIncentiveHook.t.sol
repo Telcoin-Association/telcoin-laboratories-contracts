@@ -23,6 +23,7 @@ import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
+import {IPermit2} from "../util/interfaces/IPermit2.sol";
 
 /// @title TELxIncentiveHookTest
 /// @notice Sepolia-fork unit tests for the TELxIncentiveHook — Uniswap v4 BaseHook that wires LP
@@ -308,9 +309,9 @@ contract TELxIncentiveHookTest is Test {
 
         vm.startPrank(lp);
         usdc.approve(permit2, amount0Max);
-        Permit2(permit2).approve(address(usdc), address(positionMngr), type(uint160).max, type(uint48).max);
+        IPermit2(permit2).approve(address(usdc), address(positionMngr), type(uint160).max, type(uint48).max);
         tel.approve(permit2, amount1Max);
-        Permit2(permit2).approve(address(tel), address(positionMngr), type(uint160).max, type(uint48).max);
+        IPermit2(permit2).approve(address(tel), address(positionMngr), type(uint160).max, type(uint48).max);
 
         bytes memory actions = abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR));
         bytes[] memory params = new bytes[](2);
@@ -353,8 +354,4 @@ contract TELxIncentiveHookTest is Test {
         positionMngr.modifyLiquidities(abi.encode(actions, params), block.timestamp + 1 minutes);
         vm.stopPrank();
     }
-}
-
-interface Permit2 {
-    function approve(address token, address spender, uint160 amount, uint48 expiration) external;
 }

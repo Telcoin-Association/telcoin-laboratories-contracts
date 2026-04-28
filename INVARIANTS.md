@@ -109,6 +109,12 @@ Multi-line descriptive blocks use the dash-bar heading + `//` body lines:
 - Shared mainnet addresses, pool IDs, and other cross-file constants live in `test/util/PolygonConstants.sol`. New tests MUST import from there rather than redeclaring literals.
 - Shared fork blocks live in `test/util/TestConstants.sol`.
 - Test harnesses (contracts that subclass the contract-under-test to expose internals) live in `test/<area>/harnesses/<Name>Harness.sol`. NOT inline in `.t.sol` files.
+- Test-only **mocks** (standalone contracts that stand in for an external dependency, NOT a subclass of the contract under test) live in `test/<area>/mocks/<Name>.sol`. One contract per file.
+- Test-only **interfaces** (minimal stubs of external contracts pulled in to avoid heavy dependencies, e.g. `IPermit2`, `IUniversalRouter`) live in:
+  - `test/<area>/interfaces/I<Name>.sol` if a single area uses them.
+  - `test/util/interfaces/I<Name>.sol` if two or more areas share them. Promote on the second consumer, not the first.
+- All test interfaces use the `I<Name>` prefix (matches production convention) so import sites read consistently.
+- Inheriting these mocks or interfaces directly from a `.t.sol` file is an INVARIANT violation. The single exception is the contract-under-test inheritance pattern (e.g. `PositionRegistryTest is PositionRegistry`), which is a deliberate "test-as-harness" approach for exposing internals; document the rationale in the test contract's NatSpec.
 
 ### Test interaction patterns
 

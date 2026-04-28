@@ -25,6 +25,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {IPermit2} from "../util/interfaces/IPermit2.sol";
 
 /// @title TELxSubscriberTest
 /// @notice Sepolia-fork unit tests for TELxSubscriber — the Uniswap v4 PositionManager subscriber
@@ -374,9 +375,9 @@ contract TELxSubscriberTest is Test {
 
         vm.startPrank(lp);
         usdc.approve(permit2Addr, amount0Max);
-        Permit2(permit2Addr).approve(address(usdc), address(positionMngr), type(uint160).max, type(uint48).max);
+        IPermit2(permit2Addr).approve(address(usdc), address(positionMngr), type(uint160).max, type(uint48).max);
         tel.approve(permit2Addr, amount1Max);
-        Permit2(permit2Addr).approve(address(tel), address(positionMngr), type(uint160).max, type(uint48).max);
+        IPermit2(permit2Addr).approve(address(tel), address(positionMngr), type(uint160).max, type(uint48).max);
 
         bytes memory actions = abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR));
         bytes[] memory params = new bytes[](2);
@@ -412,8 +413,4 @@ contract TELxSubscriberTest is Test {
         positionMngr.modifyLiquidities(abi.encode(actions, params), block.timestamp + 1 minutes);
         vm.stopPrank();
     }
-}
-
-interface Permit2 {
-    function approve(address token, address spender, uint160 amount, uint48 expiration) external;
 }

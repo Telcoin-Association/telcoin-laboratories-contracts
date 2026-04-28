@@ -10,6 +10,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IBalancerVault} from "contracts/snapshot/interfaces/IBalancerVault.sol";
 import {IBalancerPool} from "contracts/snapshot/interfaces/IBalancerPool.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {MockSource} from "./mocks/MockSource.sol";
+import {NonSourceERC165} from "./mocks/NonSourceERC165.sol";
 
 /// @title VotingWeightCalculatorTest
 /// @notice Polygon-fork tests for the central voting-weight calculator that aggregates `ISource`
@@ -435,29 +437,5 @@ contract VotingWeightCalculatorTest is Test {
 
         vm.expectRevert("VotingWeightCalculator: source already added");
         calculator.addSource(ISource(address(s3)));
-    }
-}
-
-/// @dev Contract that implements IERC165 but does NOT support ISource.interfaceId
-contract NonSourceERC165 is IERC165 {
-    function supportsInterface(bytes4 interfaceId) external pure override returns (bool) {
-        return interfaceId == type(IERC165).interfaceId;
-    }
-}
-
-/// @dev Minimal mock source for testing VotingWeightCalculator iteration
-contract MockSource is ISource, IERC165 {
-    mapping(address => uint256) private _balances;
-
-    function setBalanceOf(address account, uint256 value) external {
-        _balances[account] = value;
-    }
-
-    function balanceOf(address voter) external view override returns (uint256) {
-        return _balances[voter];
-    }
-
-    function supportsInterface(bytes4 interfaceId) external pure override returns (bool) {
-        return interfaceId == type(ISource).interfaceId;
     }
 }

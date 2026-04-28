@@ -29,6 +29,10 @@ import {IWETH9} from "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IPositionDescriptor} from "@uniswap/v4-periphery/src/interfaces/IPositionDescriptor.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
+import {IPermit2} from "../util/interfaces/IPermit2.sol";
+import {IUniversalRouter} from "./interfaces/IUniversalRouter.sol";
+import {MockRouter} from "./mocks/MockRouter.sol";
+import {MockRouterNoMsgSender} from "./mocks/MockRouterNoMsgSender.sol";
 
 /// @title PositionRegistryTest
 /// @notice Sepolia-fork unit tests for PositionRegistry — fresh deploys with full branch coverage.
@@ -50,7 +54,7 @@ contract PositionRegistryTest is
     IERC20 public tel;
     PoolManager public poolMngr;
     PositionManager public positionMngr;
-    UniversalRouter public router;
+    IUniversalRouter public router;
     StateView public st8View;
     PositionRegistry public positionRegistry;
     TELxIncentiveHook public telXIncentiveHook;
@@ -78,7 +82,7 @@ contract PositionRegistryTest is
         // for debugging: new PoolManager(0xE03A1074c86CFeDd5C142C4F04F1a1536e203543);
         positionMngr = PositionManager(payable(0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4));
         // for debugging: new PositionManager(IPoolManager(address(poolMngr)), IAllowanceTransfer(permit2), type(uint128).max, IPositionDescriptor(0x12570561f184C7Bf46C7EcA7D937db49861C7e61), IWETH9(0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14));
-        router = UniversalRouter(0x3A9D48AB9751398BbFa63ad67599Bb04e4BdF98b);
+        router = IUniversalRouter(0x3A9D48AB9751398BbFa63ad67599Bb04e4BdF98b);
         st8View = StateView(0xE1Dd9c3fA50EDB962E442f60DfBc432e24537E4C);
 
         // create pool registry and hook on permissions-encoded address
@@ -461,7 +465,7 @@ contract PositionRegistryTest is
         // subscribe position and approve router (required for swaps)
         vm.startPrank(holder);
         positionMngr.subscribe(tokenId, address(telXSubscriber), "");
-        Permit2(permit2).approve(Currency.unwrap(inputCurrency), address(router), type(uint160).max, type(uint48).max);
+        IPermit2(permit2).approve(Currency.unwrap(inputCurrency), address(router), type(uint160).max, type(uint48).max);
         vm.stopPrank();
 
         // add v4 universal router to position registry
@@ -886,9 +890,9 @@ contract PositionRegistryTest is
         assertEq(subscriptions.length, maxSubscriptions);
     }
 
-    /**
-     * UTILS
-     */
+    // -----
+    // UTILS
+    // -----
 
     // performs approvals to permit2 and positionMngr so it can be skipped later
     function mintPosition(
@@ -971,7 +975,7 @@ contract PositionRegistryTest is
     // pre-mint LP approvals to permit2 address and positionMngr to spend `amount` of `token`
     function approveTokensForMint(IERC20 token, uint128 amount) internal {
         token.approve(permit2, amount);
-        Permit2(permit2).approve(address(token), address(positionMngr), type(uint160).max, type(uint48).max);
+        IPermit2(permit2).approve(address(token), address(positionMngr), type(uint160).max, type(uint48).max);
     }
 
     // assumes previous approval to permit2::approve for router address on behalf of swapper
@@ -1877,29 +1881,3 @@ contract PositionRegistryTest is
     }
 }
 
-// interface used to interact with the Uniswap V4 Universal Router without requiring extra dependencies
-interface UniversalRouter {
-    function execute(bytes memory commands, bytes[] memory inputs, uint256 deadline) external payable;
-}
-
-interface Permit2 {
-    function approve(address token, address spender, uint160 amount, uint48 expiration) external;
-}
-
-/// @dev Mock router that implements IMsgSender for testing _resolveUser trusted router path
-contract MockRouter {
-    address private _sender;
-
-    constructor(address sender_) {
-        _sender = sender_;
-    }
-
-    function msgSender() external view returns (address) {
-        return _sender;
-    }
-}
-
-/// @dev Mock router that does NOT implement IMsgSender for testing _resolveUser revert path
-contract MockRouterNoMsgSender {
-    // intentionally empty - no msgSender function
-}
