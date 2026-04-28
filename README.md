@@ -103,8 +103,8 @@ A middle-ground `ci` profile (64 fuzz runs, depth 10) is also defined for CI env
 | TELx          | `forge test --match-path "test/telx/*"`                    |
 | Zodiac        | `forge test --match-path "test/zodiac/*"`                  |
 | Deploy scripts | `forge test --match-path "test/script/*"`                 |
-| Fork-only     | `forge test --match-contract "(Fork|Polygon)"`            |
-| Non-fork      | `forge test --no-match-contract "(Fork|Polygon)"`          |
+| Fork-only     | `forge test --match-contract "(Fork\|Polygon)"`            |
+| Non-fork      | `forge test --no-match-contract "(Fork\|Polygon)"`         |
 | Benchmarks    | `forge test --match-test "bench_.*" -vvv` (opt-in, see Benchmarks section) |
 
 ## Repository layout
