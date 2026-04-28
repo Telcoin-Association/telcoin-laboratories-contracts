@@ -150,9 +150,8 @@ Multi-line descriptive blocks use the dash-bar heading + `//` body lines:
 
 ### Cross-repo coordination
 
-- Contracts that exist in multiple Telcoin repos require parallel updates OR an explicit divergence note. Reviewers should check the divergence section before approving any change to a multi-repo contract.
-- Identical-as-of-now contracts: `AmirX.sol`, `Stablecoin.sol`, `StablecoinHandler.sol`, `ProxyFactory.sol`, `Blacklist.sol`, all migration contracts.
-- For intentionally divergent contracts, the holding repo's `archive/README.md` (or equivalent doc) MUST call out which version is canonical, what features differ, and the reconciliation owner.
+- This repo is the canonical home for the governance-layer modules: `protocol/` (TelcoinDistributor), `sablier/` (CouncilMember), `snapshot/` (voting-weight calculator and adaptors), `telx/` (PositionRegistry, TELxIncentiveHook, TELxSubscriber, StakingRewards), and `zodiac/` (SafeGuard). None of these contracts are duplicated in other Telcoin repos at the moment, so cross-repo coordination is not currently required for changes in those modules.
+- Archived modules under `archive/` (notably `archive/application/`) overlap conceptually with code in sibling repos. Because the archive tree is excluded from `forge build`, no production assertion exists for those overlaps; if a future change ever revives anything from `archive/`, the holding `archive/README.md` MUST document which sibling-repo version is canonical, what features differ, and the reconciliation owner BEFORE the file is moved back into the active tree.
 
 ### Archive policy
 
