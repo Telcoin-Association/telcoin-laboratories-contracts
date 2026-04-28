@@ -3,44 +3,17 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 
-import {UpgradeCouncilMember} from "../../scripts/sablier/UpgradeCouncilMember.s.sol";
+import {UpgradeCouncilMember} from "../../script/sablier/UpgradeCouncilMember.s.sol";
 import {CouncilMember} from "../../contracts/sablier/core/CouncilMember.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISablierV2Lockup} from "../../contracts/sablier/interfaces/ISablierV2Lockup.sol";
-
-interface IProxyAdminLike {
-    function owner() external view returns (address);
-
-    function upgradeAndCall(
-        address proxy,
-        address implementation,
-        bytes memory data
-    ) external payable;
-}
-
-contract UpgradeCouncilMemberHarness is UpgradeCouncilMember {
-    function exposed_getProxies() external pure returns (address[] memory) {
-        return getProxies();
-    }
-
-    function exposed_readAddressSlot(
-        address target,
-        bytes32 slot
-    ) external view returns (address) {
-        return _readAddressSlot(target, slot);
-    }
-
-    function exposed_runWithSigner(
-        address signer
-    ) external returns (address newImplementation) {
-        return runWithSigner(signer);
-    }
-}
+import {IProxyAdminLike} from "./interfaces/IProxyAdminLike.sol";
+import {UpgradeCouncilMemberHarness} from "./harnesses/UpgradeCouncilMemberHarness.sol";
 
 contract CouncilMemberUpgradeForkTest is Test {
-    /*//////////////////////////////////////////////////////////////
-                                CONSTANTS
-    //////////////////////////////////////////////////////////////*/
+    // ---------
+    // CONSTANTS
+    // ---------
 
     bytes32 internal constant IMPLEMENTATION_SLOT =
         0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
@@ -51,9 +24,9 @@ contract CouncilMemberUpgradeForkTest is Test {
     bytes32 internal constant GOVERNANCE_COUNCIL_ROLE =
         keccak256("GOVERNANCE_COUNCIL_ROLE");
 
-    /*//////////////////////////////////////////////////////////////
-                         REPRESENTATIVE PROXY CONFIG
-    //////////////////////////////////////////////////////////////*/
+    // ---------------------------
+    // REPRESENTATIVE PROXY CONFIG
+    // ---------------------------
 
     // Compliance Council proxy (example) from UpgradeCouncilMember::getProxies()[3]
     // the representative proxy we run functional behavior tests against
@@ -74,9 +47,9 @@ contract CouncilMemberUpgradeForkTest is Test {
     address internal constant MEMBER_3 =
         0x51b2695e7f21fcB56f34a3eC7d44B482C2eFE4d9;
 
-    /*//////////////////////////////////////////////////////////////
-                                  STATE
-    //////////////////////////////////////////////////////////////*/
+    // -----
+    // STATE
+    // -----
 
     UpgradeCouncilMemberHarness internal script;
     uint256 internal forkId;
@@ -93,9 +66,9 @@ contract CouncilMemberUpgradeForkTest is Test {
     address internal behaviourFrom;
     address internal behaviourTo;
 
-    /*//////////////////////////////////////////////////////////////
-                                  TYPES
-    //////////////////////////////////////////////////////////////*/
+    // -----
+    // TYPES
+    // -----
 
     struct GlobalSnapshot {
         address proxy;
@@ -134,9 +107,9 @@ contract CouncilMemberUpgradeForkTest is Test {
         bool safeHasSupportRole;
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                   SETUP
-    //////////////////////////////////////////////////////////////*/
+    // -----
+    // SETUP
+    // -----
 
     function setUp() external {
         string memory rpcUrl = vm.envString("POLYGON_RPC_URL");
@@ -169,9 +142,9 @@ contract CouncilMemberUpgradeForkTest is Test {
         behaviourTo = makeAddr("behaviourTo");
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                  HELPERS
-    //////////////////////////////////////////////////////////////*/
+    // -------
+    // HELPERS
+    // -------
 
     function mine() internal {
         vm.warp(block.timestamp + 1);
@@ -358,9 +331,9 @@ contract CouncilMemberUpgradeForkTest is Test {
         }
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        SCRIPT-LEVEL REAL COVERAGE
-    //////////////////////////////////////////////////////////////*/
+    // --------------------------
+    // SCRIPT-LEVEL REAL COVERAGE
+    // --------------------------
 
     function test_liveFork_scriptRun_upgradesAllProxiesAndPreservesState()
         external
@@ -529,9 +502,9 @@ contract CouncilMemberUpgradeForkTest is Test {
         }
     }
 
-    /*//////////////////////////////////////////////////////////////
-                      REPRESENTATIVE PROXY SANITY
-    //////////////////////////////////////////////////////////////*/
+    // ---------------------------
+    // REPRESENTATIVE PROXY SANITY
+    // ---------------------------
 
     function testFork_representative_readsLiveProxyMetadata() external view {
         assertEq(address(behaviourCouncil), BEHAVIOUR_PROXY);
@@ -581,9 +554,9 @@ contract CouncilMemberUpgradeForkTest is Test {
         );
     }
 
-    /*//////////////////////////////////////////////////////////////
-                 REPRESENTATIVE PROXY POST-SCRIPT BEHAVIOUR
-    //////////////////////////////////////////////////////////////*/
+    // ------------------------------------------
+    // REPRESENTATIVE PROXY POST-SCRIPT BEHAVIOUR
+    // ------------------------------------------
 
     /// @dev Ensure TEL/NFT balances for proxy/from/to and the governance/safe roles are preserved.
     function testFork_scriptUpgrade_representativeBalanceAndRoleDeltas()
@@ -757,4 +730,5 @@ contract CouncilMemberUpgradeForkTest is Test {
             "proxy holds more than running balance dust"
         );
     }
+
 }

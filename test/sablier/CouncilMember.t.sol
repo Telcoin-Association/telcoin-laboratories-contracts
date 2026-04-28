@@ -8,66 +8,10 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ISablierV2Lockup} from "../../contracts/sablier/interfaces/ISablierV2Lockup.sol";
 import {TestSablierV2Lockup} from "../../contracts/sablier/test/TestSablierV2Lockup.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
-
-contract RevertingLockup is ISablierV2Lockup {
-    function withdrawMax(uint256, address) external pure returns (uint128) {
-        revert("withdraw failed");
-    }
-
-    function withdrawableAmountOf(uint256) external pure returns (uint128) {
-        revert("withdrawableAmountOf failed");
-    }
-}
-
-/**
- * @title MockTelcoin
- * @notice Simple ERC20 mock for testing
- */
-contract MockTelcoin is IERC20 {
-    string public name = "Telcoin";
-    string public symbol = "TEL";
-    uint8 public decimals = 2;
-
-    mapping(address => uint256) public balanceOf;
-    mapping(address => mapping(address => uint256)) public allowance;
-    uint256 public totalSupply;
-
-    function mint(address to, uint256 amount) external {
-        balanceOf[to] += amount;
-        totalSupply += amount;
-    }
-
-    function transfer(address to, uint256 amount) external returns (bool) {
-        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
-        balanceOf[msg.sender] -= amount;
-        balanceOf[to] += amount;
-        emit Transfer(msg.sender, to, amount);
-        return true;
-    }
-
-    function transferFrom(
-        address from,
-        address to,
-        uint256 amount
-    ) external returns (bool) {
-        require(balanceOf[from] >= amount, "Insufficient balance");
-        require(
-            allowance[from][msg.sender] >= amount,
-            "Insufficient allowance"
-        );
-        allowance[from][msg.sender] -= amount;
-        balanceOf[from] -= amount;
-        balanceOf[to] += amount;
-        emit Transfer(from, to, amount);
-        return true;
-    }
-
-    function approve(address spender, uint256 amount) external returns (bool) {
-        allowance[msg.sender][spender] = amount;
-        emit Approval(msg.sender, spender, amount);
-        return true;
-    }
-}
+import {IAccessControlEnumerable} from "@openzeppelin/contracts/access/extensions/IAccessControlEnumerable.sol";
+import {IERC721Enumerable} from "@openzeppelin/contracts/token/ERC721/extensions/IERC721Enumerable.sol";
+import {RevertingLockup} from "./mocks/RevertingLockup.sol";
+import {MockTelcoin} from "./mocks/MockTelcoin.sol";
 
 /**
  * @title CouncilMemberTest
@@ -91,6 +35,14 @@ contract CouncilMemberTest is Test {
     bytes32 public constant GOVERNANCE_COUNCIL_ROLE =
         keccak256("GOVERNANCE_COUNCIL_ROLE");
     bytes32 public constant SUPPORT_ROLE = keccak256("SUPPORT_ROLE");
+
+    /// @dev How much TEL to mint into TestSablierV2Lockup so that _update →
+    ///      _retrieve (which fires on every mint after the first) can execute
+    ///      TestSablierV2Lockup.withdrawMax without hitting the mock's
+    ///      "Insufficient balance" revert. Any amount >= 100 works; the
+    ///      specific value doesn't matter beyond being non-zero.
+    ///      Used by `_mintThree` below.
+    uint256 internal constant LOCKUP_FUND_AMOUNT = 100_000;
 
     function setUp() public {
         // Deploy mocks
@@ -125,9 +77,9 @@ contract CouncilMemberTest is Test {
         vm.stopPrank();
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                VALUES - GETTERS
-    //////////////////////////////////////////////////////////////*/
+    // ----------------
+    // VALUES - GETTERS
+    // ----------------
 
     function test_GOVERNANCE_COUNCIL_ROLE() public view {
         assertEq(
@@ -158,9 +110,9 @@ contract CouncilMemberTest is Test {
         assertTrue(councilMemberContract.hasRole(SUPPORT_ROLE, support));
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            VALUES - SETTERS
-    //////////////////////////////////////////////////////////////*/
+    // ----------------
+    // VALUES - SETTERS
+    // ----------------
 
     function test_updateLockup_revertsWithoutRole() public {
         vm.prank(support);
@@ -194,9 +146,9 @@ contract CouncilMemberTest is Test {
         assertEq(councilMemberContract._id(), 1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                MUTATIVE - MINT
-        //////////////////////////////////////////////////////////////*/
+    // ---------------
+    // MUTATIVE - MINT
+    // ---------------
 
     function test_mint_singleNFT() public {
         vm.prank(admin);
@@ -209,9 +161,9 @@ contract CouncilMemberTest is Test {
         assertEq(councilMemberContract.ownerOf(0), member1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                MUTATIVE - APPROVE
-        //////////////////////////////////////////////////////////////*/
+    // ------------------
+    // MUTATIVE - APPROVE
+    // ------------------
 
     function test_approve_reverts_without_approval() public {
         vm.prank(admin);
@@ -251,9 +203,9 @@ contract CouncilMemberTest is Test {
         assertEq(councilMemberContract.balanceOf(support), 1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                MUTATIVE - BURN
-        //////////////////////////////////////////////////////////////*/
+    // ---------------
+    // MUTATIVE - BURN
+    // ---------------
 
     function test_burn_effect_on_totalSupply() public {
         telcoin.mint(address(sablierLockup), 100000);
@@ -311,9 +263,9 @@ contract CouncilMemberTest is Test {
         councilMemberContract.ownerOf(1);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            MUTATIVE - TRANSFERFROM
-        //////////////////////////////////////////////////////////////*/
+    // -----------------------
+    // MUTATIVE - TRANSFERFROM
+    // -----------------------
 
     function test_transferFrom_success() public {
         telcoin.mint(address(sablierLockup), 100000);
@@ -364,9 +316,9 @@ contract CouncilMemberTest is Test {
         councilMemberContract.transferFrom(member1, member2, 0);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - MINT
-        //////////////////////////////////////////////////////////////*/
+    // -----------------
+    // TOKENOMICS - MINT
+    // -----------------
 
     function test_tokenomics_mint_correct_balance_accumulation() public {
         telcoin.mint(address(sablierLockup), 100000);
@@ -406,9 +358,9 @@ contract CouncilMemberTest is Test {
         assertEq(councilMemberContract.balances(2), 0); // just minted
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - BURN
-        //////////////////////////////////////////////////////////////*/
+    // -----------------
+    // TOKENOMICS - BURN
+    // -----------------
 
     function test_tokenomics_burn_correct_removal() public {
         telcoin.mint(address(sablierLockup), 100000);
@@ -648,9 +600,9 @@ contract CouncilMemberTest is Test {
         councilMemberContract.claim(penultimateTokenId, 1); // should revert as no balance
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - TRANSFERFROM
-        //////////////////////////////////////////////////////////////*/
+    // -------------------------
+    // TOKENOMICS - TRANSFERFROM
+    // -------------------------
 
     function test_tokenomics_transferFrom_accounting_soundness() public {
         telcoin.mint(address(sablierLockup), 100000);
@@ -672,9 +624,9 @@ contract CouncilMemberTest is Test {
         assertEq(telcoin.balanceOf(address(councilMemberContract)), 50); // member2's 50
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - CLAIM
-        //////////////////////////////////////////////////////////////*/
+    // ------------------
+    // TOKENOMICS - CLAIM
+    // ------------------
 
     function test_tokenomics_claim_claiming_rewards() public {
         telcoin.mint(address(sablierLockup), 100000);
@@ -727,9 +679,9 @@ contract CouncilMemberTest is Test {
         assertEq(telcoin.balanceOf(member3), 0); // hasn't claimed
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - RETRIEVE
-        //////////////////////////////////////////////////////////////*/
+    // ---------------------
+    // TOKENOMICS - RETRIEVE
+    // ---------------------
 
     function test_tokenomics_retrieve_minting_does_not_affect_claims_but_increases_balance()
         public
@@ -864,9 +816,9 @@ contract CouncilMemberTest is Test {
         councilMemberContract.burn(0, admin);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            TOKENOMICS - ERC20 RESCUE
-        //////////////////////////////////////////////////////////////*/
+    // -------------------------
+    // TOKENOMICS - ERC20 RESCUE
+    // -------------------------
 
     function test_tokenomics_erc20Rescue() public {
         telcoin.mint(address(councilMemberContract), 100000);
@@ -886,5 +838,285 @@ contract CouncilMemberTest is Test {
     function mine() public {
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
+    }
+
+    // --------------------------------
+    // INITIALIZE - extra safety checks
+    // --------------------------------
+
+    function test_initialize_cannotReinitialize() public {
+        vm.expectRevert();
+        councilMemberContract.initialize(
+            IERC20(address(telcoin)),
+            "X",
+            "X",
+            ISablierV2Lockup(address(sablierLockup)),
+            0
+        );
+    }
+
+    function test_initialize_nameAndSymbol() public view {
+        assertEq(councilMemberContract.name(), "Test Council");
+        assertEq(councilMemberContract.symbol(), "TC");
+    }
+
+    // ---------------------------
+    // EIP-165 - supportsInterface
+    // ---------------------------
+    // NOTE: PR #87 fixed supportsInterface to delegate to super.
+    // These tests lock in that behavior.
+
+    function test_supportsInterface_accessControlEnumerable() public view {
+        bytes4 iface = type(IAccessControlEnumerable).interfaceId;
+        assertTrue(councilMemberContract.supportsInterface(iface));
+    }
+
+    function test_supportsInterface_erc721Enumerable() public view {
+        bytes4 iface = type(IERC721Enumerable).interfaceId;
+        assertTrue(councilMemberContract.supportsInterface(iface));
+    }
+
+    function test_supportsInterface_ierc721() public view {
+        bytes4 iface = type(IERC721).interfaceId;
+        assertTrue(councilMemberContract.supportsInterface(iface));
+    }
+
+    function test_supportsInterface_randomFalse() public view {
+        assertFalse(councilMemberContract.supportsInterface(0xdeadbeef));
+    }
+
+    // ------------------------------
+    // ERC721Enumerable - conformance
+    // ------------------------------
+
+    function test_erc721Enumerable_totalSupply() public {
+        _mintThree();
+        assertEq(councilMemberContract.totalSupply(), 3);
+    }
+
+    function test_erc721Enumerable_tokenByIndex() public {
+        _mintThree();
+        assertEq(councilMemberContract.tokenByIndex(0), 0);
+        assertEq(councilMemberContract.tokenByIndex(1), 1);
+        assertEq(councilMemberContract.tokenByIndex(2), 2);
+    }
+
+    function test_erc721Enumerable_tokenOfOwnerByIndex() public {
+        _mintThree();
+        assertEq(councilMemberContract.tokenOfOwnerByIndex(member1, 0), 0);
+        assertEq(councilMemberContract.tokenOfOwnerByIndex(member2, 0), 1);
+        assertEq(councilMemberContract.tokenOfOwnerByIndex(member3, 0), 2);
+    }
+
+    function test_erc721Enumerable_balanceOf() public {
+        _mintThree();
+        assertEq(councilMemberContract.balanceOf(member1), 1);
+        assertEq(councilMemberContract.balanceOf(member2), 1);
+        assertEq(councilMemberContract.balanceOf(member3), 1);
+        assertEq(councilMemberContract.balanceOf(externalAddress), 0);
+    }
+
+    // ---------------------------
+    // APPROVAL - custom overrides
+    // ---------------------------
+
+    function test_setApprovalForAll_isNoop() public {
+        // setApprovalForAll is overridden to be a no-op on CouncilMember.
+        _mintThree();
+        vm.prank(member1);
+        councilMemberContract.setApprovalForAll(externalAddress, true);
+        assertFalse(
+            councilMemberContract.isApprovedForAll(member1, externalAddress)
+        );
+    }
+
+    // --------------------------------------
+    // AUTHORIZATION - _isAuthorized override
+    // --------------------------------------
+
+    function test_isAuthorized_governanceCanTransfer() public {
+        // GOVERNANCE_COUNCIL_ROLE holder can transfer any token without approval.
+        _mintThree();
+        vm.prank(admin);
+        councilMemberContract.transferFrom(member1, externalAddress, 0);
+        assertEq(councilMemberContract.ownerOf(0), externalAddress);
+    }
+
+    function test_isAuthorized_approvedCanTransfer() public {
+        _mintThree();
+        address approved = makeAddr("approved");
+        vm.prank(admin);
+        councilMemberContract.approve(approved, 1);
+
+        vm.prank(approved);
+        councilMemberContract.transferFrom(member2, externalAddress, 1);
+        assertEq(councilMemberContract.ownerOf(1), externalAddress);
+    }
+
+    // --------------------------------
+    // _UPDATE HOOK - retrieve ordering
+    // --------------------------------
+
+    function test_update_callsRetrieveBeforeMint() public {
+        // After first member is minted, subsequent mints invoke _retrieve via _update.
+        // With a TestSablierV2Lockup that returns 0, _retrieve is a no-op but still executes.
+        _mintThree();
+        vm.prank(admin);
+        councilMemberContract.mint(makeAddr("newMember"));
+        assertEq(councilMemberContract.totalSupply(), 4);
+    }
+
+    function test_update_callsRetrieveBeforeTransfer() public {
+        _mintThree();
+        vm.prank(admin);
+        councilMemberContract.transferFrom(member1, externalAddress, 0);
+        assertEq(councilMemberContract.ownerOf(0), externalAddress);
+    }
+
+    function test_update_firstMintSkipsRetrieve() public {
+        // Fresh council with zero supply: _update must skip the _retrieve branch
+        // entirely on the first mint.
+        CouncilMember impl2 = new CouncilMember();
+        bytes memory initData = abi.encodeCall(
+            CouncilMember.initialize,
+            (
+                IERC20(address(telcoin)),
+                "Fresh Council",
+                "FC",
+                ISablierV2Lockup(address(sablierLockup)),
+                uint256(0)
+            )
+        );
+
+        vm.startPrank(admin);
+        TransparentUpgradeableProxy proxy2 = new TransparentUpgradeableProxy(
+            address(impl2),
+            admin,
+            initData
+        );
+        CouncilMember fresh = CouncilMember(address(proxy2));
+        fresh.grantRole(GOVERNANCE_COUNCIL_ROLE, admin);
+
+        // totalSupply() == 0 → _update must take the early-return branch and not
+        // touch the Sablier lockup.
+        fresh.mint(member1);
+        vm.stopPrank();
+
+        assertEq(fresh.totalSupply(), 1);
+        assertEq(fresh.ownerOf(0), member1);
+    }
+
+    // ----------------------
+    // LIFECYCLE - edge cases
+    // ----------------------
+
+    function test_burnAllButOne_thenMintAgain() public {
+        _mintThree();
+
+        vm.startPrank(admin);
+        councilMemberContract.burn(2, externalAddress);
+        councilMemberContract.burn(1, externalAddress);
+        vm.stopPrank();
+
+        assertEq(councilMemberContract.totalSupply(), 1);
+
+        // Counter continues from the last used tokenId — it does not reset.
+        address newA = makeAddr("newA");
+        address newB = makeAddr("newB");
+        vm.startPrank(admin);
+        councilMemberContract.mint(newA);
+        councilMemberContract.mint(newB);
+        vm.stopPrank();
+
+        assertEq(councilMemberContract.totalSupply(), 3);
+        assertEq(councilMemberContract.ownerOf(3), newA);
+        assertEq(councilMemberContract.ownerOf(4), newB);
+    }
+
+    // -------
+    // HELPERS
+    // -------
+
+    function _mintThree() internal {
+        telcoin.mint(address(sablierLockup), LOCKUP_FUND_AMOUNT);
+        vm.startPrank(admin);
+        councilMemberContract.mint(member1); // tokenId 0
+        councilMemberContract.mint(member2); // tokenId 1
+        councilMemberContract.mint(member3); // tokenId 2
+        vm.stopPrank();
+    }
+
+    // -------------------------
+    // APPROVAL - removeApproval
+    // -------------------------
+
+    function test_removeApproval_clearsApproval() public {
+        _mintThree();
+        address approved = makeAddr("approved");
+        vm.startPrank(admin);
+        councilMemberContract.approve(approved, 0);
+        assertEq(councilMemberContract.getApproved(0), approved);
+        councilMemberContract.removeApproval(0);
+        vm.stopPrank();
+        assertEq(councilMemberContract.getApproved(0), address(0));
+    }
+
+    function test_removeApproval_revertsNonGovernance() public {
+        _mintThree();
+        vm.prank(externalAddress);
+        vm.expectRevert();
+        councilMemberContract.removeApproval(0);
+    }
+
+    // ------------------------------------------
+    // TestSablierV2Lockup - direct mock coverage
+    // ------------------------------------------
+    // The mock's same-block idempotency paths (withdrawMax returning 0,
+    // withdrawableAmountOf returning 0) are not reachable through
+    // CouncilMember._retrieve, since that always gates withdrawMax
+    // behind withdrawableAmountOf. These tests exercise them directly.
+
+    function test_testSablierV2Lockup_withdrawMax_returnsZeroOnSecondCallSameBlock() public {
+        telcoin.mint(address(sablierLockup), 100000);
+
+        // First call in this block: returns 100, transfers 100 tokens.
+        uint128 first = sablierLockup.withdrawMax(0, address(this));
+        assertEq(first, 100);
+        assertEq(telcoin.balanceOf(address(this)), 100);
+
+        // Second call in the same block: returns 0, no-op.
+        uint128 second = sablierLockup.withdrawMax(0, address(this));
+        assertEq(second, 0);
+        assertEq(telcoin.balanceOf(address(this)), 100, "no additional transfer");
+    }
+
+    function test_testSablierV2Lockup_withdrawableAmountOf_returnsZeroAfterWithdraw() public {
+        telcoin.mint(address(sablierLockup), 100000);
+
+        // Before any withdraw this block, amount is 100.
+        assertEq(sablierLockup.withdrawableAmountOf(0), 100);
+
+        // After a withdraw in the same block, subsequent reads return 0.
+        sablierLockup.withdrawMax(0, address(this));
+        assertEq(sablierLockup.withdrawableAmountOf(0), 0);
+    }
+
+    // ------------------------------------
+    // OnlyAuthorized modifier - retrieve()
+    // ------------------------------------
+
+    function test_retrieve_revertsForUnauthorizedCaller() public {
+        // retrieve() is gated by OnlyAuthorized, which requires the caller to
+        // either hold GOVERNANCE_COUNCIL_ROLE or own at least one NFT.
+        // externalAddress has neither.
+        _mintThree();
+        vm.prank(externalAddress);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "CouncilMember__NotAuthorized(address)",
+                externalAddress
+            )
+        );
+        councilMemberContract.retrieve();
     }
 }
