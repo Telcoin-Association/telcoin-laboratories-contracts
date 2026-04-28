@@ -7,35 +7,8 @@ import {UpgradeCouncilMember} from "../../script/sablier/UpgradeCouncilMember.s.
 import {CouncilMember} from "../../contracts/sablier/core/CouncilMember.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISablierV2Lockup} from "../../contracts/sablier/interfaces/ISablierV2Lockup.sol";
-
-interface IProxyAdminLike {
-    function owner() external view returns (address);
-
-    function upgradeAndCall(
-        address proxy,
-        address implementation,
-        bytes memory data
-    ) external payable;
-}
-
-contract UpgradeCouncilMemberHarness is UpgradeCouncilMember {
-    function exposed_getProxies() external pure returns (address[] memory) {
-        return getProxies();
-    }
-
-    function exposed_readAddressSlot(
-        address target,
-        bytes32 slot
-    ) external view returns (address) {
-        return _readAddressSlot(target, slot);
-    }
-
-    function exposed_runWithSigner(
-        address signer
-    ) external returns (address newImplementation) {
-        return runWithSigner(signer);
-    }
-}
+import {IProxyAdminLike} from "./interfaces/IProxyAdminLike.sol";
+import {UpgradeCouncilMemberHarness} from "./harnesses/UpgradeCouncilMemberHarness.sol";
 
 contract CouncilMemberUpgradeForkTest is Test {
     // ---------

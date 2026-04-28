@@ -10,16 +10,7 @@ import {ISablierV2Lockup} from "../../contracts/sablier/interfaces/ISablierV2Loc
 import {TestSablierV2Lockup} from "../../contracts/sablier/test/TestSablierV2Lockup.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
-
-contract RevertingLockup is ISablierV2Lockup {
-    function withdrawMax(uint256, address) external pure returns (uint128) {
-        revert("withdraw failed");
-    }
-
-    function withdrawableAmountOf(uint256) external pure returns (uint128) {
-        revert("withdrawableAmountOf failed");
-    }
-}
+import {RevertingLockup} from "./mocks/RevertingLockup.sol";
 
 /**
  * @title CouncilMemberForkTest

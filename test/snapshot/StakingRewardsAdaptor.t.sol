@@ -11,6 +11,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IBalancerVault} from "contracts/snapshot/interfaces/IBalancerVault.sol";
 import {IBalancerPool} from "contracts/snapshot/interfaces/IBalancerPool.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {MockStakingRewards} from "./mocks/MockStakingRewards.sol";
 
 /// @title StakingRewardsAdaptorTest
 /// @notice Polygon-fork tests for the StakingRewards voting-weight adaptor. Composes a fresh
@@ -242,36 +243,5 @@ contract StakingRewardsAdaptorTest is Test {
     /// @dev supportsInterface returns false for IERC165 interfaceId itself
     function test_supportsInterface_ierc165_returnsFalse() public view {
         assertFalse(adaptor.supportsInterface(type(IERC165).interfaceId));
-    }
-}
-
-/// @dev Minimal mock for IStakingRewards that lets tests control returned values.
-contract MockStakingRewards is IStakingRewards {
-    mapping(address => uint256) private _balances;
-    mapping(address => uint256) private _earned;
-    uint256 private _totalSupply;
-
-    function setBalance(address account, uint256 value) external {
-        _balances[account] = value;
-    }
-
-    function setEarned(address account, uint256 value) external {
-        _earned[account] = value;
-    }
-
-    function setTotalSupply(uint256 value) external {
-        _totalSupply = value;
-    }
-
-    function earned(address account) external view override returns (uint256) {
-        return _earned[account];
-    }
-
-    function balanceOf(address account) external view override returns (uint256) {
-        return _balances[account];
-    }
-
-    function totalSupply() external view override returns (uint256) {
-        return _totalSupply;
     }
 }

@@ -10,66 +10,8 @@ import {TestSablierV2Lockup} from "../../contracts/sablier/test/TestSablierV2Loc
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {IAccessControlEnumerable} from "@openzeppelin/contracts/access/extensions/IAccessControlEnumerable.sol";
 import {IERC721Enumerable} from "@openzeppelin/contracts/token/ERC721/extensions/IERC721Enumerable.sol";
-
-contract RevertingLockup is ISablierV2Lockup {
-    function withdrawMax(uint256, address) external pure returns (uint128) {
-        revert("withdraw failed");
-    }
-
-    function withdrawableAmountOf(uint256) external pure returns (uint128) {
-        revert("withdrawableAmountOf failed");
-    }
-}
-
-/**
- * @title MockTelcoin
- * @notice Simple ERC20 mock for testing
- */
-contract MockTelcoin is IERC20 {
-    string public name = "Telcoin";
-    string public symbol = "TEL";
-    uint8 public decimals = 2;
-
-    mapping(address => uint256) public balanceOf;
-    mapping(address => mapping(address => uint256)) public allowance;
-    uint256 public totalSupply;
-
-    function mint(address to, uint256 amount) external {
-        balanceOf[to] += amount;
-        totalSupply += amount;
-    }
-
-    function transfer(address to, uint256 amount) external returns (bool) {
-        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
-        balanceOf[msg.sender] -= amount;
-        balanceOf[to] += amount;
-        emit Transfer(msg.sender, to, amount);
-        return true;
-    }
-
-    function transferFrom(
-        address from,
-        address to,
-        uint256 amount
-    ) external returns (bool) {
-        require(balanceOf[from] >= amount, "Insufficient balance");
-        require(
-            allowance[from][msg.sender] >= amount,
-            "Insufficient allowance"
-        );
-        allowance[from][msg.sender] -= amount;
-        balanceOf[from] -= amount;
-        balanceOf[to] += amount;
-        emit Transfer(from, to, amount);
-        return true;
-    }
-
-    function approve(address spender, uint256 amount) external returns (bool) {
-        allowance[msg.sender][spender] = amount;
-        emit Approval(msg.sender, spender, amount);
-        return true;
-    }
-}
+import {RevertingLockup} from "./mocks/RevertingLockup.sol";
+import {MockTelcoin} from "./mocks/MockTelcoin.sol";
 
 /**
  * @title CouncilMemberTest

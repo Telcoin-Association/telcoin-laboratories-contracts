@@ -7,26 +7,7 @@ import {Enum} from "contracts/zodiac/enums/Operation.sol";
 import {IReality} from "contracts/zodiac/interfaces/IReality.sol";
 import {IGuard} from "contracts/zodiac/interfaces/IGuard.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
-
-/// @dev Minimal mock that implements IReality.getTransactionHash so SafeGuard
-///      can compute hashes during checkTransaction.  We deploy this as the
-///      msg.sender (the "Safe") that calls checkTransaction.
-contract MockReality is IReality {
-    function getTransactionHash(
-        address to,
-        uint256 value,
-        bytes memory data,
-        Enum.Operation operation,
-        uint256 nonce
-    ) external pure override returns (bytes32) {
-        return keccak256(abi.encodePacked(to, value, data, operation, nonce));
-    }
-
-    // Unused stubs required by IReality
-    function notifyOfArbitrationRequest(bytes32, address, uint256) external pure override {}
-    function submitAnswerByArbitrator(bytes32, bytes32, address) external pure override {}
-    function getBestAnswer(bytes32) external pure override returns (bytes32) { return bytes32(0); }
-}
+import {MockReality} from "./mocks/MockReality.sol";
 
 contract SafeGuardTest is Test {
     // ---------------------------------------------------------------
