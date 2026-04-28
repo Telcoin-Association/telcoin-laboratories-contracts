@@ -150,7 +150,7 @@ Multi-line descriptive blocks use the dash-bar heading + `//` body lines:
 
 ### Cross-repo coordination
 
-- Contracts that exist in multiple Telcoin repos (see the version matrix in the org-wide skill: `~/.claude/skills/telcoin-engineering/references/version-matrix.md`) require parallel updates OR an explicit divergence note.
+- Contracts that exist in multiple Telcoin repos require parallel updates OR an explicit divergence note. Reviewers should check the divergence section before approving any change to a multi-repo contract.
 - Identical-as-of-now contracts: `AmirX.sol`, `Stablecoin.sol`, `StablecoinHandler.sol`, `ProxyFactory.sol`, `Blacklist.sol`, all migration contracts.
 - For intentionally divergent contracts, the holding repo's `archive/README.md` (or equivalent doc) MUST call out which version is canonical, what features differ, and the reconciliation owner.
 
@@ -167,6 +167,5 @@ Multi-line descriptive blocks use the dash-bar heading + `//` body lines:
 - **PR #88 review** by chasebrownn (2026-04-24) — established or formalized: OZ submodule pattern, `.env` vs constants split, header style, NatSpec on test contracts, shared test constants location, harness extraction, low-level call avoidance, MAX-approval avoidance, archive removal gates.
 - **`refactor/repo-restructure` migration** (2026-04-24) — established: `runWithSigner` pattern, fork-test naming convention, secrets-aware CI workflow, `solc_version` pinning, profile naming, lib-warning suppression, `test/util/TestConstants.sol`, `test/util/PolygonConstants.sol`.
 - **Sherlock audit findings** — protocol invariants in Part 1 cross-reference these.
-- **Org-wide source of truth** for engineering conventions: `~/.claude/skills/telcoin-engineering/references/foundry-conventions.md`. This file (INVARIANTS.md) is the repo-local view; the skill file is the multi-repo reference.
 
-When new patterns emerge from PR reviews or audits, update this file AND the org-wide skill reference. Each addition should cite its lineage so future maintainers can trace why it exists.
+When new patterns emerge from PR reviews or audits, update this file. Each addition should cite its lineage so future maintainers can trace why it exists.
