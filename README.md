@@ -115,7 +115,7 @@ contracts/        Solidity sources, grouped by product area
   protocol/       TelcoinDistributor and protocol-level contracts
   sablier/        Council Member NFTs + Sablier v2 lockup integration
   snapshot/       Voting-weight adaptors (Balancer, staking, staking-rewards)
-  telx/           TELx DeFi primitives (v4 hooks, staking rewards, position registry)
+  telx/           TELx DeFi primitives (staking rewards, Uniswap v4 position registry)
   zodiac/         SafeGuard for Zodiac/Safe-based governance
 script/           Foundry deployment + operational scripts (*.s.sol)
 test/             Foundry tests. Files ending in .polygon.t.sol / .fork.t.sol
@@ -190,9 +190,19 @@ Notes on benchmarks:
 
 ### Current benchmarks
 
-| Benchmark | Location | What it measures |
-| --------- | -------- | ---------------- |
-| `bench_MAX_SUBSCRIBED_MAX_SUBSCRIPTIONS` | `test/telx/PositionRegistry.t.sol` | Attempts to fill `PositionRegistry` to its `MAX_SUBSCRIBED` (50,000) × `MAX_SUBSCRIPTIONS` (100) ceiling - 5,000,000 mint+subscribe operations. Exhausts gas in practice; useful for profiling per-subscription cost curves, not for pass/fail. |
+There are currently no `bench_` functions in the suite.
+
+The one scaling question the TELx registry has - what a full `MAX_SUBSCRIPTIONS` (1,000) subscription
+list costs to read and to mutate - is now covered by an ordinary test that runs on every CI pass,
+`test_maxSubscriptions_capAndQueryGas` in `test/telx/PositionRegistry.t.sol`. It fills one LP to the
+cap, logs the gas for `getSubscriptionsRaw`, `getSubscriptions` and `handleUnsubscribe`, and asserts
+the cap rejects the next subscription. A regular test beats a benchmark here because the thin
+registry has no unbounded state-mutating path left to push toward exhaustion; the numbers are a
+budget to watch, not a cliff to find.
+
+```shell
+forge test --match-test test_maxSubscriptions_capAndQueryGas -vv
+```
 
 ## Notes
 
@@ -207,7 +217,7 @@ This section exists to give LLM tooling enough context to work productively in t
 **Architecture at a glance**
 - `contracts/sablier/core/CouncilMember.sol` - upgradeable ERC-721 + AccessControl representing Telcoin Association council seats; withdraws TEL from a Sablier v2 lockup stream and distributes pro-rata to holders.
 - `contracts/protocol/core/TelcoinDistributor.sol` - Ownable2Step + Pausable distributor for approved token transfers.
-- `contracts/telx/core/` - TELx hooks (Uniswap v4) and staking rewards. `TELxIncentiveHook` is a `BaseHook` that distributes rewards via `StakingRewards`. `PositionRegistry` indexes v4 positions for reward attribution. `TELxSubscriber` subscribes to position events.
+- `contracts/telx/core/` - TELx Uniswap v4 position tracking and staking rewards. `PositionRegistry` is a thin subscription index plus a live view layer over Uniswap's own `PositionManager` and `StateView` - it tracks which v4 LP positions have opted into TELx governance. `TELxSubscriber` is the `ISubscriber` that relays subscribe/unsubscribe/burn/modify-liquidity events from the v4 `PositionManager` into the registry. TELx pools are vanilla Uniswap v4 pools with no custom hook; reward distribution is handled off-chain via Merkl.
 - `contracts/snapshot/adaptors/` - read-only weight adaptors implementing the `ISource` interface (EIP-165 flagged), consumed by `VotingWeightCalculator`.
 - `contracts/zodiac/core/SafeGuard.sol` - a Gnosis Safe guard enforcing transaction-level policies.
 

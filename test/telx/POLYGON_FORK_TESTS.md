@@ -1,14 +1,14 @@
 # Polygon Production Fork Tests
 
-This directory contains TWO types of fork tests for the TELx contracts. Both are necessary for full confidence.
+The TELx contracts are covered by TWO types of tests. Both are necessary for full confidence.
 
 ## The Two Approaches
 
-### 1. Sepolia Fresh-Deploy Tests
+### 1. Non-Fork Mock-Based Unit Tests
 
-**Files**: `PositionRegistry.t.sol`, `TELxIncentiveHook.t.sol`, `TELxSubscriber.t.sol`
+**Files**: `PositionRegistry.t.sol`, `TELxSubscriber.t.sol`
 
-**Approach**: Fork Sepolia, deploy fresh instances of the TELx contracts, create pools/positions from scratch, exercise every branch and edge case.
+**Approach**: Deploy fresh instances of the TELx contracts against mock Uniswap v4 contracts, create positions and subscriptions from scratch, and exercise every branch and edge case. These tests run entirely against mocks - they do not fork a network and do not need `SEPOLIA_RPC_URL`.
 
 **What it catches**:
 - Logic bugs in contract code
@@ -20,12 +20,12 @@ This directory contains TWO types of fork tests for the TELx contracts. Both are
 **What it doesn't catch**:
 - Production deployment misconfigurations
 - Integration issues with real Uniswap V4 pool state
-- Behavior against positions with unusual fee growth values
+- Behavior against positions with unusual on-chain state
 - Role assignments on the live contracts
 
 ### 2. Polygon Production Tests (this document)
 
-**Files**: `PositionRegistry.polygon.t.sol`, `TELxIncentiveHook.polygon.t.sol`, `TELxSubscriber.polygon.t.sol`
+**Files**: `PositionRegistry.polygon.t.sol`, `TELxSubscriber.polygon.t.sol`
 
 **Approach**: Fork Polygon mainnet, read the actual deployed contracts at their production addresses, verify configuration and behavior against real on-chain state.
 
@@ -36,13 +36,13 @@ This directory contains TWO types of fork tests for the TELx contracts. Both are
 - Behavior on production Uniswap V4 state (real fee growth, actual liquidity)
 
 **What it doesn't catch**:
-- Logic bugs that weren't triggered by live data (covered by Sepolia tests)
+- Logic bugs that weren't triggered by live data (covered by the mock-based unit tests)
 
 ## Why Both
 
 Logic coverage + production state coverage = full confidence. Either alone leaves blind spots.
 
-Example: a logic test might pass on a fresh deploy with clean state, but the production contract has a different admin address due to a governance handoff — the Polygon test catches that immediately. Conversely, a production test can't exhaust every branch because real pools don't hit every edge case.
+Example: a logic test might pass on a fresh deploy with clean state, but the production contract has a different admin address due to a governance handoff - the Polygon test catches that immediately. Conversely, a production test can't exhaust every branch because real pools don't hit every edge case.
 
 ## Running the Tests
 
@@ -50,10 +50,9 @@ Example: a logic test might pass on a fresh deploy with clean state, but the pro
 
 ```bash
 export POLYGON_RPC_URL="https://polygon-mainnet.g.alchemy.com/v2/YOUR_KEY"
-export SEPOLIA_RPC_URL="https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY"
 ```
 
-Both can be set in `.env` at the repo root and loaded with `source .env`.
+The Polygon production tests require `POLYGON_RPC_URL`, which can be set in `.env` at the repo root and loaded with `source .env`. The non-fork mock-based unit tests need no RPC endpoint.
 
 ### Run Both Types
 
@@ -64,12 +63,11 @@ forge test --match-path "test/telx/*.t.sol"
 # Only Polygon production tests
 forge test --match-path "test/telx/*.polygon.t.sol"
 
-# Only Sepolia fresh-deploy tests
+# Only non-fork mock-based unit tests
 forge test --match-path "test/telx/*.t.sol" --no-match-path "test/telx/*.polygon.t.sol"
 
 # Individual test contracts
 forge test --match-contract PositionRegistryPolygonTest -vv
-forge test --match-contract TELxIncentiveHookPolygonTest -vv
 forge test --match-contract TELxSubscriberPolygonTest -vv
 ```
 
@@ -89,11 +87,12 @@ To update the fork block when contracts are upgraded or state changes significan
 
 ### Contracts Under Test
 
+The post-migration (hook removal) contracts are not yet deployed. These addresses are placeholders to be filled in after the migration deploy.
+
 | Contract | Address | Notes |
 |----------|---------|-------|
-| PositionRegistry | `0x2c33fC9c09CfAC5431e754b8fe708B1dA3F5B954` | Main LP tracking contract |
-| TELxIncentiveHook | `0xD77cC9230Ded5b6591730032975453744532a500` | TEL-WETH pool hook |
-| TELxSubscriber | `0x3Bf9bAdC67573e7b4756547A2dC0C77368A2062b` | Position manager subscriber |
+| PositionRegistry | to be redeployed (post-migration) | Thin LP subscription index |
+| TELxSubscriber | to be redeployed (post-migration) | Position manager subscriber |
 
 ### External Dependencies (Polygon)
 
@@ -101,7 +100,6 @@ To update the fork block when contracts are upgraded or state changes significan
 |----------|---------|---------|
 | Uniswap V4 PoolManager | `0x67366782805870060151383F4BBff9daB53e5cD6` | Core V4 pool management |
 | Uniswap V4 PositionManager | `0x1Ec2eBF4F37E7363FDfe3551602425af0B3ceef9` | LP position NFTs |
-| TELCOIN | `0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32` | Reward token |
 | USDC | `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359` | Stablecoin in USDC/eMXN pool |
 | eMXN | `0x68727e573D21a49c767c3c86A92D9F24bd933c99` | Telcoin Mexican Peso stablecoin |
 
@@ -125,8 +123,8 @@ To update the fork block when contracts are upgraded or state changes significan
 
 First, determine which type:
 
-- **Sepolia fresh-deploy test fails** → logic bug or new branch needs coverage. Fix the contract or extend the test.
-- **Polygon production test fails** → deployment or config issue. Check:
+- **Non-fork unit test fails** -> logic bug or new branch needs coverage. Fix the contract or extend the test.
+- **Polygon production test fails** -> deployment or config issue. Check:
   - Has the contract been redeployed?
   - Has a role been revoked or transferred?
   - Has the fork block become too stale?
@@ -137,10 +135,8 @@ First, determine which type:
 Recommended GitHub Actions configuration:
 
 ```yaml
-- name: Run Sepolia tests
+- name: Run non-fork unit tests
   run: forge test --match-path "test/telx/*.t.sol" --no-match-path "test/telx/*.polygon.t.sol"
-  env:
-    SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
 
 - name: Run Polygon production verification
   run: forge test --match-path "test/telx/*.polygon.t.sol"
@@ -158,11 +154,11 @@ These Polygon production tests are intentionally **read-only**. They do not:
 - Impersonate roles (except to verify negative access control)
 - Advance time or block numbers
 
-The goal is to verify the production system is correctly configured and its view functions return expected values. Mutation testing happens in the Sepolia fresh-deploy suite where the test has full control.
+The goal is to verify the production system is correctly configured and its view functions return expected values. Mutation testing happens in the non-fork mock-based unit suite where the test has full control.
 
-If a Polygon test needs to assert behavior that requires mutation (e.g., "claim actually transfers TEL"), the right approach is:
+If a Polygon test needs to assert behavior that requires mutation (e.g., "handleUnsubscribe actually clears the index entry"), the right approach is:
 1. Deploy a fresh instance on the Polygon fork (not use the production address)
 2. Mirror the production config
 3. Exercise the flow
 
-That's essentially what the Sepolia tests already do. The Polygon production tests fill the gap those can't: is the real deployment set up correctly?
+That's essentially what the non-fork unit tests already do. The Polygon production tests fill the gap those can't: is the real deployment set up correctly?

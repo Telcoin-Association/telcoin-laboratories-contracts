@@ -4,161 +4,165 @@
 
 This document provides a technical specification for the TELx Uniswap v4 Liquidity System, intended for security auditors and developers.
 
-The system is a hybrid on-chain/off-chain solution designed to track Uniswap v4 liquidity provider (LP) positions, distribute weighted rewards, and calculate governance voting power. It integrates with Uniswap v4's hook and subscriber mechanisms to capture on-chain data with minimal gas overhead, while leveraging off-chain services for complex, gas-intensive calculations like reward weighting and position valuation.
+The system is a lightweight on-chain index that tracks which Uniswap v4 liquidity provider (LP) positions have opted into the TELx program, so that off-chain services can calculate governance voting power. TELx pools are vanilla Uniswap v4 pools with no custom hook; our contracts hold no liquidity, no reward balances, and no pricing logic.
 
-The primary goal is to create a secure, efficient, and flexible framework for incentivizing long-term liquidity and enabling LP participation in governance.
+Reward distribution is handled off-chain by Merkl and is out of scope for this specification. The on-chain contracts do not perform any reward math, weighting, accrual, or claims.
+
+The primary goal is to provide a secure, minimal, and accurate on-chain source of truth for "which positions are subscribed" that the Snapshot voting strategy can read.
 
 ## 2. System Architecture & Scope
 
-The system comprises on-chain smart contracts and off-chain services that interact with them.
+The system comprises two on-chain smart contracts plus one off-chain read-only service.
 
 ### In-Scope Contracts
 
 The scope of this security audit includes the following Solidity smart contracts:
 
-1.  **`PositionRegistry.sol`**: The core state contract, acting as the single source of truth for all tracked position data, checkpoints, and reward balances.
-2.  **`TELxIncentiveHook.sol`**: The Uniswap v4 hook that listens to on-chain liquidity events and forwards data to the `PositionRegistry`.
-3.  **`TELxSubscriber.sol`**: The `ISubscriber` implementation that listens for position NFT transfers and updates ownership records in the `PositionRegistry`.
+1.  **`PositionRegistry.sol`**: A thin subscription index plus a live view layer over Uniswap's own `PositionManager` and `StateView`. It records which position NFTs have opted into TELx and exposes view shims that read live position data from Uniswap. It stores no liquidity, fee-growth checkpoints, reward balances, or weights.
+2.  **`TELxSubscriber.sol`**: The `ISubscriber` implementation that relays position subscribe/unsubscribe/burn/modify-liquidity notifications from the Uniswap v4 `PositionManager` into the `PositionRegistry`.
+
+TELx pools are plain Uniswap v4 pools. There is no custom hook, no `beforeInitialize`, no `afterAddLiquidity`/`afterRemoveLiquidity`, and no on-chain pool registration.
 
 #### Deployment Addresses
 
+The post-migration (hook removal) contracts are not yet deployed. The addresses below are placeholders to be filled in after the migration deploy.
+
 **Base Mainnet**
-PositionRegistry: 0x3994e3ae3Cf62bD2a3a83dcE73636E954852BB04
-TELxSubscriber: 0x735ee950D979C70C14FAa739f80fC96d9893f7ED
-TELxIncentiveHook: 0x23aB2e6D4Ab0c5f872567098671F1ffb46Fd2500
+PositionRegistry: to be redeployed (post-migration)
+TELxSubscriber: to be redeployed (post-migration)
 Supported Pools:
 "BASE_ETH_TEL": 0x727b2741ac2b2df8bc9185e1de972661519fc07b156057eeed9b07c50e08829b
 
 **Polygon Mainnet**
-PositionRegistry: 0x2c33fC9c09CfAC5431e754b8fe708B1dA3F5B954
-TELxSubscriber: 0x3Bf9bAdC67573e7b4756547A2dC0C77368A2062b
-TELxIncentiveHook: TEL-WETH:0xD77cC9230Ded5b6591730032975453744532a500
+PositionRegistry: to be redeployed (post-migration)
+TELxSubscriber: to be redeployed (post-migration)
 Supported Pools:
 "POLYGON_WETH_TEL": 0x25412ca33f9a2069f0520708da3f70a7843374dd46dc1c7e62f6d5002f5f9fa7
 "POLYGON_USDC_EMXN": 0x37dafec81119c7987538ac000b8a8a16a7f4daeecf91626efc9956ccd5146246
 
 #### Verification
 
+The registry constructor is `constructor(address positionManager, address stateView, address admin)`. The subscriber constructor is `constructor(address registry, address positionManager, address owner)`.
+
 ```bash
-forge verify-contract hook contracts/telx/core/TELxIncentiveHook.sol:TELxIncentiveHook --constructor-args $(cast abi-encode "constructor(address,address,address)" poolmanager positionmanager registry) --rpc-url $RPC_URL --etherscan-api-key $ETHERSCAN_API_KEY --watch
+forge verify-contract registry contracts/telx/core/PositionRegistry.sol:PositionRegistry --constructor-args $(cast abi-encode "constructor(address,address,address)" positionmanager stateview admin) --rpc-url $RPC_URL --etherscan-api-key $ETHERSCAN_API_KEY --watch
 
-forge verify-contract registry contracts/telx/core/PositionRegistry.sol:PositionRegistry --constructor-args $(cast abi-encode "constructor(address,address,address,address,address)" telcoin poolmanager positionmanager stateview admin) --rpc-url $RPC_URL --etherscan-api-key $ETHERSCAN_API_KEY --watch
-
-forge verify-contract subscriber contracts/telx/core/TELxSubscriber.sol:TELxSubscriber --constructor-args $(cast abi-encode "constructor(address,address)" registry manager) --rpc-url $RPC_URL --etherscan-api-key $ETHERSCAN_API_KEY --watch
+forge verify-contract subscriber contracts/telx/core/TELxSubscriber.sol:TELxSubscriber --constructor-args $(cast abi-encode "constructor(address,address,address)" registry positionmanager owner) --rpc-url $RPC_URL --etherscan-api-key $ETHERSCAN_API_KEY --watch
 ```
 
 ### Off-Chain Components (For Context)
 
-The following off-chain services are critical to the system's function but their code is **out of scope** for this audit. However, their interactions with the in-scope contracts are a key part of the review.
+The following off-chain logic is critical to the system's function but its code is **out of scope** for this audit. Its interactions with the in-scope contracts are still a relevant part of the review.
 
-1.  **Rewards Calculation Script**: An off-chain service that reads data from the `PositionRegistry` to calculate weighted rewards. It then calls a privileged function on the `PositionRegistry` to distribute these rewards.
-2.  **Custom Snapshot Strategy**: A JavaScript module running on Snapshot's infrastructure that reads position data from the `PositionRegistry` to calculate voting power. It makes **read-only** calls to the on-chain contracts.
+1.  **Custom Snapshot Strategy**: A JavaScript module running on Snapshot's infrastructure that reads position data from the `PositionRegistry` to calculate voting power. It makes **read-only** calls to the on-chain contracts.
+2.  **Merkl Reward Distribution**: Reward calculation and distribution is handled entirely by Merkl, off-chain. Our contracts do not touch reward math, accrual, or claims, and Merkl does not call any privileged function on our contracts.
 
 ### Architectural Flow
 
 ```mermaid
 graph TD
     subgraph On-Chain
-        User -- 1. Modifies Liquidity --> UNISWAP_V4[Uniswap v4 PositionManager];
-        UNISWAP_V4 -- 2. Triggers Hook --> Hook[TELxIncentiveHook];
-        Hook -- 3. Checkpoints Data --> Registry[PositionRegistry];
-        User -- 7. claim() --> Registry;
-
-        User -- 4. Subscribes/Transfers --> UNISWAP_V4;
-        UNISWAP_V4 -- 5. Notifies Subscriber --> Subscriber[TELxSubscriber];
-        Subscriber -- 6. Updates Subscription --> Registry;
+        User -- 1. Mints / modifies a vanilla v4 position --> UNISWAP_V4[Uniswap v4 PositionManager];
+        User -- 2. Subscribes / transfers --> UNISWAP_V4;
+        UNISWAP_V4 -- 3. Notifies Subscriber --> Subscriber[TELxSubscriber];
+        Subscriber -- 4. Updates subscription index --> Registry[PositionRegistry];
+        Registry -- reads live position data --> UNISWAP_V4;
+        Registry -- reads live position data --> STATEVIEW[Uniswap v4 StateView];
     end
 
     subgraph Off-Chain
-        RewardsScript[Rewards Calculation Script] -- 8. Reads Events & State --> Registry;
-        RewardsScript -- 9. addRewards() --> Registry;
-        Snapshot[Snapshot Strategy] -- 10. Reads State (View Calls) --> Registry;
+        Snapshot[Snapshot Strategy] -- 5. Reads State (View Calls) --> Registry;
+        Merkl[Merkl] -- distributes rewards independently --> User;
     end
 
     style UNISWAP_V4 fill:#f9f,stroke:#333,stroke-width:2px
+    style STATEVIEW fill:#f9f,stroke:#333,stroke-width:2px
 ```
 
 ## 3. Roles and Access Control
 
-The system uses OpenZeppelin's `AccessControl` to manage privileges.
+The system uses OpenZeppelin's `AccessControl` to manage privileges on the `PositionRegistry`.
 
 - **`DEFAULT_ADMIN_ROLE`**
   - **Holder**: A secure multisig or DAO.
-  - **Permissions**: Can grant/revoke all other roles. Can initialize new pools for tracking via the `TELxIncentiveHook`.
-- **`SUPPORT_ROLE`**
-  - **Holder**: An operational multisig or automated address controlled by the rewards script operator.
-  - **Permissions**:
-    - `PositionRegistry::addRewards()`: Distributes calculated rewards to users.
-    - `PositionRegistry::updateRouter()`: Manages the list of trusted routers.
-    - `PositionRegistry::erc20Rescue()`: Recovers mis-sent tokens.
-- **`UNI_HOOK_ROLE`**
-  - **Holder**: The deployed `TELxIncentiveHook` contract address.
-  - **Permissions**: `PositionRegistry::addOrUpdatePosition()`. This is the sole entry point for recording liquidity and fee growth data.
+  - **Permissions**: Can grant and revoke all other roles.
 - **`SUBSCRIBER_ROLE`**
   - **Holder**: The deployed `TELxSubscriber` contract address.
-  - **Permissions**: `PositionRegistry::handleSubscribe()`, `handleUnsubscribe()`, `handleModifyLiquidity()`, `handleBurn()`.
+  - **Permissions**: `PositionRegistry::handleSubscribe()`, `handleUnsubscribe()`, and `handleBurn()`. This is the sole entry point for mutating the subscription index.
+- **`SUPPORT_ROLE`**
+  - **Holder**: An operational multisig.
+  - **Permissions**: `PositionRegistry::erc20Rescue()` only - recovers mis-sent ERC-20 tokens.
+
+`pruneSubscription(uint256)` is **permissionless**: anyone may call it to clean up a stale subscription entry whose underlying position no longer qualifies.
+
+There is no `UNI_HOOK_ROLE` - the hook has been removed. `TELxSubscriber` is `Ownable2Step`; its owner can re-point the registry via `setRegistry(IPositionRegistry)`.
 
 ## 4. Trust Assumptions & External Dependencies
 
-1.  **Uniswap v4 Contracts**: The system trusts that the Uniswap v4 `PoolManager` and `PositionManager` contracts are secure and will provide authentic, correct data to the hook and subscriber contracts.
-2.  **Off-Chain Services**: The on-chain contracts assume that the operators of the Rewards Script and Snapshot Strategy are trusted. The contracts must be secure even if a compromised `SUPPORT_ROLE` holder sends validly-formatted but incorrect reward data. The attack surface is limited to the rewards held by the `PositionRegistry`.
-3.  **NFT Ownership**: The system considers the `PositionManager` the single source of truth for position NFT ownership.
+1.  **Uniswap v4 Contracts**: The system trusts that the Uniswap v4 `PositionManager` and `StateView` contracts are secure and provide authentic, correct position data. The registry's view shims read directly from these contracts.
+2.  **NFT Ownership**: The system considers the `PositionManager` the single source of truth for position NFT ownership.
+3.  **Off-Chain Services**: The Snapshot strategy is read-only; a compromise of it cannot affect on-chain state. Reward distribution via Merkl is independent of these contracts.
 4.  **Governance**: The `DEFAULT_ADMIN_ROLE` is assumed to be held by a secure, trusted entity (e.g., a DAO with a timelock).
 
 ## 5. Detailed Component Breakdown
 
 ### `PositionRegistry.sol`
 
-- **Purpose**: Acts as the core state machine and database for all LP data.
+- **Purpose**: A thin subscription index plus a live view layer over Uniswap v4. It records which position NFTs have opted into TELx and exposes views that read live position data from Uniswap's own contracts.
 - **Key State**:
-  - `mapping(uint256 => Position) public positions`: Stores core data for each position, including a dynamic array of `FeeGrowthCheckpoint` structs.
-  - `mapping(address => uint256[]) public subscriptions`: Tracks which positions a user has actively subscribed to.
-  - `mapping(address => uint256) public unclaimedRewards`: Tracks claimable rewards for each user.
+  - `mapping(uint256 => bool) subscriptions` (exposed via `subscriptions`/`isSubscribed`): tracks whether a given position NFT is currently subscribed.
+  - Per-pool and per-owner subscription lists, used by `getSubscriptions`/`getSubscribed`.
+- **It does not store**: liquidity, fee-growth checkpoints, reward balances, JIT/Active/Passive weights, a trusted-router registry, or a pool registry. All of that machinery was removed with the hook.
+- **Caps**:
+  - `MAX_SUBSCRIBED = 50_000` - per-pool subscription cap (unchanged).
+  - `MAX_SUBSCRIPTIONS = 1_000` - per-LP subscription cap. This was raised from 100: the old cap was a gas-safety bound on on-chain iteration over the per-owner array, and no such iteration remains.
 - **Key Functions & Intended Behavior**:
-  - `addOrUpdatePosition()`: Called exclusively by the hook. Atomically records a position's liquidity change and its `feeGrowthInside` at that block, pushing a new checkpoint to storage.
-  - `handleSubscribe()` / `handleUnsubscribe()`: Called exclusively by the subscriber. Manages a user's opt-in status. Unsubscribing occurs on transfer, requiring new owners to re-subscribe.
-  - `addRewards()`: Called by `SUPPORT_ROLE`. Accepts a batch of rewards and credits the `unclaimedRewards` mapping. Protected by a `nonReentrant` guard.
-  - `claim()`: A user-facing function to withdraw from `unclaimedRewards`. Protected by a `nonReentrant` guard.
-
-### `TELxIncentiveHook.sol`
-
-- **Purpose**: A minimal, gas-efficient data collector that interfaces directly with Uniswap v4.
-- **Interaction Points**:
-  - `beforeInitialize`: A privileged function for the `DEFAULT_ADMIN_ROLE` to approve new pools for tracking.
-  - `beforeModifyPosition`: Captures all liquidity changes (mint, add, remove, collect).
-- **Core Logic**: This contract is designed to be stateless. Upon a hook trigger, it reads data provided by the `PoolManager`, performs necessary checks, and immediately calls the `PositionRegistry` to record the data. Its primary security concern is ensuring it accurately relays data without introducing vulnerabilities.
+  - `handleSubscribe()` / `handleUnsubscribe()` / `handleBurn()`: Called exclusively by the subscriber (`SUBSCRIBER_ROLE`). Manage a position's opt-in status. Unsubscribing occurs on transfer or burn, requiring new owners to re-subscribe.
+  - `pruneSubscription(uint256)`: Permissionless cleanup. Removes a stale subscription entry for a position that has been transferred or burned, or is no longer `subscriptionEligible`.
+  - `subscriptionEligible(uint256)`: View returning whether a position meets the liquidity threshold and, when `inRangeRequired` is enabled, is in range. The single source of truth for eligibility.
+  - `belowSubscriptionThreshold(uint256)` / `isInRange(uint256)`: Component views for the liquidity-threshold and in-range checks respectively.
+  - `getPosition`, `getPositionDetails`, `getLiquidityLast`, `validPool`: **Live view shims** that read from the Uniswap v4 `PositionManager` and `StateView` rather than internal storage.
+  - `getSubscriptions(owner)`: Returns only currently-votable positions (still owned by `owner` and `subscriptionEligible`); the Snapshot strategy consumes this directly. `getSubscriptionsRaw(owner)` returns the full unfiltered stored set for ops and prune bots.
+  - `getSubscribed`, `getAmountsForLiquidity`, `isTokenSubscribed`, `isSubscribed`, `inRangeRequired`: Views over the subscription index, configuration, and derived data.
+  - `setInRangeRequired(bool)`: Called by `DEFAULT_ADMIN_ROLE`. Toggles the in-range requirement.
+  - `erc20Rescue()`: Called by `SUPPORT_ROLE`. Recovers mis-sent ERC-20 tokens.
 
 ### `TELxSubscriber.sol`
 
-- **Purpose**: Securely forwards ownership change events from the `PositionManager` to the `PositionRegistry`.
-- **Security Model**: Its primary security feature is the `onlyPositionManager` modifier, which ensures that all notifications (`notifySubscribe`, `notifyUnsubscribe`, etc.) are authentically from the Uniswap v4 `PositionManager` contract, preventing spoofed ownership changes.
+- **Purpose**: Securely forwards position lifecycle events from the Uniswap v4 `PositionManager` to the `PositionRegistry`.
+- **Security Model**: Its primary security feature is the `onlyPositionManager` modifier, which ensures all notifications (`notifySubscribe`, `notifyUnsubscribe`, `notifyBurn`, `notifyModifyLiquidity`) are authentically from the Uniswap v4 `PositionManager`, preventing spoofed events.
+- **`notifyModifyLiquidity`**: No longer a no-op. It enforces subscription eligibility: if a subscribed position's live liquidity falls below the threshold, or the position is no longer in range, it is unsubscribed.
+- **Configurability**: The contract is `Ownable2Step`. Its `registry` pointer is owner-swappable via `setRegistry(IPositionRegistry)`.
 
-## 6. Off-Chain Logic (Context for On-Chain Interactions)
+## 6. Subscription Eligibility
 
-### Rewards Calculation Script
+A position is `subscriptionEligible` only if it satisfies **both** conditions below:
 
-The off-chain script implements a three-tiered weighting system to incentivize long-term liquidity provision.
+- **Liquidity threshold:** its liquidity is at least 1 basis point (0.01%) of the pool's total liquidity - that is, `liquidity >= totalLiquidity / 10_000`. As an exception, if the pool's total liquidity is less than or equal to 10,000, any non-zero position liquidity qualifies.
+- **In range:** when the `inRangeRequired` flag is enabled, the pool's current tick must sit within the position's `[tickLower, tickUpper)` range. An out-of-range position provides no live liquidity and earns no voting power. The flag defaults to enabled and the admin can toggle it via `setInRangeRequired`.
 
-- It reads `Checkpoint` event data from the `PositionRegistry` to calculate the `feeGrowth` accrued by each subscribed position during a reward epoch.
-- It classifies each position's activity as **JIT**, **Active**, or **Passive** based on its on-chain lifetime, measured in blocks.
-- It applies a configurable weight (e.g., 0.25 for JIT, 1.0 for Passive) to the `feeGrowth` to determine a final "weighted score."
-- Rewards from the epoch's TEL budget are distributed pro-rata based on these weighted scores.
-- The script's final action is to call the privileged `PositionRegistry.addRewards()` function.
+`handleSubscribe` enforces eligibility at subscribe time; `notifyModifyLiquidity` re-checks it on liquidity modification, and `pruneSubscription` lets anyone remove a position that has become ineligible. `getSubscriptions(owner)` evaluates eligibility live and returns only currently-votable positions, so a pinned-block read by the Snapshot strategy needs no filter of its own.
+
+## 7. Off-Chain Logic (Context for On-Chain Interactions)
+
+### Reward Distribution (Merkl)
+
+Reward distribution is handled entirely off-chain by Merkl. The TELx contracts in this directory perform no reward math, no weighting, no accrual, and no claims. LPs claim rewards directly on Merkl. This logic is out of scope for this specification.
 
 ### Snapshot Voting Strategy
 
-The voting strategy runs entirely off-chain on Snapshot's infrastructure and makes **read-only** calls to the `PositionRegistry`.
+The voting strategy runs entirely off-chain on Snapshot's infrastructure and makes **read-only** calls to the `PositionRegistry`. The `uni-v4-telx-lp` strategy is unchanged by the hook removal.
 
-1.  It fetches a voter's subscribed position IDs and their corresponding raw data (liquidity, ticks, pool currencies).
-2.  It calls a trusted external price oracle (e.g., CoinGecko API) to get historical USD prices for all tokens at the proposal's snapshot block.
-3.  It calculates the total USD value of the LP position.
-4.  It converts this USD value into a final TEL-denominated voting power.
+1.  It fetches a voter's subscribed position IDs via `getSubscriptions` and their corresponding raw data via `getPositionDetails` (liquidity, ticks, pool currencies).
+2.  It uses `getAmountsForLiquidity` to convert raw liquidity and tick data into token amounts.
+3.  It calls a trusted external price oracle (e.g., CoinGecko API) to get historical USD prices for all tokens at the proposal's snapshot block.
+4.  It calculates the total USD value of the LP position and converts it into a final TEL-denominated voting power.
 
-## 7. Known Risks & Mitigations
+## 8. Known Risks & Mitigations
 
-- **Off-Chain Service Compromise**:
-  - **Risk**: A compromised `SUPPORT_ROLE` key could allow an attacker to call `addRewards()` with false data, unfairly distributing the reward pool.
-  - **Mitigation**: The `SUPPORT_ROLE` should be a secure multisig. The contract cannot be drained of more TEL than has been deposited for rewards. The core position data remains unaffected.
-- **JIT Lifetime Gaming**:
-  - **Risk**: A sophisticated actor could create zero-liquidity positions and let them "age" on-chain. They could then add liquidity for a single block (JIT) in an attempt to receive the higher "Passive" reward weight.
-  - **Mitigation**: This requires maintaining a gamut of positions in dormant state to cover a wide variety of tick ranges which are not guaranteed to be relevant to the current price and ongoing swaps at any given time. It requires a substantial degree of serendepitiy as well as significant technical sophistication and ongoing maintenance costs which are unlikely to be worth the potential reward payout of higher weighted fee growth and thus is considered an accepted risk.
+- **Stale subscription entries**:
+  - **Risk**: A subscribed position may drop below the liquidity threshold or drift out of range (the latter on price movement, with no on-chain callback) without an event that prunes its index entry.
+  - **Mitigation**: `notifyModifyLiquidity` unsubscribes positions that have become ineligible on their next liquidity event, and the permissionless `pruneSubscription` lets anyone clean up stale entries at any time. `getSubscriptions` also evaluates eligibility live, so a stale stored entry is excluded from the votable set the moment it becomes ineligible and does not by itself confer voting power.
+- **Misconfigured Uniswap addresses**:
+  - **Risk**: If the registry is constructed with an incorrect `PositionManager` or `StateView`, its view shims would return wrong data.
+  - **Mitigation**: Constructor arguments are verified at deploy time and against production state by the Polygon fork tests.

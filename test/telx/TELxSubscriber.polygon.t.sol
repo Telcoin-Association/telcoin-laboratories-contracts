@@ -3,80 +3,82 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {TELxSubscriber} from "../../contracts/telx/core/TELxSubscriber.sol";
-import {ISubscriber} from "@uniswap/v4-periphery/src/interfaces/ISubscriber.sol";
+import {PositionRegistry} from "../../contracts/telx/core/PositionRegistry.sol";
+import {IPositionRegistry} from "../../contracts/telx/interfaces/IPositionRegistry.sol";
+import {PositionManagerAuth} from "../../contracts/telx/abstract/PositionManagerAuth.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
+import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {PositionInfo} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {TestConstants} from "../util/TestConstants.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
 
 /**
- * @title TELxSubscriber Polygon Production Fork Tests
- * @notice Read-only verification that the production subscriber on Polygon is correctly configured
- *         and access control is correctly enforced.
+ * @title TELxSubscriber Polygon Fork Tests
+ * @notice Verifies a TELxSubscriber deployed against live Uniswap v4 infrastructure on Polygon is
+ *         wired correctly and enforces access control. The subscriber itself makes no calls into
+ *         v4 - it only forwards to the registry and gates on the PositionManager address - so
+ *         behavioral coverage lives in the deterministic `TELxSubscriber.t.sol` unit suite.
  *
- * @dev Complements the Sepolia fresh-deploy tests at test/telx/TELxSubscriber.t.sol.
+ * @dev The previous production subscriber is being redeployed as part of this migration, so this
+ *      file deploys fresh rather than reading a production address.
  *
  *      Required env vars: POLYGON_RPC_URL
- *      Fork block: 65000000+ (post-Dencun)
  */
 contract TELxSubscriberPolygonTest is Test {
-    address constant PRODUCTION_SUBSCRIBER = PolygonConstants.TELX_PRODUCTION_SUBSCRIBER;
-    address constant PRODUCTION_REGISTRY = PolygonConstants.TELX_PRODUCTION_REGISTRY;
-    address constant V4_POSITION_MANAGER = 0x1Ec2eBf4F37E7363FDfe3551602425af0B3ceef9;
+    // Local aliases for shared Polygon constants (see test/util/PolygonConstants.sol).
+    address constant V4_POOL_MANAGER = PolygonConstants.V4_POOL_MANAGER;
+    address constant V4_POSITION_MANAGER = PolygonConstants.V4_POSITION_MANAGER;
 
-    uint256 constant FORK_BLOCK = 85_800_000;
+    address admin = makeAddr("admin");
+    address owner = makeAddr("owner");
 
+    PositionRegistry registry;
     TELxSubscriber subscriber;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), FORK_BLOCK);
-        subscriber = TELxSubscriber(PRODUCTION_SUBSCRIBER);
+        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), TestConstants.PRODUCTION_STATE_POLYGON_FORK_BLOCK);
+
+        StateView stateView = new StateView(IPoolManager(V4_POOL_MANAGER));
+        registry = new PositionRegistry(IPositionManager(V4_POSITION_MANAGER), stateView, admin);
+        subscriber = new TELxSubscriber(IPositionRegistry(address(registry)), V4_POSITION_MANAGER, owner);
+
+        vm.startPrank(admin);
+        registry.grantRole(registry.SUBSCRIBER_ROLE(), address(subscriber));
+        vm.stopPrank();
     }
 
-    function test_productionSubscriber_isContract() public view {
-        uint256 size;
-        address target = PRODUCTION_SUBSCRIBER;
-        assembly {
-            size := extcodesize(target)
-        }
-        assertTrue(size > 0, "Production subscriber should have code");
+    function test_deployment_wiredToLiveV4() public view {
+        assertEq(address(subscriber.registry()), address(registry), "registry");
+        assertEq(subscriber.positionManager(), V4_POSITION_MANAGER, "positionManager");
+        assertEq(subscriber.owner(), owner, "owner");
     }
 
-    function test_registry_setCorrectly() public view {
-        assertEq(address(subscriber.registry()), PRODUCTION_REGISTRY, "Subscriber registry mismatch");
-    }
-
-    function test_positionManager_setCorrectly() public view {
-        assertEq(subscriber.positionManager(), V4_POSITION_MANAGER, "Subscriber positionManager mismatch");
-    }
-
-    function test_notifySubscribe_revertsFromUnauthorized() public {
-        // Call from an unauthorized address — should revert
+    function test_notifyCallbacks_revertFromUnauthorized() public {
         address attacker = makeAddr("attacker");
-        vm.prank(attacker);
-        vm.expectRevert();
+        vm.startPrank(attacker);
+
+        vm.expectRevert(PositionManagerAuth.OnlyPositionManager.selector);
         subscriber.notifySubscribe(1, "");
-    }
 
-    function test_notifyUnsubscribe_revertsFromUnauthorized() public {
-        address attacker = makeAddr("attacker");
-        vm.prank(attacker);
-        vm.expectRevert();
+        vm.expectRevert(PositionManagerAuth.OnlyPositionManager.selector);
         subscriber.notifyUnsubscribe(1);
+
+        vm.expectRevert(PositionManagerAuth.OnlyPositionManager.selector);
+        subscriber.notifyModifyLiquidity(1, 0, BalanceDelta.wrap(0));
+
+        vm.expectRevert(PositionManagerAuth.OnlyPositionManager.selector);
+        subscriber.notifyBurn(1, address(0), PositionInfo.wrap(0), 0, BalanceDelta.wrap(0));
+
+        vm.stopPrank();
     }
 
-    function test_notifyModifyLiquidity_revertsFromUnauthorized() public {
+    function test_setRegistry_revertsFromNonOwner() public {
         address attacker = makeAddr("attacker");
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
         vm.prank(attacker);
-        vm.expectRevert();
-        ISubscriber(address(subscriber)).notifyModifyLiquidity(1, int256(0), BalanceDelta.wrap(0));
-    }
-
-    function test_notifyBurn_revertsFromUnauthorized() public {
-        address attacker = makeAddr("attacker");
-        vm.prank(attacker);
-        vm.expectRevert();
-        ISubscriber(address(subscriber)).notifyBurn(
-            1, address(0), PositionInfo.wrap(0), uint256(0), BalanceDelta.wrap(0)
-        );
+        subscriber.setRegistry(IPositionRegistry(address(registry)));
     }
 }

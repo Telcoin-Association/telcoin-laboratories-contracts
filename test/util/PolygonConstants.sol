@@ -33,11 +33,18 @@ library PolygonConstants {
     address internal constant SABLIER_LOCKUP = 0x8D87c5eddb5644D1a714F85930Ca940166e465f0;
 
     // ----------
-    // TELx production deployments
+    // Uniswap v4 infrastructure
     // ----------
-    address internal constant TELX_PRODUCTION_HOOK = 0xD77cC9230Ded5b6591730032975453744532a500;
-    address internal constant TELX_PRODUCTION_REGISTRY = 0x2c33fC9c09CfAC5431e754b8fe708B1dA3F5B954;
-    address internal constant TELX_PRODUCTION_SUBSCRIBER = 0x3Bf9bAdC67573e7b4756547A2dC0C77368A2062b;
+    address internal constant V4_POOL_MANAGER = 0x67366782805870060151383F4BbFF9daB53e5cD6;
+    address internal constant V4_POSITION_MANAGER = 0x1Ec2eBf4F37E7363FDfe3551602425af0B3ceef9;
+
+    // ----------
+    // TELx pool IDs
+    // ----------
+    bytes32 internal constant TELX_POOL_ID_USDC_EMXN =
+        0x37dafec81119c7987538ac000b8a8a16a7f4daeecf91626efc9956ccd5146246;
+    bytes32 internal constant TELX_POOL_ID_WETH_TEL =
+        0x25412ca33f9a2069f0520708da3f70a7843374dd46dc1c7e62f6d5002f5f9fa7;
 
     // ----------
     // Snapshot adaptors (deployed instances)

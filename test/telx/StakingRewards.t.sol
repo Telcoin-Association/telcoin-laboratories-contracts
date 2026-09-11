@@ -8,9 +8,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
 
 /// @title StakingRewardsTest
-/// @notice Polygon-fork tests for the standalone StakingRewards contract (unstaked from the
-///         TELxIncentiveHook flow). Validates `notifyRewardAmount`, per-user `earned()`
-///         accounting, and the `recoverERC20` guard against draining the staking token.
+/// @notice Polygon-fork tests for the standalone StakingRewards contract. Validates
+///         `notifyRewardAmount`, per-user `earned()` accounting, and the `recoverERC20`
+///         guard against draining the staking token.
 contract StakingRewardsTest is Test {
     StakingRewards public stakingRewards;
 
