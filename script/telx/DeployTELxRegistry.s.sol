@@ -90,6 +90,14 @@ abstract contract BaseDeployTELxRegistry is DeployBase {
             ChainTarget memory target = allChains[i];
             if (bytes(only).length > 0 && keccak256(bytes(target.name)) != keccak256(bytes(only))) continue;
 
+            // A chain with no RPC configured is skipped rather than fatal. Deploying one chain at a
+            // time is the normal way to run this, and requiring every chain's URL to be present in
+            // order to touch one of them would be a trap rather than a safety check.
+            if (bytes(target.rpcUrl).length == 0) {
+                console.log("Skipping %s: no RPC URL configured", target.name);
+                continue;
+            }
+
             vm.createSelectFork(target.rpcUrl);
             // The Safe's on-chain nonce only advances on execution, so re-read it per chain and let
             // safe-utils increment locally across proposals within a run.
@@ -236,7 +244,7 @@ contract DeployTELxRegistryMainnet is BaseDeployTELxRegistry {
         allChains.push(
             ChainTarget({
                 name: "ethereum",
-                rpcUrl: vm.envString("ETHEREUM_RPC_URL"),
+                rpcUrl: vm.envOr("ETHEREUM_RPC_URL", string("")),
                 chainId: EthereumAddresses.CHAIN_ID,
                 positionManager: EthereumAddresses.POSITION_MANAGER,
                 stateView: EthereumAddresses.STATE_VIEW,
@@ -250,7 +258,7 @@ contract DeployTELxRegistryMainnet is BaseDeployTELxRegistry {
         allChains.push(
             ChainTarget({
                 name: "polygon",
-                rpcUrl: vm.envString("POLYGON_RPC_URL"),
+                rpcUrl: vm.envOr("POLYGON_RPC_URL", string("")),
                 chainId: PolygonAddresses.CHAIN_ID,
                 positionManager: PolygonAddresses.POSITION_MANAGER,
                 stateView: PolygonAddresses.STATE_VIEW,
@@ -262,7 +270,7 @@ contract DeployTELxRegistryMainnet is BaseDeployTELxRegistry {
         allChains.push(
             ChainTarget({
                 name: "base",
-                rpcUrl: vm.envString("BASE_RPC_URL"),
+                rpcUrl: vm.envOr("BASE_RPC_URL", string("")),
                 chainId: BaseAddresses.CHAIN_ID,
                 positionManager: BaseAddresses.POSITION_MANAGER,
                 stateView: BaseAddresses.STATE_VIEW,

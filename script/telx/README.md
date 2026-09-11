@@ -41,8 +41,12 @@ In `.env` (see `.env.example`):
 
 - `ETHEREUM_RPC_URL`, `POLYGON_RPC_URL`, `BASE_RPC_URL`
 - `ETH_FROM` (hardware wallet) or `PRIVATE_KEY`, for the pool scripts
-- `DEPLOYER_SAFE_ADDRESS`, `SIGNER_ADDRESS`, and optionally `DERIVATION_PATH` / `HARDWARE_WALLET`,
-  for the registry deploy
+- `DEPLOYER_SAFE_ADDRESS`, and `SIGNER_ADDRESS_0` / `SIGNER_ADDRESS_1` for the registry deploy,
+  plus optionally `DERIVATION_PATH` / `HARDWARE_WALLET`
+
+  The governance Safe is 2-of-8, and safe-utils simulates the real signature check. A single
+  `SIGNER_ADDRESS` therefore fails simulation with the Safe error `GS020` ("signatures data too
+  short"). Supply at least as many owner addresses as the threshold.
 
 Before seeding, the deployer EOA needs the tokens. TEL v3 currently has **zero supply on every
 chain**, so pools can be created now but cannot be seeded until the TEL v2 to v3 upgrade portal
@@ -105,10 +109,21 @@ both of which safe-utils needs. Set `CHAIN=polygon` to restrict a run to one cha
 
 Addresses are written to `deployments/<chain>.json` on broadcast.
 
-**Ethereum is blocked.** `EthereumAddresses.SUPPORT_SAFE` is still `address(0)` because no TELx
-support multisig exists there yet, and the script reverts rather than granting `SUPPORT_ROLE` to
-nobody and handing the subscriber to `address(0)`, which would freeze its registry pointer
-permanently. Run `CHAIN=polygon` and `CHAIN=base` until that address is supplied.
+### Known blockers for step 1
+
+**Ethereum.** `EthereumAddresses.SUPPORT_SAFE` is still `address(0)` because no TELx support
+multisig exists there yet, and the script reverts with `MissingSupportSafe("ethereum")` rather than
+granting `SUPPORT_ROLE` to nobody and handing the subscriber to `address(0)`, which would freeze its
+registry pointer permanently. Supply that address before running Ethereum.
+
+**Base simulation.** `CHAIN=polygon` simulates successfully. `CHAIN=base` deterministically reverts
+inside safe-utils' MultiSend simulation, with empty revert data (which is what MultiSendCallOnly
+returns when an inner call fails). The batch content is not the problem: executing all four calls
+directly as the Safe on a Base fork succeeds and lands both contracts at the predicted addresses,
+and the on-chain prerequisites are byte-identical to Polygon (same CreateX codehash, same MultiSend
+codehash, same Safe singleton and version 1.4.1, same owner set, same threshold, no transaction
+guard on either). The difference is isolated to the safe-utils simulation path on Base. Resolve this
+before proposing the Base batch, since simulation is the only rehearsal we get.
 
 ## Step 2 - create a pool
 
