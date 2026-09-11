@@ -23,7 +23,7 @@ contract CreateCouncilNftsAndStreamsForkTest is Test {
     address internal sablierSender;
     /// @dev Sum of every council's deposit. Computed at setUp time from the
     ///      script's own `getCouncilsInfo()` so it tracks automatically if
-    ///      deposits are ever adjusted — no manual sync required.
+    ///      deposits are ever adjusted - no manual sync required.
     uint256 internal totalTelRequired;
 
     function setUp() public {

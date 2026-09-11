@@ -8,7 +8,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
 
 /// @title StakingRewardsFactoryTest
-/// @notice Polygon-fork tests for the StakingRewardsFactory — the deterministic-deployer for
+/// @notice Polygon-fork tests for the StakingRewardsFactory - the deterministic-deployer for
 ///         per-pool StakingRewards instances. Verifies that `deployStakingRewards` produces
 ///         contracts with the correct (rewardsToken, stakingToken) pair and reverts on duplicates.
 contract StakingRewardsFactoryTest is Test {

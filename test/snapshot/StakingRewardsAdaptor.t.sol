@@ -98,7 +98,7 @@ contract StakingRewardsAdaptorTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // balanceOf — zero-stake path (only earned)
+    // balanceOf - zero-stake path (only earned)
     // ---------------------------------------------------------------
 
     function test_balanceOf_zeroStake_returnsEarned() public {
@@ -112,7 +112,7 @@ contract StakingRewardsAdaptorTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // balanceOf — with stake (earned + weighted BPT share)
+    // balanceOf - with stake (earned + weighted BPT share)
     // ---------------------------------------------------------------
 
     function test_balanceOf_withStake_returnsEarnedPlusWeightedShare() public {
@@ -143,7 +143,7 @@ contract StakingRewardsAdaptorTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // balanceOf — edge: staking contract holds BPT but voter has 0 stake
+    // balanceOf - edge: staking contract holds BPT but voter has 0 stake
     // ---------------------------------------------------------------
 
     function test_balanceOf_stakingHasBPT_voterHasNoStake() public {

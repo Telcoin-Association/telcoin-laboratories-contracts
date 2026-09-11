@@ -57,7 +57,7 @@ contract DeployBalancerAdaptorForkTest is Test {
     //
     // vm.envOr appears to cache within a single forge test invocation,
     // which makes split-test coverage of the three env-var paths
-    // unreliable — one test sets ETH_FROM, a later test can't flip it
+    // unreliable - one test sets ETH_FROM, a later test can't flip it
     // back because the cached first-read value sticks. The robust
     // workaround is to exercise all three paths sequentially in a
     // single test with a fresh DeployBalancerAdaptor instance per path.

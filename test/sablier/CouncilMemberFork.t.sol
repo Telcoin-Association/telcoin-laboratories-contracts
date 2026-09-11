@@ -840,7 +840,7 @@ contract CouncilMemberForkTest is Test {
 
         assertEq(councilMemberContract.balances(0), 100);
 
-        // Second retrieve in same block — withdrawableAmountOf returns 0, should be a no-op
+        // Second retrieve in same block - withdrawableAmountOf returns 0, should be a no-op
         vm.prank(admin);
         councilMemberContract.retrieve();
 
@@ -883,7 +883,7 @@ contract CouncilMemberForkTest is Test {
             ISablierV2Lockup(address(badLockup))
         );
 
-        // claim() calls _retrieve() internally — should also revert
+        // claim() calls _retrieve() internally - should also revert
         vm.prank(member1);
         vm.expectRevert();
         councilMemberContract.claim(0, 0);
@@ -902,7 +902,7 @@ contract CouncilMemberForkTest is Test {
             ISablierV2Lockup(address(badLockup))
         );
 
-        // mint() calls _retrieve() internally — should also revert
+        // mint() calls _retrieve() internally - should also revert
         vm.prank(admin);
         vm.expectRevert();
         councilMemberContract.mint(member2);
@@ -923,7 +923,7 @@ contract CouncilMemberForkTest is Test {
             ISablierV2Lockup(address(badLockup))
         );
 
-        // burn() calls _retrieve() via _update() — should also revert
+        // burn() calls _retrieve() via _update() - should also revert
         vm.prank(admin);
         vm.expectRevert();
         councilMemberContract.burn(0, admin);

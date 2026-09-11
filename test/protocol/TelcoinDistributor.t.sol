@@ -66,8 +66,7 @@ contract TelcoinDistributorForkTest is Test {
         vm.prank(owner);
         distributor = new TelcoinDistributor(TELCOIN, CHALLENGE_PERIOD, TAO_COUNCIL_NFT);
 
-        // Fund the owner with TEL and approve the distributor for the exact funded amount —
-        // mirrors the production pattern where a Safe is funded with N and approves the
+        // Fund the owner with TEL and approve the distributor for the exact funded amount - // mirrors the production pattern where a Safe is funded with N and approves the
         // distributor for that same N (not type(uint256).max). Bounds per-test pulls to the
         // owner's balance and surfaces a regression where the distributor would over-pull.
         uint256 ownerFunding = 100_000_000e2;

@@ -1,0 +1,185 @@
+# TELx v4 pool runbook
+
+Operational guide for standing up the standardized TELx Uniswap v4 pools and the TEL v3
+PositionRegistry, per the TELx Liquidity Framework Alignment and Pool Standardization proposal.
+
+Three scripts, in the order they are run:
+
+| Script | What it does | Signed by |
+| --- | --- | --- |
+| `DeployTELxRegistry.s.sol` | Deploys `PositionRegistry` + `TELxSubscriber` and wires their roles | Governance Safe |
+| `CreateV4Pool.s.sol` | Initializes one pool at a derived price | Deployer EOA |
+| `SeedV4Liquidity.s.sol` | Mints the initial position into that pool | Deployer EOA |
+
+The registry goes through the Safe because its admin role controls subscription eligibility and its
+subscriber owner can repoint every LP subscription. Pool creation and seeding do not: a hookless v4
+pool is permissionless to initialize, and the thin registry accepts any initialized pool, so no
+privileged call sits between creating a pool and an LP subscribing to it.
+
+## The pool set
+
+| Name | Chain | currency0 | currency1 | Fee | Spacing |
+| --- | --- | --- | --- | --- | --- |
+| `ETHEREUM_ETH_TEL` | Ethereum | native ETH | TEL v3 | 0.30% | 60 |
+| `ETHEREUM_EUSD_TEL` | Ethereum | eUSD | TEL v3 | 0.30% | 60 |
+| `POLYGON_WETH_TEL` | Polygon | WETH | TEL v3 | 0.30% | 60 |
+| `POLYGON_EUSD_TEL` | Polygon | eUSD | TEL v3 | 0.30% | 60 |
+| `POLYGON_EUSD_EMXN` | Polygon | eUSD | eMXN | 0.05% | 10 |
+| `BASE_ETH_TEL` | Base | native ETH | TEL v3 | 0.30% | 60 |
+| `BASE_EUSD_TEL` | Base | eUSD | TEL v3 | 0.30% | 60 |
+
+Polygon has no native ETH, so its TEL/ETH pool pairs against WETH. Ethereum and Base use native ETH,
+matching the existing Base TEL/ETH pool. Every pool is vanilla Uniswap v4 with no hook.
+
+The catalog lives in `script/shared/TELxPools.sol`. The chain prefix in each name is checked against
+`block.chainid`, so pointing a Polygon pool at a Base RPC fails on the name rather than creating the
+wrong pool.
+
+## Prerequisites
+
+In `.env` (see `.env.example`):
+
+- `ETHEREUM_RPC_URL`, `POLYGON_RPC_URL`, `BASE_RPC_URL`
+- `ETH_FROM` (hardware wallet) or `PRIVATE_KEY`, for the pool scripts
+- `DEPLOYER_SAFE_ADDRESS`, `SIGNER_ADDRESS`, and optionally `DERIVATION_PATH` / `HARDWARE_WALLET`,
+  for the registry deploy
+
+Before seeding, the deployer EOA needs the tokens. TEL v3 currently has **zero supply on every
+chain**, so pools can be created now but cannot be seeded until the TEL v2 to v3 upgrade portal
+opens and the treasury holds upgraded TEL. The two steps are separate scripts for exactly this
+reason.
+
+## Amounts and prices
+
+Amounts are passed as **whole tokens**, not raw units: `100000` eUSD, not
+`100000000000`. The scripts scale by each token's decimals. This matters more than usual right now,
+because TEL v3 is 18 decimals where TEL v2 was 2, and getting that wrong moves the price by a factor
+of 1e16 (about 368,000 ticks).
+
+A pool's opening price is `amount1 / amount0` in raw units, so **the amounts define the price**.
+Pass the same amounts to `CreateV4Pool` and `SeedV4Liquidity`; using different figures opens the
+pool away from where the liquidity lands and hands the difference to the first arbitrageur.
+
+The amounts are a ceiling, not a target. Uniswap takes the binding side of the pair, so one currency
+is typically deposited in full and the other partially. The `plan` output shows exactly how much of
+each will move.
+
+## Step 1 - deploy the registry and subscriber
+
+One Safe MultiSend per chain: deploy both contracts via CreateX CREATE3, then grant
+`SUBSCRIBER_ROLE` and `SUPPORT_ROLE`. All-or-nothing, so the registry can never be live with the
+subscriber unwired.
+
+Because CreateX runs in cross-chain mode, both contracts land at the **same address on all three
+chains** despite each chain passing a different PositionManager.
+
+Simulate first. This executes the batch against a local fork and proposes nothing:
+
+```shell
+FOUNDRY_PROFILE=deploy forge script \
+  script/telx/DeployTELxRegistry.s.sol:DeployTELxRegistryMainnet --ffi -vvvv
+```
+
+Then propose to the Safe Transaction Service:
+
+```shell
+FOUNDRY_PROFILE=deploy forge script \
+  script/telx/DeployTELxRegistry.s.sol:DeployTELxRegistryMainnet --ffi --broadcast -vvvv
+```
+
+`FOUNDRY_PROFILE=deploy` is required: it is the only profile with FFI and filesystem writes enabled,
+both of which safe-utils needs. Set `CHAIN=polygon` to restrict a run to one chain, and
+`SAFE_NONCE_OFFSET` to queue behind Safe transactions that are proposed but not yet executed.
+
+Addresses are written to `deployments/<chain>.json` on broadcast.
+
+**Ethereum is blocked.** `EthereumAddresses.SUPPORT_SAFE` is still `address(0)` because no TELx
+support multisig exists there yet, and the script reverts rather than granting `SUPPORT_ROLE` to
+nobody and handing the subscriber to `address(0)`, which would freeze its registry pointer
+permanently. Run `CHAIN=polygon` and `CHAIN=base` until that address is supplied.
+
+## Step 2 - create a pool
+
+Preview. Broadcasts nothing, and prints the poolId, the opening price and tick, and whether the pool
+already exists:
+
+```shell
+forge script script/telx/CreateV4Pool.s.sol:CreateV4Pool \
+  --rpc-url $POLYGON_RPC_URL \
+  --sig "plan(string,uint256,uint256)" \
+  "POLYGON_EUSD_TEL" 100000 20000000
+```
+
+Then create:
+
+```shell
+forge script script/telx/CreateV4Pool.s.sol:CreateV4Pool \
+  --rpc-url $POLYGON_RPC_URL --broadcast \
+  --sig "run(string,uint256,uint256)" \
+  "POLYGON_EUSD_TEL" 100000 20000000
+```
+
+Rerunning is a no-op: the script uses `PoolInitializer_v4.initializePool`, which returns rather than
+reverting when the pool exists, and reports the live price instead of the one just computed.
+
+## Step 3 - seed liquidity
+
+`widthBps` is the half-width of the band in basis points. `1000` is a +/-10% band; `0` is full range.
+The proposal calls for concentrated liquidity as the primary shape and a full-range position as a
+backstop, which is two runs of this script.
+
+Preview:
+
+```shell
+forge script script/telx/SeedV4Liquidity.s.sol:SeedV4Liquidity \
+  --rpc-url $POLYGON_RPC_URL \
+  --sig "plan(string,uint256,uint256,uint16)" \
+  "POLYGON_EUSD_TEL" 100000 20000000 1000
+```
+
+The preview works before the pool exists: it projects the price `CreateV4Pool` would set from the
+same amounts, so the whole sequence can be rehearsed without writing to any chain.
+
+Then seed:
+
+```shell
+forge script script/telx/SeedV4Liquidity.s.sol:SeedV4Liquidity \
+  --rpc-url $POLYGON_RPC_URL --broadcast \
+  --sig "run(string,uint256,uint256,uint16)" \
+  "POLYGON_EUSD_TEL" 100000 20000000 1000
+```
+
+ERC-20 legs are approved for the exact authorized amount with a 30 minute expiry, through Permit2.
+Native ETH legs send the authorized ceiling as call value and sweep the remainder back in the same
+transaction, because minting rounds the owed amount up and sending the computed amount leaves the
+settle a wei short.
+
+## Step 4 - verify
+
+Read the pool back and confirm it matches what the plan said:
+
+```shell
+cast call $STATE_VIEW "getSlot0(bytes32)(uint160,int24,uint24,uint24)" $POOL_ID --rpc-url $RPC_URL
+cast call $POSITION_MANAGER "getPositionLiquidity(uint256)(uint128)" $TOKEN_ID --rpc-url $RPC_URL
+```
+
+Then record the pool id in `contracts/telx/core/README.md`, which is where this repo keeps
+deployment records (`broadcast/` is gitignored).
+
+LPs subscribe their positions through Uniswap's native subscriber flow, pointing at the deployed
+`TELxSubscriber`. No TELx-specific step is required beyond that.
+
+## Testing
+
+```shell
+# pure math, no RPC
+forge test --match-path "test/script/V4PoolMath.t.sol"
+
+# address constants against the live chains
+forge test --match-path "test/script/ChainAddresses.fork.t.sol"
+
+# full lifecycle against live Uniswap v4: create, seed, subscribe
+forge test --match-path "test/script/TELxPoolLifecycle.fork.t.sol"
+```
+
+The lifecycle tests grant TEL v3 balances with `deal`, since real supply does not exist yet.

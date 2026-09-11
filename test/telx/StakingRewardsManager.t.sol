@@ -10,7 +10,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {PolygonConstants} from "../util/PolygonConstants.sol";
 
 /// @title StakingRewardsManagerTest
-/// @notice Polygon-fork tests for the upgradeable StakingRewardsManager — coordinates the
+/// @notice Polygon-fork tests for the upgradeable StakingRewardsManager - coordinates the
 ///         StakingRewardsFactory's per-pool deployments behind a single owner. Tests the BUILDER
 ///         and SUPPORT role gates, factory address swap, and the `addStakingRewards` registry.
 contract StakingRewardsManagerTest is Test {
