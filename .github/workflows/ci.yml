@@ -31,12 +31,13 @@ jobs:
         # public repo.
         run: |
           if [ -z "${POLYGON_RPC_URL}" ]; then
-            echo "::notice::RPC secrets not configured. Skipping fork-dependent tests (everything matching contract name 'Fork' or 'Polygon'). Add POLYGON_RPC_URL, BASE_RPC_URL, SEPOLIA_RPC_URL repo secrets to run the full suite."
+            echo "::notice::RPC secrets not configured. Skipping fork-dependent tests (everything matching contract name 'Fork' or 'Polygon'). Add ETHEREUM_RPC_URL, POLYGON_RPC_URL, BASE_RPC_URL, SEPOLIA_RPC_URL repo secrets to run the full suite."
             forge test --no-match-contract "(Fork|Polygon)" -vvv
           else
             forge test -vvv
           fi
         env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
           POLYGON_RPC_URL: ${{ secrets.POLYGON_RPC_URL }}
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
@@ -45,6 +46,7 @@ jobs:
         if: ${{ env.POLYGON_RPC_URL != '' }}
         run: forge test --gas-report
         env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
           POLYGON_RPC_URL: ${{ secrets.POLYGON_RPC_URL }}
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}

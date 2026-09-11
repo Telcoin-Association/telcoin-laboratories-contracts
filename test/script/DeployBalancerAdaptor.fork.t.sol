@@ -28,7 +28,7 @@ contract DeployBalancerAdaptorForkTest is Test {
     // ever change, update BOTH. Consider this the single-source-of-truth
     // reference; the table below is the mirror.
     // ---------------------------------------------------------------------
-    address internal constant TELCOIN = PolygonConstants.TEL;
+    address internal constant TELCOIN = PolygonConstants.TEL_V2;
     address internal constant BALANCER_VAULT = PolygonConstants.BALANCER_VAULT;
     address internal constant PENDING_OWNER = 0xc1612C97537c2CC62a11FC4516367AB6F62d4B23;
 

@@ -28,7 +28,7 @@ contract CouncilMemberForkTest is Test {
     // ---------
 
     // Local alias for shared mainnet address (see test/util/PolygonConstants.sol).
-    address internal constant TEL_ADDRESS = PolygonConstants.TEL;
+    address internal constant TEL_ADDRESS = PolygonConstants.TEL_V2;
 
     bytes32 internal constant GOVERNANCE_COUNCIL_ROLE =
         keccak256("GOVERNANCE_COUNCIL_ROLE");

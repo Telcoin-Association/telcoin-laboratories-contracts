@@ -15,7 +15,7 @@ contract StakingRewardsTest is Test {
     StakingRewards public stakingRewards;
 
     // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
-    address public constant TEL = PolygonConstants.TEL;
+    address public constant TEL = PolygonConstants.TEL_V2;
     address public constant USDC = PolygonConstants.USDC;
 
     IERC20 public rewardsToken;

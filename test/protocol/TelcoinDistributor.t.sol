@@ -24,7 +24,7 @@ contract TelcoinDistributorForkTest is Test {
     uint256 constant FORK_BLOCK = 85_621_947;
 
     // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
-    IERC20 constant TELCOIN = IERC20(PolygonConstants.TEL);
+    IERC20 constant TELCOIN = IERC20(PolygonConstants.TEL_V2);
     ISablierV2Lockup constant SABLIER_LOCKUP = ISablierV2Lockup(PolygonConstants.SABLIER_LOCKUP);
     IERC721 constant TAO_COUNCIL_NFT = IERC721(PolygonConstants.TAO_COUNCIL_NFT);
 

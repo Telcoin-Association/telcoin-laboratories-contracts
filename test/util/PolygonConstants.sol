@@ -10,7 +10,18 @@ library PolygonConstants {
     // ----------
     // Tokens
     // ----------
-    address internal constant TEL = 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32;
+    // TEL comes in two incompatible flavours and the difference is a factor of 1e16, so both are
+    // spelled out rather than left as a bare `TEL`. The Balancer pools, the Sablier council
+    // streams and the legacy TELx v4 pools are all denominated in TEL_V2; every new TELx pool is
+    // denominated in TEL_V3.
+    /// @notice Legacy PoS-bridged TEL. 2 decimals.
+    address internal constant TEL_V2 = 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32;
+    /// @notice TEL v3. 18 decimals. Same address on Ethereum, Polygon and Base.
+    address internal constant TEL_V3 = 0x7E13B43065380aCdeC1c2d138c579cbBbafA0731;
+    /// @notice Telcoin eUSD. 6 decimals. Same address on Ethereum, Polygon and Base.
+    address internal constant EUSD = 0x14913815bCFDE78BAeAd2111F463D038Ac9C2949;
+    /// @notice Telcoin eMXN. 6 decimals. Polygon only.
+    address internal constant EMXN = 0x68727e573D21a49c767c3c86A92D9F24bd933c99;
     address internal constant USDC = 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359;
     address internal constant WETH = 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619;
 

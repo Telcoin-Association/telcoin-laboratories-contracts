@@ -16,8 +16,16 @@ gas_reports = ['*']
 ignored_warnings_from = ['lib']
 
 [rpc_endpoints]
+ethereum = "${ETHEREUM_RPC_URL}"
 polygon = "${POLYGON_RPC_URL}"
 base = "${BASE_RPC_URL}"
+
+# Etherscan V2 serves every chain from one key, so the same secret is reused with an explicit
+# chain id rather than a per-explorer key.
+[etherscan]
+ethereum = { key = "${ETHERSCAN_API_KEY}", chain = 1 }
+polygon = { key = "${ETHERSCAN_API_KEY}", chain = 137 }
+base = { key = "${ETHERSCAN_API_KEY}", chain = 8453 }
 
 [fuzz]
 runs = 256
@@ -38,6 +46,17 @@ invariant = { runs = 1, depth = 1 }
 [profile.ci]
 fuzz = { runs = 64 }
 invariant = { runs = 64, depth = 10 }
+
+# Deploy: the only profile that enables FFI and filesystem writes.
+#
+# safe-utils shells out (Safe Transaction Service API, hardware-wallet signing) and the deploy
+# scripts persist addresses to `deployments/*.json`, so both permissions are genuinely required -
+# but only while deploying. They stay off in `default` and `ci` so that `forge test`, which CI runs
+# on every PR across eight vendored submodules, cannot execute host commands or write to the repo.
+# Usage: FOUNDRY_PROFILE=deploy forge script ... --ffi
+[profile.deploy]
+ffi = true
+fs_permissions = [{ access = "read-write", path = "./deployments/" }]
 
 [fmt]
 line_length = 120

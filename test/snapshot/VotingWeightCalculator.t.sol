@@ -23,7 +23,7 @@ contract VotingWeightCalculatorTest is Test {
 
     // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
     address constant VOTING_WEIGHT_CALCULATOR = PolygonConstants.VOTING_WEIGHT_CALCULATOR;
-    address constant TEL = PolygonConstants.TEL;
+    address constant TEL = PolygonConstants.TEL_V2;
     address constant BALANCER_VAULT = PolygonConstants.BALANCER_VAULT;
     address constant WETH_POOL_ADAPTOR = PolygonConstants.WETH_POOL_ADAPTOR;
     address constant BALANCER_POOL = PolygonConstants.BALANCER_POOL;

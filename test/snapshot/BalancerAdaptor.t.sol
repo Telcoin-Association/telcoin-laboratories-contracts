@@ -18,7 +18,7 @@ contract BalancerAdaptorTest is Test {
     uint256 constant FORK_BLOCK = 68_000_000;
 
     // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
-    address constant TEL = PolygonConstants.TEL;
+    address constant TEL = PolygonConstants.TEL_V2;
     address constant BALANCER_VAULT = PolygonConstants.BALANCER_VAULT;
     address constant BALANCER_POOL = PolygonConstants.BALANCER_POOL;
     bytes32 constant POOL_ID = PolygonConstants.BALANCER_POOL_ID;

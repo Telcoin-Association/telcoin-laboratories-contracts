@@ -131,8 +131,9 @@ Multi-line descriptive blocks use the dash-bar heading + `//` body lines:
 
 ### Foundry config
 
-- `solc_version` MUST be pinned in `foundry.toml`. Auto-detect causes silent skew across contributors and CI.
-- `[profile.default]` runs full fuzz coverage (256 runs). `[profile.fast]` for active development. `[profile.ci]` for cost-limited CI environments.
+- `solc_version` MUST NOT be pinned in `foundry.toml`, and `auto_detect_solc` MUST stay `true`. This reverses the original rule, which called for a pin. A pin is unachievable in this dependency tree: `lib/permit2` pins `pragma solidity 0.8.17` exactly, `lib/v4-core/src/PoolManager.sol` and `lib/v4-periphery/src/PositionManager.sol` pin `0.8.26` exactly, and `forge-deploy-utils` requires `^0.8.30`. No single version satisfies all three, so a pin would simply fail to build. Our own sources stay on `^0.8.24` and Foundry compiles each unit at the lowest version that satisfies it. The skew the original rule guarded against is instead pinned where it actually lives: every submodule is fixed by commit in `.gitmodules` and `foundry.lock`.
+- `[profile.default]` runs full fuzz coverage (256 runs). `[profile.fast]` for active development. `[profile.ci]` for cost-limited CI environments. `[profile.deploy]` is the only profile with `ffi` and filesystem writes enabled.
+- `ffi` MUST stay disabled in `default`, `fast` and `ci`. safe-utils needs it (Safe Transaction Service calls, hardware-wallet signing) but only while deploying, and CI runs `forge test` on every PR across eight vendored submodules. Enabling FFI globally would let any test in that tree execute host commands in CI. Deploys run `FOUNDRY_PROFILE=deploy`.
 - `ignored_warnings_from = ['lib']` to silence external library warnings.
 
 ### CI workflow

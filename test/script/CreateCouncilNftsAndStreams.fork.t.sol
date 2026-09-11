@@ -16,7 +16,7 @@ import {PolygonConstants} from "../util/PolygonConstants.sol";
 ///         MEXC fallback address ships with balance on-chain.
 contract CreateCouncilNftsAndStreamsForkTest is Test {
     // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
-    address internal constant TEL_TOKEN = PolygonConstants.TEL;
+    address internal constant TEL_TOKEN = PolygonConstants.TEL_V2;
     address internal constant SABLIER_LOCKUP = PolygonConstants.SABLIER_LOCKUP;
 
     CreateCouncilNftsAndStreams internal script;
