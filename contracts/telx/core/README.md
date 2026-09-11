@@ -25,20 +25,52 @@ TELx pools are plain Uniswap v4 pools. There is no custom hook, no `beforeInitia
 
 #### Deployment Addresses
 
-The post-migration (hook removal) contracts are not yet deployed. The addresses below are placeholders to be filled in after the migration deploy.
+The post-migration (hook removal) contracts are not yet deployed. They are deployed by
+`script/telx/DeployTELxRegistry.s.sol` through the governance Safe, using CreateX CREATE3 in
+cross-chain mode, so both land at the same address on every chain regardless of the per-chain
+constructor arguments. See `script/telx/README.md` for the runbook.
 
-**Base Mainnet**
-PositionRegistry: to be redeployed (post-migration)
-TELxSubscriber: to be redeployed (post-migration)
-Supported Pools:
-"BASE_ETH_TEL": 0x727b2741ac2b2df8bc9185e1de972661519fc07b156057eeed9b07c50e08829b
+**Predicted addresses (Ethereum, Polygon and Base)**
 
-**Polygon Mainnet**
-PositionRegistry: to be redeployed (post-migration)
-TELxSubscriber: to be redeployed (post-migration)
-Supported Pools:
-"POLYGON_WETH_TEL": 0x25412ca33f9a2069f0520708da3f70a7843374dd46dc1c7e62f6d5002f5f9fa7
-"POLYGON_USDC_EMXN": 0x37dafec81119c7987538ac000b8a8a16a7f4daeecf91626efc9956ccd5146246
+| Contract | Address |
+| --- | --- |
+| PositionRegistry | `0x00637FBbae593E920B1d08300EC1f05d6D61Aa61` |
+| TELxSubscriber | `0xD9e2c4A560ba8FD0f28A5Bf25B3940576cc53fEC` |
+
+Derived from the deployer Safe `0x6012dBcb4350Ab297FeB7f96D4d86258062aeB03` and the salts in
+`script/shared/Salts.sol`; verified against the live CreateX factory on all three chains and
+confirmed unoccupied as of 2026-09-11. `DeployTELxRegistrySaltTest` pins them. Replace this heading
+with the confirmed addresses once the Safe batches execute.
+
+**Legacy TEL v2 deployments (still live, unaffected by this migration)**
+
+| Chain | PositionRegistry | TELxSubscriber | TELxIncentiveHook |
+| --- | --- | --- | --- |
+| Polygon | `0x2c33fC9c09CfAC5431e754b8fe708B1dA3F5B954` | `0x3Bf9bAdC67573e7b4756547A2dC0C77368A2062b` | `0xD77cC9230Ded5b6591730032975453744532a500` |
+| Base | `0x3994e3ae3Cf62bD2a3a83dcE73636E954852BB04` | `0x735ee950D979C70C14FAa739f80fC96d9893f7ED` | `0x23aB2e6D4Ab0c5f872567098671F1ffb46Fd2500` |
+
+These index TEL v2 pools and keep working; they are simply not where TEL v3 liquidity is tracked.
+
+| Legacy pool | Pool id |
+| --- | --- |
+| Base ETH/TEL v2 | `0x727b2741ac2b2df8bc9185e1de972661519fc07b156057eeed9b07c50e08829b` |
+| Polygon WETH/TEL v2 | `0x25412ca33f9a2069f0520708da3f70a7843374dd46dc1c7e62f6d5002f5f9fa7` |
+| Polygon USDC/eMXN | `0x37dafec81119c7987538ac000b8a8a16a7f4daeecf91626efc9956ccd5146246` |
+
+**TEL v3 pool ids**
+
+Recorded here as each pool is created. The seven-pool set and the script that creates them are in
+`script/telx/README.md`.
+
+| Pool | Pool id |
+| --- | --- |
+| `ETHEREUM_ETH_TEL` | not yet created |
+| `ETHEREUM_EUSD_TEL` | not yet created |
+| `POLYGON_WETH_TEL` | not yet created |
+| `POLYGON_EUSD_TEL` | not yet created |
+| `POLYGON_EUSD_EMXN` | not yet created |
+| `BASE_ETH_TEL` | not yet created |
+| `BASE_EUSD_TEL` | not yet created |
 
 #### Verification
 

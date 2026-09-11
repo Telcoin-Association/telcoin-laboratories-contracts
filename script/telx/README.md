@@ -71,7 +71,19 @@ One Safe MultiSend per chain: deploy both contracts via CreateX CREATE3, then gr
 subscriber unwired.
 
 Because CreateX runs in cross-chain mode, both contracts land at the **same address on all three
-chains** despite each chain passing a different PositionManager.
+chains** despite each chain passing a different PositionManager. With the governance Safe
+`0x6012dBcb4350Ab297FeB7f96D4d86258062aeB03` as deployer and the salts in
+`script/shared/Salts.sol`, that address is:
+
+| Contract | Address on Ethereum, Polygon and Base |
+| --- | --- |
+| `PositionRegistry` | `0x00637FBbae593E920B1d08300EC1f05d6D61Aa61` |
+| `TELxSubscriber` | `0xD9e2c4A560ba8FD0f28A5Bf25B3940576cc53fEC` |
+
+Verified against the live CreateX factory on each chain, and confirmed unoccupied, as of
+2026-09-11. These are derived from the deployer Safe and the salt only, so changing either changes
+both addresses. `DeployTELxRegistrySaltTest` pins them, and `predictedAddresses()` on the script
+recomputes them at run time.
 
 Simulate first. This executes the batch against a local fork and proposes nothing:
 

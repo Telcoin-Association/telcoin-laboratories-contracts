@@ -29,6 +29,12 @@ contract DeployTELxRegistrySaltTest is Test {
     address internal constant DEPLOYER_SAFE = CrossChainAddresses.GOVERNANCE_SAFE;
     address internal constant CREATEX = 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed;
 
+    /// @notice keccak256 of the minimal proxy CreateX deploys for every CREATE3 call.
+    /// @dev Fixed by the factory, not by us; taken from the same constant the tel-v3 repo verifies
+    ///      its vanity salts against.
+    bytes32 internal constant CREATE3_PROXY_INITCODE_HASH =
+        0x21c35dbe1b344a2488cf3321d6ce542f8e9f305544ff09e4993a62319a497c1f;
+
     /// @notice A guarded salt must carry the Safe in its first 20 bytes, because CreateX checks
     ///         that against msg.sender and rejects a deployment from anyone else. This is what
     ///         stops a third party front-running our address.
@@ -92,6 +98,46 @@ contract DeployTELxRegistrySaltTest is Test {
         // Recomputing from the same inputs is stable, and nothing in the derivation takes initcode.
         assertEq(internalSalt, SaltMath.getCreateXGuardedSalt(guarded, DEPLOYER_SAFE), "derivation not deterministic");
         assertTrue(CREATEX != address(0), "CreateX address");
+    }
+
+    /// @notice Pins the addresses the deploy will actually land on, which are published in
+    ///         `script/telx/README.md` and will be handed to the Snapshot strategy and every other
+    ///         downstream integration.
+    /// @dev    Computed independently of the script, by replicating CreateX's own derivation:
+    ///         guard the raw salt with the Safe, hash it the way CreateX's `_guard` does, then
+    ///         derive the CREATE3 proxy address. Cross-checked against the live CreateX factory on
+    ///         Ethereum, Polygon and Base, which all returned these values.
+    ///
+    ///         The point is not that the arithmetic works, it is that the published addresses stay
+    ///         true. Changing a salt string or the deployer Safe silently relocates both contracts,
+    ///         and the first sign of that would otherwise be a deploy landing somewhere the docs do
+    ///         not mention.
+    function test_predictedAddresses_matchThePublishedOnes() public pure {
+        assertEq(
+            _predict(Salts.TELX_POSITION_REGISTRY),
+            0x00637FBbae593E920B1d08300EC1f05d6D61Aa61,
+            "PositionRegistry address changed; update script/telx/README.md and re-verify on chain"
+        );
+        assertEq(
+            _predict(Salts.TELX_SUBSCRIBER),
+            0xD9e2c4A560ba8FD0f28A5Bf25B3940576cc53fEC,
+            "TELxSubscriber address changed; update script/telx/README.md and re-verify on chain"
+        );
+    }
+
+    /// @dev Replicates CreateX's CREATE3 address derivation. The factory deploys a minimal proxy at
+    ///      CREATE2(internalSalt), and the contract itself lands at that proxy's first CREATE, i.e.
+    ///      RLP(proxy, nonce 1).
+    function _predict(bytes32 rawSalt) internal pure returns (address) {
+        bytes32 internalSalt =
+            SaltMath.getCreateXGuardedSalt(SaltMath.guardSalt(DEPLOYER_SAFE, rawSalt), DEPLOYER_SAFE);
+
+        address proxy = address(
+            uint160(
+                uint256(keccak256(abi.encodePacked(bytes1(0xff), CREATEX, internalSalt, CREATE3_PROXY_INITCODE_HASH)))
+            )
+        );
+        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xd6), bytes1(0x94), proxy, bytes1(0x01))))));
     }
 
     /// @notice All three chains feed the same governance Safe into the deploy, which is the

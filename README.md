@@ -43,10 +43,14 @@ Fork tests require RPC endpoints. Three naming patterns are in use:
 Copy `.env.example` → `.env` (or create one) with:
 
 ```
+ETHEREUM_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/<key>
 POLYGON_RPC_URL=https://polygon-mainnet.g.alchemy.com/v2/<key>
 BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/<key>
 SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/<key>
 ```
+
+Suites that need a chain nobody else uses skip themselves when the URL is unset rather than
+failing, so a missing `ETHEREUM_RPC_URL` costs coverage but not a red build.
 
 Foundry auto-loads `.env`. To skip **every** fork test - all our fork test contract names end in either `Fork` or `Polygon`, so a single regex covers them all:
 
@@ -104,6 +108,7 @@ A middle-ground `ci` profile (64 fuzz runs, depth 10) is also defined for CI env
 | TELx          | `forge test --match-path "test/telx/*"`                    |
 | Zodiac        | `forge test --match-path "test/zodiac/*"`                  |
 | Deploy scripts | `forge test --match-path "test/script/*"`                 |
+| TELx pools     | `forge test --match-path "test/script/TELxPoolLifecycle.fork.t.sol"` |
 | Fork-only     | `forge test --match-contract "(Fork\|Polygon)"`            |
 | Non-fork      | `forge test --no-match-contract "(Fork\|Polygon)"`         |
 | Benchmarks    | `forge test --match-test "bench_.*" -vvv` (opt-in, see Benchmarks section) |
@@ -118,6 +123,9 @@ contracts/        Solidity sources, grouped by product area
   telx/           TELx DeFi primitives (staking rewards, Uniswap v4 position registry)
   zodiac/         SafeGuard for Zodiac/Safe-based governance
 script/           Foundry deployment + operational scripts (*.s.sol)
+  shared/         Chain address libraries, the TELx pool catalog, v4 price/tick math
+  telx/           TELx v4 pool create/seed scripts + the Safe-based registry deploy
+                  (see script/telx/README.md for the runbook)
 test/             Foundry tests. Files ending in .polygon.t.sol / .fork.t.sol
                   and contracts matching *Fork* hit mainnet forks via RPC env
                   vars. `test/script/` contains fork tests for deploy scripts.
@@ -142,6 +150,7 @@ All external Solidity dependencies are git submodules. Versions for OZ, Uniswap 
 | `forge-std/`                           | `lib/forge-std`                        | v1.10.0          |
 | `permit2/`                             | `lib/permit2`                          | commit `cc56ad0f` (matches v4-periphery's internal pin - keep in sync when bumping v4-periphery) |
 | `solmate/`                             | `lib/v4-core/lib/solmate/`             | explicit override - points at v4-core's initialized copy rather than permit2's uninit'd nested one |
+| `forge-deploy-utils/`, `@safe-utils/`  | `lib/forge-deploy-utils`               | commit `c5427a6a` (matches the tel-v3 pin). Safe + CreateX deployment tooling; requires `^0.8.30`, which is why `auto_detect_solc` stays on |
 
 `lib/evm-utils` exists but no contract in this repo imports from it; it's a leftover from an earlier Sablier helper and can be removed in a follow-up.
 
