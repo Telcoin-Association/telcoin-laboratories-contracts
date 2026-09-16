@@ -14,6 +14,13 @@ gas_reports = ['*']
 # OpenZeppelin, Sablier, prb-math, etc.). We cannot fix upstream, so silencing
 # keeps our build output focused on warnings in our own code.
 ignored_warnings_from = ['lib']
+# Read-only. The pool scripts take their per-pool parameters from a checked-in JSON file, and the
+# verify script reads the recorded deployment addresses. Neither needs to write, and no profile
+# other than `deploy` may.
+fs_permissions = [
+    { access = "read", path = "./script/telx/pools.json" },
+    { access = "read", path = "./deployments/" },
+]
 
 [rpc_endpoints]
 ethereum = "${ETHEREUM_RPC_URL}"
@@ -56,7 +63,10 @@ invariant = { runs = 64, depth = 10 }
 # Usage: FOUNDRY_PROFILE=deploy forge script ... --ffi
 [profile.deploy]
 ffi = true
-fs_permissions = [{ access = "read-write", path = "./deployments/" }]
+fs_permissions = [
+    { access = "read", path = "./script/telx/pools.json" },
+    { access = "read-write", path = "./deployments/" },
+]
 
 [fmt]
 line_length = 120

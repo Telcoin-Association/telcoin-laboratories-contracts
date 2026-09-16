@@ -13,7 +13,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {TELxPools} from "../shared/TELxPools.sol";
 import {V4PoolMath} from "../shared/V4PoolMath.sol";
-import {TELxPoolScriptBase} from "./TELxPoolScriptBase.sol";
+import {TELxPoolScriptBase} from "./base/TELxPoolScriptBase.sol";
 
 /**
  * @title SeedV4Liquidity
@@ -24,19 +24,22 @@ import {TELxPoolScriptBase} from "./TELxPoolScriptBase.sol";
  *         quotes if price leaves the tight band. Both are the same call with a different
  *         `widthBps`, so seeding a pool with one of each is two runs of this script.
  *
- *         Usage - preview first, it broadcasts nothing:
+ *         Parameters come from `script/telx/pools.json`. Preview every pool on the connected
+ *         chain, broadcasting nothing:
  *
  *           forge script script/telx/SeedV4Liquidity.s.sol:SeedV4Liquidity \
- *             --rpc-url $POLYGON_RPC_URL \
- *             --sig "plan(string,uint256,uint256,uint16)" \
- *             "POLYGON_EUSD_TEL" 100000 20000000 1000
+ *             --rpc-url $POLYGON_RPC_URL --sig "planAll()"
  *
- *         Then seed:
+ *         Then seed one:
  *
  *           forge script script/telx/SeedV4Liquidity.s.sol:SeedV4Liquidity \
  *             --rpc-url $POLYGON_RPC_URL --broadcast \
- *             --sig "run(string,uint256,uint256,uint16)" \
- *             "POLYGON_EUSD_TEL" 100000 20000000 1000
+ *             --sig "run(string)" "POLYGON_EUSD_TEL"
+ *
+ *         The explicit overloads, `plan(string,uint256,uint256,uint16)` and
+ *         `run(string,uint256,uint256,uint16)`, bypass the file for one-off exploration. A
+ *         full-range backstop position on top of the configured band is the explicit form with
+ *         `widthBps` = 0.
  *
  *         `widthBps` is the half-width of the band in basis points: 1000 is +/-10%, and 0 means
  *         full range. Amounts are whole tokens.
@@ -74,9 +77,31 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
     // Preview
     // -----------
 
+    /// @notice Previews every catalog pool on the connected chain from `pools.json`. Pools whose
+    ///         amounts are still unset are reported rather than skipped silently.
+    function planAll() external view {
+        string[] memory names = _poolsOnThisChain();
+        for (uint256 i; i < names.length; ++i) {
+            PoolParams memory params = _poolParams(names[i]);
+            if (params.amount0Human == 0 || params.amount1Human == 0) {
+                console2.log("=== %s: amounts not set in pools.json ===", names[i]);
+                continue;
+            }
+            plan(names[i], params.amount0Human, params.amount1Human, params.widthBps);
+            console2.log("");
+        }
+    }
+
+    /// @notice Previews one pool using the parameters in `pools.json`.
+    function plan(string memory poolName) external view {
+        PoolParams memory params = _poolParams(poolName);
+        _requireAmountsSet(poolName, params);
+        plan(poolName, params.amount0Human, params.amount1Human, params.widthBps);
+    }
+
     /**
-     * @notice Dry run. Resolves and prints the ticks, liquidity and the amounts that would actually
-     *         move, and broadcasts nothing.
+     * @notice Dry run with explicit parameters. Resolves and prints the ticks, liquidity and the
+     *         amounts that would actually move, and broadcasts nothing.
      */
     function plan(string memory poolName, uint256 amount0Human, uint256 amount1Human, uint16 widthBps) public view {
         ChainConfig memory config = _chainConfig();
@@ -110,7 +135,14 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
     // Run
     // -----------
 
-    /// @notice Production entrypoint. Resolves the signer from env and delegates.
+    /// @notice Production entrypoint using the parameters in `pools.json`.
+    function run(string memory poolName) external returns (uint256 tokenId) {
+        PoolParams memory params = _poolParams(poolName);
+        _requireAmountsSet(poolName, params);
+        return runWithSigner(poolName, params.amount0Human, params.amount1Human, params.widthBps, _resolveSigner());
+    }
+
+    /// @notice Production entrypoint with explicit parameters. Resolves the signer from env and delegates.
     function run(string memory poolName, uint256 amount0Human, uint256 amount1Human, uint16 widthBps)
         external
         returns (uint256 tokenId)

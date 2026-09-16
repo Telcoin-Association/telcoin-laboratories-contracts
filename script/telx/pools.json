@@ -1,0 +1,12 @@
+{
+  "_note": "Seed parameters for the standardized TELx pools. Amounts are whole tokens (100000 eUSD, not 100000000000); the scripts scale by each token's decimals. The two amounts define the pool's opening price as amount1/amount0, so they must be reviewed as a pair. 0 means not yet decided: run() refuses it and planAll() reports it. widthBps is the half-width of the seeded band in basis points, 0 for full range.",
+  "pools": {
+    "ETHEREUM_ETH_TEL":  { "amount0": 0, "amount1": 0, "widthBps": 1000 },
+    "ETHEREUM_EUSD_TEL": { "amount0": 0, "amount1": 0, "widthBps": 1000 },
+    "POLYGON_WETH_TEL":  { "amount0": 0, "amount1": 0, "widthBps": 1000 },
+    "POLYGON_EUSD_TEL":  { "amount0": 0, "amount1": 0, "widthBps": 1000 },
+    "POLYGON_EUSD_EMXN": { "amount0": 0, "amount1": 0, "widthBps": 100 },
+    "BASE_ETH_TEL":      { "amount0": 0, "amount1": 0, "widthBps": 1000 },
+    "BASE_EUSD_TEL":     { "amount0": 0, "amount1": 0, "widthBps": 1000 }
+  }
+}

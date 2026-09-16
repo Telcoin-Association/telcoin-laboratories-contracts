@@ -148,6 +148,16 @@ Multi-line descriptive blocks use the dash-bar heading + `//` body lines:
   - Fork tests call `runWithSigner` directly with a controlled address.
 - Sidesteps Foundry's `vm.startBroadcast()` vs. `vm.prank` incompatibility, which would otherwise make scripts untestable.
 
+### Safe-utils deploy scripts
+
+Scripts that propose to a Safe through `forge-deploy-utils` / `safe-utils` follow a different shape, because they never call `vm.startBroadcast`: they either simulate a MultiSend against a fork or propose it to the Safe Transaction Service, and the Safe executes it later, out of band.
+
+- They do NOT expose `runWithSigner`. Simulation mode (`forge script ... --ffi` without `--broadcast`) is the equivalent rehearsal and MUST be run before any proposal.
+- Every deploy script `DeployX.s.sol` MUST be paired with a `VerifyX.s.sol` that reads the recorded addresses from `deployments/<chain>.json` and asserts the intended on-chain wiring, reverting on the first mismatch. An EOA script can `require` on state after its own broadcast; a Safe script cannot, so the checks that would have lived at its tail live in the verify script instead. The flow is deploy, execute in the Safe UI, verify.
+- Abstract bases live in `script/<area>/base/`; the concrete script only wires configuration. As more scripts adopt the pattern, the base is where the shared batching and chain-selection logic accrues.
+- `deployments/<chain>.json` files are committed, initially as `{}`. `vm.writeJson` cannot create a missing file or directory, and the address record is written after the batch is proposed, so a missing file would fail the script after the proposal had already gone out.
+- Deploying one chain at a time is the normal mode. A chain with no RPC URL configured MUST be skipped with a log line, not treated as fatal.
+
 ### Coverage expectations
 
 - 100% lines / statements / branches / functions on production contracts (`forge coverage --no-match-coverage "(test|script|lib)"`).

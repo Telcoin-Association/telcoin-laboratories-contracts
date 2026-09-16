@@ -8,7 +8,7 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {TELxPools} from "../shared/TELxPools.sol";
 import {V4PoolMath} from "../shared/V4PoolMath.sol";
-import {TELxPoolScriptBase} from "./TELxPoolScriptBase.sol";
+import {TELxPoolScriptBase} from "./base/TELxPoolScriptBase.sol";
 
 /**
  * @title CreateV4Pool
@@ -24,19 +24,20 @@ import {TELxPoolScriptBase} from "./TELxPoolScriptBase.sol";
  *         steps opens the pool away from where the liquidity lands and hands the difference to the
  *         first arbitrageur.
  *
- *         Usage - preview first, it broadcasts nothing:
+ *         Amounts come from `script/telx/pools.json`, which is filled in once for all seven pools
+ *         and reviewed as a set. Preview every pool on the connected chain, broadcasting nothing:
  *
  *           forge script script/telx/CreateV4Pool.s.sol:CreateV4Pool \
- *             --rpc-url $POLYGON_RPC_URL \
- *             --sig "plan(string,uint256,uint256)" \
- *             "POLYGON_EUSD_TEL" 100000 20000000
+ *             --rpc-url $POLYGON_RPC_URL --sig "planAll()"
  *
- *         Then create:
+ *         Then create one:
  *
  *           forge script script/telx/CreateV4Pool.s.sol:CreateV4Pool \
  *             --rpc-url $POLYGON_RPC_URL --broadcast \
- *             --sig "run(string,uint256,uint256)" \
- *             "POLYGON_EUSD_TEL" 100000 20000000
+ *             --sig "run(string)" "POLYGON_EUSD_TEL"
+ *
+ *         The explicit-amount overloads, `plan(string,uint256,uint256)` and
+ *         `run(string,uint256,uint256)`, bypass the file for one-off exploration.
  *
  *         Amounts are whole tokens, not raw units: `100000` eUSD and `20000000` TEL. Scaling by
  *         each side's decimals is the script's job, because that is the step the TEL v2 to v3
@@ -46,9 +47,36 @@ contract CreateV4Pool is TELxPoolScriptBase {
     /// @notice Returned by `initializePool` when the pool already exists, instead of reverting.
     int24 internal constant ALREADY_INITIALIZED = type(int24).max;
 
+    // -----------
+    // Preview
+    // -----------
+
+    /// @notice Previews every catalog pool on the connected chain from `pools.json`. Pools whose
+    ///         amounts are still unset are reported rather than skipped silently, so the output is
+    ///         also a checklist of what remains to be decided.
+    function planAll() external view {
+        string[] memory names = _poolsOnThisChain();
+        for (uint256 i; i < names.length; ++i) {
+            PoolParams memory params = _poolParams(names[i]);
+            if (params.amount0Human == 0 || params.amount1Human == 0) {
+                console2.log("=== %s: amounts not set in pools.json ===", names[i]);
+                continue;
+            }
+            plan(names[i], params.amount0Human, params.amount1Human);
+            console2.log("");
+        }
+    }
+
+    /// @notice Previews one pool using the amounts in `pools.json`.
+    function plan(string memory poolName) external view {
+        PoolParams memory params = _poolParams(poolName);
+        _requireAmountsSet(poolName, params);
+        plan(poolName, params.amount0Human, params.amount1Human);
+    }
+
     /**
-     * @notice Dry run. Resolves and prints every number the real run would use, and broadcasts
-     *         nothing.
+     * @notice Dry run with explicit amounts. Resolves and prints every number the real run would
+     *         use, and broadcasts nothing.
      * @dev The main ergonomic affordance of this suite: the operator sees the poolId, the opening
      *      price, the tick and whether the pool already exists before spending gas or committing to
      *      a price.
@@ -81,7 +109,18 @@ contract CreateV4Pool is TELxPoolScriptBase {
         }
     }
 
-    /// @notice Production entrypoint. Resolves the signer from env and delegates.
+    // -----------
+    // Run
+    // -----------
+
+    /// @notice Production entrypoint using the amounts in `pools.json`.
+    function run(string memory poolName) external returns (PoolId poolId, uint160 sqrtPriceX96) {
+        PoolParams memory params = _poolParams(poolName);
+        _requireAmountsSet(poolName, params);
+        return runWithSigner(poolName, params.amount0Human, params.amount1Human, _resolveSigner());
+    }
+
+    /// @notice Production entrypoint with explicit amounts. Resolves the signer from env and delegates.
     function run(string memory poolName, uint256 amount0Human, uint256 amount1Human)
         external
         returns (PoolId poolId, uint160 sqrtPriceX96)

@@ -7,11 +7,11 @@ import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {EthereumAddresses} from "../shared/EthereumAddresses.sol";
-import {PolygonAddresses} from "../shared/PolygonAddresses.sol";
-import {BaseAddresses} from "../shared/BaseAddresses.sol";
-import {TELxPools} from "../shared/TELxPools.sol";
-import {V4PoolMath} from "../shared/V4PoolMath.sol";
+import {EthereumAddresses} from "../../shared/EthereumAddresses.sol";
+import {PolygonAddresses} from "../../shared/PolygonAddresses.sol";
+import {BaseAddresses} from "../../shared/BaseAddresses.sol";
+import {TELxPools} from "../../shared/TELxPools.sol";
+import {V4PoolMath} from "../../shared/V4PoolMath.sol";
 
 /// @title TELxPoolScriptBase
 /// @notice Shared chain resolution, signer resolution and preview logging for the TELx pool
@@ -29,8 +29,17 @@ abstract contract TELxPoolScriptBase is Script {
         string name;
     }
 
+    /// @notice Per-pool seed parameters, as read from `script/telx/pools.json`.
+    struct PoolParams {
+        uint256 amount0Human;
+        uint256 amount1Human;
+        uint16 widthBps;
+    }
+
     error UnsupportedChain(uint256 chainId);
     error MissingChainAddress(string what);
+    error PoolNotConfigured(string poolName);
+    error PoolAmountsNotSet(string poolName);
 
     // -----------
     // Chain resolution
@@ -75,6 +84,53 @@ abstract contract TELxPoolScriptBase is Script {
     /// @notice Resolves the pool spec and asserts it belongs to the connected chain.
     function _poolSpec(string memory poolName) internal view returns (TELxPools.PoolSpec memory) {
         return TELxPools.specForChain(poolName, block.chainid);
+    }
+
+    // -----------
+    // Pool parameters
+    // -----------
+
+    /// @dev Path of the checked-in parameter file, relative to the project root.
+    string internal constant POOLS_CONFIG = "script/telx/pools.json";
+
+    /**
+     * @notice Reads a pool's seed parameters from `script/telx/pools.json`.
+     * @dev The file is the single place the per-pool amounts live, so the seven pools can be filled
+     *      in and reviewed together and each script invocation then needs only the pool name. It
+     *      also leaves a record of what each pool was seeded with, in git, next to the code that
+     *      seeded it, rather than only in a transaction somewhere.
+     *
+     *      Amounts of zero mean "not decided yet" and are refused by `_requireAmountsSet`; the
+     *      file ships that way so that nothing can be seeded at a placeholder price by accident.
+     */
+    function _poolParams(string memory poolName) internal view returns (PoolParams memory params) {
+        string memory json = vm.readFile(string.concat(vm.projectRoot(), "/", POOLS_CONFIG));
+        string memory key = string.concat(".pools.", poolName);
+        if (!vm.keyExists(json, key)) revert PoolNotConfigured(poolName);
+
+        params.amount0Human = vm.parseJsonUint(json, string.concat(key, ".amount0"));
+        params.amount1Human = vm.parseJsonUint(json, string.concat(key, ".amount1"));
+        params.widthBps = uint16(vm.parseJsonUint(json, string.concat(key, ".widthBps")));
+    }
+
+    /// @dev Zero amounts are the file's "not decided" marker. Refuse them on any path that would
+    ///      set a price or move tokens.
+    function _requireAmountsSet(string memory poolName, PoolParams memory params) internal pure {
+        if (params.amount0Human == 0 || params.amount1Human == 0) revert PoolAmountsNotSet(poolName);
+    }
+
+    /// @notice The catalog pools that belong to the connected chain.
+    function _poolsOnThisChain() internal view returns (string[] memory names) {
+        string[] memory all = TELxPools.allNames();
+        uint256 count;
+        for (uint256 i; i < all.length; ++i) {
+            if (TELxPools.spec(all[i]).chainId == block.chainid) ++count;
+        }
+        names = new string[](count);
+        uint256 j;
+        for (uint256 i; i < all.length; ++i) {
+            if (TELxPools.spec(all[i]).chainId == block.chainid) names[j++] = all[i];
+        }
     }
 
     // -----------

@@ -3,13 +3,17 @@
 Operational guide for standing up the standardized TELx Uniswap v4 pools and the TEL v3
 PositionRegistry, per the TELx Liquidity Framework Alignment and Pool Standardization proposal.
 
-Three scripts, in the order they are run:
+Four scripts, in the order they are run:
 
 | Script | What it does | Signed by |
 | --- | --- | --- |
-| `DeployTELxRegistry.s.sol` | Deploys `PositionRegistry` + `TELxSubscriber` and wires their roles | Governance Safe |
+| `DeployTELxRegistry.s.sol` | Proposes the `PositionRegistry` + `TELxSubscriber` deploy and role wiring to the Safe | Governance Safe |
+| `VerifyTELxRegistry.s.sol` | After the Safe executes, asserts the resulting on-chain wiring | nobody (read-only) |
 | `CreateV4Pool.s.sol` | Initializes one pool at a derived price | Deployer EOA |
 | `SeedV4Liquidity.s.sol` | Mints the initial position into that pool | Deployer EOA |
+
+Abstract bases shared by these scripts live in `script/telx/base/`. Per-pool seed parameters live
+in `script/telx/pools.json`. Recorded deployment addresses land in `deployments/<chain>.json`.
 
 The registry goes through the Safe because its admin role controls subscription eligibility and its
 subscriber owner can repoint every LP subscription. Pool creation and seeding do not: a hookless v4
@@ -55,7 +59,13 @@ reason.
 
 ## Amounts and prices
 
-Amounts are passed as **whole tokens**, not raw units: `100000` eUSD, not
+Per-pool amounts and band widths are set once, for all seven pools, in `script/telx/pools.json`,
+and each script run then needs only a pool name. The file ships with every amount at `0`, which
+means "not decided yet": `run` refuses it and `planAll` reports it, so nothing can be seeded at a
+placeholder price by accident. Fill the file in, review it as a set, commit it, and the amounts each
+pool was seeded with are recorded in git next to the code that seeded them.
+
+Amounts are **whole tokens**, not raw units: `100000` eUSD, not
 `100000000000`. The scripts scale by each token's decimals. This matters more than usual right now,
 because TEL v3 is 18 decimals where TEL v2 was 2, and getting that wrong moves the price by a factor
 of 1e16 (about 368,000 ticks).
@@ -89,25 +99,64 @@ Verified against the live CreateX factory on each chain, and confirmed unoccupie
 both addresses. `DeployTELxRegistrySaltTest` pins them, and `predictedAddresses()` on the script
 recomputes them at run time.
 
-Simulate first. This executes the batch against a local fork and proposes nothing:
+Simulate first. This executes the batch against a local fork by manipulating Safe storage, so it
+needs no hardware wallet and proposes nothing:
 
 ```shell
-FOUNDRY_PROFILE=deploy forge script \
-  script/telx/DeployTELxRegistry.s.sol:DeployTELxRegistryMainnet --ffi -vvvv
+CHAIN=polygon FOUNDRY_PROFILE=deploy forge script \
+  script/telx/DeployTELxRegistry.s.sol:DeployTELxRegistry \
+  --rpc-url $POLYGON_RPC_URL --ffi -vvvv
 ```
 
-Then propose to the Safe Transaction Service:
+Expected output ends with:
+
+```
+  [batch] Deploy PositionRegistry (expected: 0x00637FBbae593E920B1d08300EC1f05d6D61Aa61)
+  [batch] Deploy TELxSubscriber (expected: 0xD9e2c4A560ba8FD0f28A5Bf25B3940576cc53fEC)
+  Proposing 4 transactions as a single MultiSend
+[safe-utils] simulation succeeded
+```
+
+Then propose to the Safe Transaction Service, signing with the hardware wallet:
 
 ```shell
-FOUNDRY_PROFILE=deploy forge script \
-  script/telx/DeployTELxRegistry.s.sol:DeployTELxRegistryMainnet --ffi --broadcast -vvvv
+CHAIN=polygon FOUNDRY_PROFILE=deploy forge script \
+  script/telx/DeployTELxRegistry.s.sol:DeployTELxRegistry \
+  --rpc-url $POLYGON_RPC_URL --ffi --broadcast -vvvv
 ```
 
 `FOUNDRY_PROFILE=deploy` is required: it is the only profile with FFI and filesystem writes enabled,
-both of which safe-utils needs. Set `CHAIN=polygon` to restrict a run to one chain, and
-`SAFE_NONCE_OFFSET` to queue behind Safe transactions that are proposed but not yet executed.
+both of which safe-utils needs. `SAFE_NONCE_OFFSET` queues behind Safe transactions that are
+proposed but not yet executed.
 
-Addresses are written to `deployments/<chain>.json` on broadcast.
+`--rpc-url` is required even though the script forks each chain itself. safe-utils reads the Safe's
+nonce during `setUp()`, before the loop starts, and that read needs a chain where the Safe exists.
+Chains with no RPC URL configured are skipped rather than fatal, so deploying one chain at a time
+does not require every chain's URL to be set.
+
+On broadcast the predicted addresses are written to `deployments/<chain>.json`. Those files are
+committed as `{}` so the write cannot fail on a missing file after the proposal has already gone out.
+
+### Step 1b - execute in the Safe UI, then verify
+
+The Safe executes the batch out of band, so the deploy script cannot check the result the way an
+EOA script would after its own broadcast. Once the signers have executed the transaction, run the
+verify script against the same chain. It needs no Safe credentials, no FFI and no broadcast:
+
+```shell
+CHAIN=polygon forge script script/telx/VerifyTELxRegistry.s.sol:VerifyTELxRegistry \
+  --rpc-url $POLYGON_RPC_URL -vvvv
+```
+
+It reads the recorded addresses from `deployments/<chain>.json`, insists they match the CREATE3
+prediction, and then asserts the full wiring: both contracts have code, the registry points at this
+chain's PositionManager and StateView, the governance Safe holds `DEFAULT_ADMIN_ROLE`, the subscriber
+holds `SUBSCRIBER_ROLE` and nothing else does, the support Safe holds `SUPPORT_ROLE` and owns the
+subscriber, and the in-range gate is enabled. A clean run ends with `[OK] polygon: all checks
+passed`; anything else reverts on the first mismatch.
+
+Run before the Safe executes, it falls back to the predicted addresses and fails on "no code",
+which doubles as a check that those addresses are still free.
 
 ### Known blockers for step 1
 
@@ -127,24 +176,25 @@ before proposing the Base batch, since simulation is the only rehearsal we get.
 
 ## Step 2 - create a pool
 
-Preview. Broadcasts nothing, and prints the poolId, the opening price and tick, and whether the pool
-already exists:
+Fill in `script/telx/pools.json` first. Then preview every pool on the connected chain at once. This
+broadcasts nothing, and prints each pool's poolId, opening price and tick, whether it already exists,
+and which pools still have amounts unset:
 
 ```shell
 forge script script/telx/CreateV4Pool.s.sol:CreateV4Pool \
-  --rpc-url $POLYGON_RPC_URL \
-  --sig "plan(string,uint256,uint256)" \
-  "POLYGON_EUSD_TEL" 100000 20000000
+  --rpc-url $POLYGON_RPC_URL --sig "planAll()"
 ```
 
-Then create:
+Then create one:
 
 ```shell
 forge script script/telx/CreateV4Pool.s.sol:CreateV4Pool \
   --rpc-url $POLYGON_RPC_URL --broadcast \
-  --sig "run(string,uint256,uint256)" \
-  "POLYGON_EUSD_TEL" 100000 20000000
+  --sig "run(string)" "POLYGON_EUSD_TEL"
 ```
+
+The explicit-amount forms, `plan(string,uint256,uint256)` and `run(string,uint256,uint256)`,
+bypass the file for one-off exploration.
 
 Rerunning is a no-op: the script uses `PoolInitializer_v4.initializePool`, which returns rather than
 reverting when the pool exists, and reports the live price instead of the one just computed.
@@ -155,26 +205,27 @@ reverting when the pool exists, and reports the live price instead of the one ju
 The proposal calls for concentrated liquidity as the primary shape and a full-range position as a
 backstop, which is two runs of this script.
 
-Preview:
+Preview every pool on the connected chain from `pools.json`:
 
 ```shell
 forge script script/telx/SeedV4Liquidity.s.sol:SeedV4Liquidity \
-  --rpc-url $POLYGON_RPC_URL \
-  --sig "plan(string,uint256,uint256,uint16)" \
-  "POLYGON_EUSD_TEL" 100000 20000000 1000
+  --rpc-url $POLYGON_RPC_URL --sig "planAll()"
 ```
 
 The preview works before the pool exists: it projects the price `CreateV4Pool` would set from the
 same amounts, so the whole sequence can be rehearsed without writing to any chain.
 
-Then seed:
+Then seed one:
 
 ```shell
 forge script script/telx/SeedV4Liquidity.s.sol:SeedV4Liquidity \
   --rpc-url $POLYGON_RPC_URL --broadcast \
-  --sig "run(string,uint256,uint256,uint16)" \
-  "POLYGON_EUSD_TEL" 100000 20000000 1000
+  --sig "run(string)" "POLYGON_EUSD_TEL"
 ```
+
+The explicit forms, `plan(string,uint256,uint256,uint16)` and `run(string,uint256,uint256,uint16)`,
+bypass the file. A full-range backstop on top of the configured band is the explicit form with
+`widthBps` = 0.
 
 ERC-20 legs are approved for the exact authorized amount with a 30 minute expiry, through Permit2.
 Native ETH legs send the authorized ceiling as call value and sweep the remainder back in the same
@@ -207,6 +258,12 @@ forge test --match-path "test/script/ChainAddresses.fork.t.sol"
 
 # full lifecycle against live Uniswap v4: create, seed, subscribe
 forge test --match-path "test/script/TELxPoolLifecycle.fork.t.sol"
+
+# pools.json stays in step with the catalog
+forge test --match-path "test/script/TELxPoolsConfig.t.sol"
+
+# the verify script accepts correct wiring and rejects each way it could be wrong
+forge test --match-path "test/script/VerifyTELxRegistry.fork.t.sol"
 ```
 
 The lifecycle tests grant TEL v3 balances with `deal`, since real supply does not exist yet.

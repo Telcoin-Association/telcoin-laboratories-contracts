@@ -124,8 +124,10 @@ contracts/        Solidity sources, grouped by product area
   zodiac/         SafeGuard for Zodiac/Safe-based governance
 script/           Foundry deployment + operational scripts (*.s.sol)
   shared/         Chain address libraries, the TELx pool catalog, v4 price/tick math
-  telx/           TELx v4 pool create/seed scripts + the Safe-based registry deploy
-                  (see script/telx/README.md for the runbook)
+  telx/           TELx v4 pool create/seed scripts, the Safe-based registry deploy and
+                  its verify script, and pools.json (see script/telx/README.md)
+    base/         Abstract bases the telx scripts inherit from
+deployments/      Recorded deployment addresses per chain, written by the Safe deploy scripts
 test/             Foundry tests. Files ending in .polygon.t.sol / .fork.t.sol
                   and contracts matching *Fork* hit mainnet forks via RPC env
                   vars. `test/script/` contains fork tests for deploy scripts.
