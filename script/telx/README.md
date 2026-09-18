@@ -158,8 +158,14 @@ CHAIN=polygon FOUNDRY_PROFILE=deploy forge script \
 ```
 
 `FOUNDRY_PROFILE=deploy` is required: it is the only profile with FFI and filesystem writes enabled,
-both of which safe-utils needs. `SAFE_NONCE_OFFSET` queues behind Safe transactions that are
-proposed but not yet executed.
+both of which safe-utils needs. `SAFE_NONCE_OFFSET` queues a proposal behind Safe transactions that
+are proposed but not yet executed. Simulation always executes at the Safe's on-chain nonce (the
+`simulating to ... (nonce N)` line), so the offset applies to the proposal only and cannot be
+rehearsed; check the Transaction Service queue for pending proposals before choosing it.
+
+The run checks every chain it will touch before proposing to any of them: a missing support Safe,
+a deployer that is not governance, or a `CHAIN` value that names no chain fails the run up front
+rather than after the first proposal has gone out.
 
 `SAFE_BROADCAST=true` in the environment forces proposal mode even without `--broadcast`. Never set
 it in `.env`: a simulation run with it set is a proposal.
@@ -311,8 +317,13 @@ override; an accidental rerun is what the guard is for. `SEED_ALLOW_EXISTING_RAN
 environment overrides it for a deliberate second mint.
 
 ERC-20 legs are approved for exactly the on-chain maximum with a 30 minute expiry, through
-Permit2. Native ETH legs send the maximum as call value and sweep the unspent margin back to the
-signer in the same transaction.
+Permit2, and the ERC-20 approval to Permit2 is zeroed again in the same broadcast, so no allowance
+outlives the run. Native ETH legs send the maximum as call value and sweep the unspent margin back
+to the signer in the same transaction.
+
+The 30 minute window covers the Permit2 allowance and the mint deadline, and it starts at
+simulation time. A broadcast that stalls past it, or a `forge script --resume` of stale calldata,
+fails loudly with `DeadlinePassed`; rerun the script from scratch rather than resuming.
 
 `CreateV4Pool.s.sol` initializes a pool with no liquidity, for the case where a pool genuinely has
 to exist before it can be seeded. It calls `PoolManager.initialize` directly, so a pool that

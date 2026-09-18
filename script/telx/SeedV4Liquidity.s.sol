@@ -265,6 +265,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
         vm.startBroadcast(opts.signer);
         _approve(config, s, p);
         positionManager.multicall{value: _nativeValue(s, p)}(calls);
+        _revoke(config, s);
         vm.stopBroadcast();
 
         tokenId = _mintedTokenId(config, opts.recipient);
@@ -348,6 +349,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
         positionManager.modifyLiquidities{value: _nativeValue(s, p)}(
             _encodeMint(s, p, opts), block.timestamp + VALIDITY_WINDOW
         );
+        _revoke(config, s);
         vm.stopBroadcast();
 
         tokenId = _mintedTokenId(config, opts.recipient);
@@ -497,6 +499,16 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
     function _approveOne(ChainConfig memory config, address token, uint256 amount, uint48 expiration) internal {
         IERC20(token).approve(config.permit2, amount);
         IAllowanceTransfer(config.permit2).approve(token, config.positionManager, uint160(amount), expiration);
+    }
+
+    /**
+     * @dev Zeroes the ERC-20 allowances to Permit2 once the mint has pulled what it needed. The
+     *      mint consumes the cost, not the maximum, so the slippage margin would otherwise stay
+     *      approved to Permit2 indefinitely. The Permit2 allowance itself expires on its own.
+     */
+    function _revoke(ChainConfig memory config, TELxPools.PoolSpec memory s) internal {
+        if (!TELxPools.isNativeCurrency0(s)) IERC20(s.currency0).approve(config.permit2, 0);
+        IERC20(s.currency1).approve(config.permit2, 0);
     }
 
     /**

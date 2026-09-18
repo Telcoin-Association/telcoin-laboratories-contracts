@@ -88,25 +88,15 @@ contract DeployTELxRegistrySaltTest is Test {
         );
     }
 
-    /// @notice The CreateX internal transformation depends only on the sender and the salt, never
-    ///         on constructor arguments. This is the property the whole cross-chain parity claim
-    ///         rests on, so it is asserted directly rather than assumed.
-    function test_create3Derivation_ignoresConstructorArguments() public pure {
-        bytes32 guarded = SaltMath.guardSalt(DEPLOYER_SAFE, Salts.TELX_POSITION_REGISTRY);
-        bytes32 internalSalt = SaltMath.getCreateXGuardedSalt(guarded, DEPLOYER_SAFE);
-
-        // Recomputing from the same inputs is stable, and nothing in the derivation takes initcode.
-        assertEq(internalSalt, SaltMath.getCreateXGuardedSalt(guarded, DEPLOYER_SAFE), "derivation not deterministic");
-        assertTrue(CREATEX != address(0), "CreateX address");
-    }
-
     /// @notice Pins the addresses the deploy will actually land on, which are published in
     ///         `script/telx/README.md` and will be handed to the Snapshot strategy and every other
     ///         downstream integration.
-    /// @dev    Computed independently of the script, by replicating CreateX's own derivation:
-    ///         guard the raw salt with the Safe, hash it the way CreateX's `_guard` does, then
-    ///         derive the CREATE3 proxy address. Cross-checked against the live CreateX factory on
-    ///         Ethereum, Polygon and Base, which all returned these values.
+    /// @dev    Computed independently of the script and of `SaltMath`, by replicating CreateX's own
+    ///         derivation from the CreateX source: build the guarded salt as the 20-byte Safe, a
+    ///         zero byte and the low 11 bytes of the raw salt; hash it the way `_guard` does for
+    ///         cross-chain mode; then derive the CREATE3 proxy address and its first CREATE.
+    ///         Cross-checked against the live CreateX factory on Ethereum, Polygon and Base, which
+    ///         all returned these values.
     ///
     ///         The point is not that the arithmetic works, it is that the published addresses stay
     ///         true. Changing a salt string or the deployer Safe silently relocates both contracts,
@@ -125,12 +115,15 @@ contract DeployTELxRegistrySaltTest is Test {
         );
     }
 
-    /// @dev Replicates CreateX's CREATE3 address derivation. The factory deploys a minimal proxy at
-    ///      CREATE2(internalSalt), and the contract itself lands at that proxy's first CREATE, i.e.
-    ///      RLP(proxy, nonce 1).
+    /// @dev Replicates CreateX's CREATE3 address derivation without going through `SaltMath`, so
+    ///      the assertion does not share code with the thing it checks. The factory deploys a
+    ///      minimal proxy at CREATE2(internalSalt), and the contract itself lands at that proxy's
+    ///      first CREATE, i.e. RLP(proxy, nonce 1).
     function _predict(bytes32 rawSalt) internal pure returns (address) {
-        bytes32 internalSalt =
-            SaltMath.getCreateXGuardedSalt(SaltMath.guardSalt(DEPLOYER_SAFE, rawSalt), DEPLOYER_SAFE);
+        // [20 bytes Safe][0x00][11 low bytes of the raw salt]: CreateX's cross-chain guarded form
+        bytes32 guarded = bytes32(uint256(uint160(DEPLOYER_SAFE)) << 96) | bytes32(uint256(uint88(uint256(rawSalt))));
+        // CreateX `_guard` for a sender-guarded, cross-chain salt: keccak256(padded sender ++ salt)
+        bytes32 internalSalt = keccak256(abi.encodePacked(bytes32(uint256(uint160(DEPLOYER_SAFE))), guarded));
 
         address proxy = address(
             uint160(

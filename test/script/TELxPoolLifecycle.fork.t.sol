@@ -534,6 +534,14 @@ abstract contract TELxPoolLifecycleForkTest is Test {
         // holds no more of either currency than it did before.
         assertEq(_balance(s.currency0, _positionManager()), held0, "currency0 stranded in the PositionManager");
         assertEq(_balance(s.currency1, _positionManager()), held1, "currency1 stranded in the PositionManager");
+
+        // No standing ERC-20 allowance to Permit2 survives the run: the slippage margin that was
+        // approved but not pulled is revoked in the same broadcast.
+        address permit2 = seedScript.chainConfig().permit2;
+        if (!TELxPools.isNativeCurrency0(s)) {
+            assertEq(IERC20(s.currency0).allowance(signer, permit2), 0, "currency0 allowance to Permit2 left standing");
+        }
+        assertEq(IERC20(s.currency1).allowance(signer, permit2), 0, "currency1 allowance to Permit2 left standing");
     }
 
     /// @dev The minted range must be exactly what `V4PoolMath` says for this price and width.

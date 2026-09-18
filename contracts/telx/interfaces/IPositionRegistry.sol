@@ -59,6 +59,8 @@ interface IPositionRegistry {
     // Errors
     // -----------
 
+    error ZeroAddress();
+    error NotAContract(address target);
     error PoolManagerUnlocked();
     error PoolNotAllowed(PoolId poolId);
     error PoolNotInitialized(PoolId poolId);

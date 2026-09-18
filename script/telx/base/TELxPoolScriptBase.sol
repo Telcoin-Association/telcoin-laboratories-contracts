@@ -230,13 +230,19 @@ abstract contract TELxPoolScriptBase is Script {
     }
 
     /// @dev The signer if one is configured, otherwise zero. Previews use this so they can print
-    ///      the signer's balances when a signer is set and still run when none is.
+    ///      the signer's balances when a signer is set and still run when none is. A variable that
+    ///      is present but does not parse is an error, not an absence: `vm.envOr` would otherwise
+    ///      swallow a malformed key into its default and the run would report that no key was set.
     function _trySigner() internal view returns (address) {
-        address ethFrom = vm.envOr("ETH_FROM", address(0));
-        if (ethFrom != address(0)) return ethFrom;
-
-        uint256 pk = vm.envOr("PRIVATE_KEY", uint256(0));
-        return pk == 0 ? address(0) : vm.addr(pk);
+        if (vm.envExists("ETH_FROM")) {
+            address ethFrom = vm.envAddress("ETH_FROM");
+            if (ethFrom != address(0)) return ethFrom;
+        }
+        if (vm.envExists("PRIVATE_KEY")) {
+            uint256 pk = vm.envUint("PRIVATE_KEY");
+            if (pk != 0) return vm.addr(pk);
+        }
+        return address(0);
     }
 
     // -----------

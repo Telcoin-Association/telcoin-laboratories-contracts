@@ -91,6 +91,24 @@ contract PositionRegistryTest is Test {
         assertTrue(registry.inRangeRequired(), "in-range required by default");
     }
 
+    /// @notice A wrong immutable would deploy fine at the CREATE3 address and burn it, so the
+    ///         obvious mistakes are refused at construction.
+    function testRevert_constructor_codelessPositionManager() public {
+        address nothing = makeAddr("nothing");
+        vm.expectRevert(abi.encodeWithSelector(IPositionRegistry.NotAContract.selector, nothing));
+        new PositionRegistry(IPositionManager(nothing), StateView(address(sv)), admin);
+    }
+
+    function testRevert_constructor_zeroAdmin() public {
+        vm.expectRevert(IPositionRegistry.ZeroAddress.selector);
+        new PositionRegistry(IPositionManager(address(pm)), StateView(address(sv)), address(0));
+    }
+
+    function testRevert_constructor_codelessStateView() public {
+        vm.expectRevert();
+        new PositionRegistry(IPositionManager(address(pm)), StateView(makeAddr("nothing")), admin);
+    }
+
     function test_caps() public view {
         assertEq(registry.MAX_SUBSCRIPTIONS(), 1_000, "MAX_SUBSCRIPTIONS");
         assertEq(registry.MAX_SUBSCRIBED(), 50_000, "MAX_SUBSCRIBED");
@@ -349,6 +367,26 @@ contract PositionRegistryTest is Test {
         vm.prank(subscriber);
         registry.handleSubscribe(1);
         assertTrue(registry.isTokenSubscribed(1), "subscribed while out of range");
+    }
+
+    /// @notice Toggling the gate after positions are subscribed changes who votes, and nothing
+    ///         else: no entry is removed or added, the live filter simply reads the new setting.
+    function test_setInRangeRequired_afterSubscriptions_onlyChangesTheLiveFilter() public {
+        _subscribe(1, alice, DEFAULT_LIQUIDITY);
+        sv.setSlot0(poolId, SQRT_PRICE_1_1, TICK_UPPER); // drift out of range after subscribing
+
+        assertTrue(registry.isTokenSubscribed(1), "entry stays");
+        assertEq(registry.getSubscriptions(alice).length, 0, "out of range does not vote while the gate is on");
+
+        vm.prank(admin);
+        registry.setInRangeRequired(false);
+        assertTrue(registry.isTokenSubscribed(1), "entry still stays");
+        assertEq(registry.getSubscriptions(alice).length, 1, "votes once the gate is off");
+
+        vm.prank(admin);
+        registry.setInRangeRequired(true);
+        assertEq(registry.getSubscriptions(alice).length, 0, "and stops again when it is back on");
+        assertEq(registry.getSubscriptionsRaw(alice).length, 1, "raw set untouched throughout");
     }
 
     function testRevert_handleSubscribe_maxSubscribed() public {

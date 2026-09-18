@@ -82,6 +82,12 @@ contract VerifyTELxRegistryForkTest is Test {
         vm.stopPrank();
     }
 
+    /// @dev A deployed contract on this chain that is not the PositionManager. Constructors refuse
+    ///      a codeless address, so a "wrong" PositionManager has to be a real one.
+    function _wrongPositionManager() internal view returns (address) {
+        return stateView;
+    }
+
     function _registerCatalogPools(PositionRegistry registry) internal {
         string[] memory names = TELxPools.allNames();
         for (uint256 i; i < names.length; ++i) {
@@ -120,13 +126,22 @@ contract VerifyTELxRegistryForkTest is Test {
         verifier.verifyOn(target, address(registry), makeAddr("nothingHere"));
     }
 
-    /// @notice Wrong Uniswap infrastructure in the constructor is the cross-chain copy-paste error:
-    ///         Base's PositionManager on a Polygon deploy.
+    /// @notice Wrong Uniswap infrastructure in the constructor is the cross-chain copy-paste error.
+    ///         Another chain's PositionManager has no code here and the constructor refuses it
+    ///         outright, so the wrong-but-deployed case is modelled with a contract that exists on
+    ///         this chain and is not the PositionManager: the StateView.
     function test_verifyOn_rejectsWrongPositionManager() public {
         (PositionRegistry registry, TELxSubscriber subscriber) =
-            _deployWith(BaseAddresses.POSITION_MANAGER, stateView, governance, governance);
+            _deployWith(_wrongPositionManager(), stateView, governance, governance);
         vm.expectRevert(bytes("registry: wrong PositionManager"));
         verifier.verifyOn(target, address(registry), address(subscriber));
+    }
+
+    /// @notice The cross-chain paste itself, Base's PositionManager on a Polygon deploy, cannot
+    ///         even be constructed: the address has no code on this chain.
+    function testRevert_constructor_rejectsOtherChainsPositionManager() public {
+        vm.expectRevert(abi.encodeWithSelector(IPositionRegistry.NotAContract.selector, BaseAddresses.POSITION_MANAGER));
+        new PositionRegistry(IPositionManager(BaseAddresses.POSITION_MANAGER), StateView(stateView), governance);
     }
 
     /// @notice A second, fully functional StateView over the same PoolManager is still the wrong
@@ -221,7 +236,7 @@ contract VerifyTELxRegistryForkTest is Test {
     function test_verifyOn_rejectsSubscriberWrongPositionManager() public {
         (PositionRegistry registry,) = _deployWired();
         TELxSubscriber wrongPm =
-            new TELxSubscriber(IPositionRegistry(address(registry)), BaseAddresses.POSITION_MANAGER, governance);
+            new TELxSubscriber(IPositionRegistry(address(registry)), _wrongPositionManager(), governance);
         vm.prank(governance);
         registry.grantRole(SUBSCRIBER_ROLE, address(wrongPm));
         vm.expectRevert(bytes("subscriber: wrong PositionManager"));
@@ -289,7 +304,7 @@ contract VerifyTELxRegistryForkTest is Test {
     ///         PositionManager has a different hash even from identical source.
     function test_verifyBytecode_rejectsDifferentImmutables() public {
         (PositionRegistry registry, TELxSubscriber subscriber) =
-            _deployWith(BaseAddresses.POSITION_MANAGER, stateView, governance, governance);
+            _deployWith(_wrongPositionManager(), stateView, governance, governance);
         vm.expectRevert(bytes("PositionRegistry: deployed bytecode does not match this tree"));
         verifier.verifyBytecode(target, address(registry), address(subscriber));
     }

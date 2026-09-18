@@ -97,6 +97,14 @@ contract TELxSubscriberTest is Test {
         new TELxSubscriber(IPositionRegistry(address(0)), address(pm), owner);
     }
 
+    /// @notice Every notification is gated on the PositionManager address, so a codeless one is a
+    ///         subscriber nothing can ever reach.
+    function testRevert_constructor_codelessPositionManager() public {
+        address nothing = makeAddr("nothing");
+        vm.expectRevert(abi.encodeWithSelector(PositionManagerAuth.NotAContract.selector, nothing));
+        new TELxSubscriber(IPositionRegistry(address(registry)), nothing, owner);
+    }
+
     // -----------
     // setRegistry
     // -----------
@@ -123,6 +131,33 @@ contract TELxSubscriberTest is Test {
 
         assertTrue(next.isTokenSubscribed(1), "recorded in the new registry");
         assertFalse(registry.isTokenSubscribed(1), "not in the old one");
+    }
+
+    /// @notice Repointing with live subscriptions: the old registry keeps its entries, the new one
+    ///         starts empty, and the v4-side subscription is untouched. An LP who wants to be in
+    ///         the new registry unsubscribes and subscribes again; an unsubscribe of an existing
+    ///         position reaches the new registry and is a harmless no-op there.
+    function test_setRegistry_withExistingSubscriptions_leavesOldEntriesAndStartsEmpty() public {
+        _subscribe(1, alice);
+        assertTrue(registry.isTokenSubscribed(1), "precondition");
+
+        PositionRegistry next = _wiredRegistry();
+        vm.prank(owner);
+        subscriber.setRegistry(IPositionRegistry(address(next)));
+
+        assertTrue(registry.isTokenSubscribed(1), "old registry keeps the entry");
+        assertFalse(next.isTokenSubscribed(1), "new registry knows nothing yet");
+
+        // an unsubscribe after the repoint lands on the new registry as a no-op
+        vm.prank(address(pm));
+        subscriber.notifyUnsubscribe(1);
+        assertTrue(registry.isTokenSubscribed(1), "old entry is now stale until pruned or forced");
+        assertFalse(next.isTokenSubscribed(1), "still nothing in the new registry");
+
+        // and a fresh subscribe is recorded in the new one
+        vm.prank(address(pm));
+        subscriber.notifySubscribe(1, "");
+        assertTrue(next.isTokenSubscribed(1), "resubscribe lands in the new registry");
     }
 
     function testRevert_setRegistry_zeroAddress() public {

@@ -60,6 +60,7 @@ abstract contract BaseDeployTELxRegistry is TELxRegistryScriptBase {
 
     error MissingSupportSafe(string chain);
     error DeployerIsNotAdmin(address deployerSafe, address admin);
+    error UnknownChain(string chain);
 
     // -----------
     // Entry point
@@ -73,6 +74,11 @@ abstract contract BaseDeployTELxRegistry is TELxRegistryScriptBase {
             vm.createDir(string.concat(vm.projectRoot(), "/deployments"), true);
         }
 
+        // Every chain this run will touch is checked before any proposal goes out, so a run over
+        // several chains cannot propose to the first and then fail on the second's configuration.
+        // A CHAIN value that names nothing is a typo, not an empty selection.
+        _preflight();
+
         for (uint256 i; i < allChains.length; ++i) {
             ChainTarget memory target = allChains[i];
             if (!_selectChain(target)) continue;
@@ -84,6 +90,30 @@ abstract contract BaseDeployTELxRegistry is TELxRegistryScriptBase {
             console.log("\n=== TELx registry on %s (chainId %s) ===", target.name, vm.toString(target.chainId));
             _deployOnChain(target);
         }
+    }
+
+    // -----------
+    // Pre-flight
+    // -----------
+
+    /// @dev The configuration checks `_deployOnChain` would make, applied up front to every chain
+    ///      the run will select, without forking. Nothing here needs chain state.
+    function _preflight() internal view {
+        string memory only = vm.envOr("CHAIN", string(""));
+        bool matched = bytes(only).length == 0;
+
+        for (uint256 i; i < allChains.length; ++i) {
+            ChainTarget memory target = allChains[i];
+            bool named = keccak256(bytes(target.name)) == keccak256(bytes(only));
+            if (bytes(only).length > 0 && !named) continue;
+            matched = matched || named;
+            if (bytes(target.rpcUrl).length == 0) continue;
+
+            if (target.supportSafe == address(0)) revert MissingSupportSafe(target.name);
+            if (deployerSafeAddress != target.admin) revert DeployerIsNotAdmin(deployerSafeAddress, target.admin);
+        }
+
+        if (!matched) revert UnknownChain(only);
     }
 
     // -----------

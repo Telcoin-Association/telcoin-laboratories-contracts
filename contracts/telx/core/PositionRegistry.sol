@@ -108,6 +108,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
      * @param admin Holder of DEFAULT_ADMIN_ROLE.
      */
     constructor(IPositionManager positionManager_, StateView stateView_, address admin) {
+        // A wrong immutable deploys fine at the CREATE3 address and burns it, so the arguments are
+        // checked here as well as by the verify script. The StateView read doubles as its code
+        // check: a codeless lens cannot answer.
+        if (address(positionManager_).code.length == 0) revert NotAContract(address(positionManager_));
+        if (admin == address(0)) revert ZeroAddress();
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         positionManager = positionManager_;
         stateView = stateView_;
