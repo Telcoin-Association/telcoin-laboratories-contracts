@@ -106,7 +106,12 @@ contract TELxSubscriber is ISubscriber, PositionManagerAuth, Ownable2Step {
     ///      path, the subscriber cannot affect an LP's increase, decrease or collect under any
     ///      registry configuration whatsoever. A fully drained position stops voting immediately
     ///      (zero liquidity is ineligible) and anyone may `pruneSubscription` it afterwards.
-    function notifyModifyLiquidity(uint256, int256, BalanceDelta) external view override onlyPositionManager(msg.sender) {}
+    function notifyModifyLiquidity(uint256, int256, BalanceDelta)
+        external
+        view
+        override
+        onlyPositionManager(msg.sender)
+    {}
 
     /// @notice Notifies the registry of a position burn.
     /// @dev Wrapped so a misconfigured registry can never prevent an LP from burning.

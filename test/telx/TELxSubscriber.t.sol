@@ -143,8 +143,7 @@ contract TELxSubscriberTest is Test {
     /// @notice A registry that has not granted this subscriber SUBSCRIBER_ROLE would reject every
     ///         subscribe. Refused up front; the role must be granted before the switch.
     function testRevert_setRegistry_notWired() public {
-        PositionRegistry unwired =
-            new PositionRegistry(IPositionManager(address(pm)), StateView(address(sv)), admin);
+        PositionRegistry unwired = new PositionRegistry(IPositionManager(address(pm)), StateView(address(sv)), admin);
         vm.expectRevert(abi.encodeWithSelector(TELxSubscriber.RegistryNotWired.selector, address(unwired)));
         vm.prank(owner);
         subscriber.setRegistry(IPositionRegistry(address(unwired)));

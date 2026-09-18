@@ -211,7 +211,8 @@ contract V4PoolMathTest is Test {
         uint256 amount0 = 10 * 1e18;
         uint256 amount1 = 10 * 1e18;
 
-        uint128 correct = LiquidityAmounts.getLiquidityForAmounts(SQRT_PRICE_1_1, sqrtLower, sqrtUpper, amount0, amount1);
+        uint128 correct =
+            LiquidityAmounts.getLiquidityForAmounts(SQRT_PRICE_1_1, sqrtLower, sqrtUpper, amount0, amount1);
         uint128 mismatched = LiquidityAmounts.getLiquidityForAmounts(
             SQRT_PRICE_1_1, TickMath.MIN_SQRT_PRICE, TickMath.MAX_SQRT_PRICE - 1, amount0, amount1
         );
@@ -231,7 +232,8 @@ contract V4PoolMathTest is Test {
         uint256 amount0 = 10 * 1e18;
         uint256 amount1 = 10 * 1e18;
 
-        uint128 correct = LiquidityAmounts.getLiquidityForAmounts(SQRT_PRICE_1_1, sqrtLower, sqrtUpper, amount0, amount1);
+        uint128 correct =
+            LiquidityAmounts.getLiquidityForAmounts(SQRT_PRICE_1_1, sqrtLower, sqrtUpper, amount0, amount1);
         uint128 mismatched =
             LiquidityAmounts.getLiquidityForAmounts(SQRT_PRICE_1_1, fullLower, fullUpper, amount0, amount1);
 

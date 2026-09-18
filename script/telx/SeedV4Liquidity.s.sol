@@ -176,10 +176,14 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
             int24 distance = _tickDistance(p.liveTick, p.intendedTick);
             console2.log("  live vs intended distance: ", int256(distance));
             console2.log("  tolerance:                 ", int256(params.maxTickDeviation));
-            console2.log(distance > params.maxTickDeviation ? "  OUTSIDE tolerance: run() will revert" : "  within tolerance");
+            console2.log(
+                distance > params.maxTickDeviation ? "  OUTSIDE tolerance: run() will revert" : "  within tolerance"
+            );
             console2.log("  pool liquidity:", uint256(_poolLiquidity(config, p.poolId)));
             if (_rangeHasLiquidity(config, p.poolId, p.tickLower, p.tickUpper)) {
-                console2.log("  a position ALREADY spans this range: run() refuses without SEED_ALLOW_EXISTING_RANGE=true");
+                console2.log(
+                    "  a position ALREADY spans this range: run() refuses without SEED_ALLOW_EXISTING_RANGE=true"
+                );
             }
         }
 
@@ -266,7 +270,8 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
         tokenId = _mintedTokenId(config, opts.recipient);
         _postConditions(config, tokenId, opts.recipient, p, before);
         require(
-            _currentSqrtPriceX96(config, p.poolId) == p.sqrtPriceX96, "Post-check: pool did not open at the intended price"
+            _currentSqrtPriceX96(config, p.poolId) == p.sqrtPriceX96,
+            "Post-check: pool did not open at the intended price"
         );
 
         console2.log("Pool created and position minted.");

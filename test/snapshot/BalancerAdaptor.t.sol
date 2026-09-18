@@ -8,6 +8,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IBalancerVault} from "contracts/snapshot/interfaces/IBalancerVault.sol";
 import {IBalancerPool} from "contracts/snapshot/interfaces/IBalancerPool.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title BalancerAdaptorTest
 /// @notice Polygon-fork tests for the Balancer voting-weight adaptor. Validates that the adaptor
@@ -30,7 +31,7 @@ contract BalancerAdaptorTest is Test {
     BalancerAdaptor adaptor;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), FORK_BLOCK);
+        ForkOrSkip.select("POLYGON_RPC_URL", FORK_BLOCK);
 
         adaptor = new BalancerAdaptor(
             IERC20(TEL),

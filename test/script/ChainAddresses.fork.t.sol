@@ -9,6 +9,7 @@ import {EthereumAddresses} from "../../script/shared/EthereumAddresses.sol";
 import {PolygonAddresses} from "../../script/shared/PolygonAddresses.sol";
 import {BaseAddresses} from "../../script/shared/BaseAddresses.sol";
 import {CrossChainAddresses} from "../../script/shared/CrossChainAddresses.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title ChainAddressesForkTest
 /// @notice Asserts every constant in `script/shared/*Addresses.sol` against the live chain it
@@ -81,12 +82,7 @@ contract EthereumAddressesForkTest is ChainAddressesForkTest {
     ///      Ethereum is the newest chain in these libraries and the likeliest secret to be missing,
     ///      so this suite skips itself instead of going red.
     function setUp() public {
-        string memory rpc = vm.envOr("ETHEREUM_RPC_URL", string(""));
-        if (bytes(rpc).length == 0) {
-            vm.skip(true);
-            return;
-        }
-        vm.createSelectFork(rpc);
+        ForkOrSkip.select("ETHEREUM_RPC_URL");
         assertEq(block.chainid, EthereumAddresses.CHAIN_ID, "wrong chain");
     }
 
@@ -143,7 +139,7 @@ contract EthereumAddressesForkTest is ChainAddressesForkTest {
 /// @notice Verifies `script/shared/PolygonAddresses.sol` against Polygon mainnet.
 contract PolygonAddressesForkTest is ChainAddressesForkTest {
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"));
+        ForkOrSkip.select("POLYGON_RPC_URL");
         assertEq(block.chainid, PolygonAddresses.CHAIN_ID, "wrong chain");
     }
 
@@ -173,7 +169,7 @@ contract PolygonAddressesForkTest is ChainAddressesForkTest {
 /// @notice Verifies `script/shared/BaseAddresses.sol` against Base mainnet.
 contract BaseAddressesForkTest is ChainAddressesForkTest {
     function setUp() public {
-        vm.createSelectFork(vm.envString("BASE_RPC_URL"));
+        ForkOrSkip.select("BASE_RPC_URL");
         assertEq(block.chainid, BaseAddresses.CHAIN_ID, "wrong chain");
     }
 
@@ -211,7 +207,7 @@ contract BaseAddressesForkTest is ChainAddressesForkTest {
         address[] memory baseOwners = ISafe(BaseAddresses.SUPPORT_SAFE).getOwners();
 
         uint256 baseFork = vm.activeFork();
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"));
+        ForkOrSkip.select("POLYGON_RPC_URL");
         address[] memory polygonOwners = ISafe(PolygonAddresses.SUPPORT_SAFE).getOwners();
         vm.selectFork(baseFork);
 

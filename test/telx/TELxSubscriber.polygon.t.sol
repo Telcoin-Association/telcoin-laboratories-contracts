@@ -14,6 +14,7 @@ import {PositionInfo} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibr
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {TestConstants} from "../util/TestConstants.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /**
  * @title TELxSubscriber Polygon Fork Tests
@@ -39,7 +40,7 @@ contract TELxSubscriberPolygonTest is Test {
     TELxSubscriber subscriber;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), TestConstants.PRODUCTION_STATE_POLYGON_FORK_BLOCK);
+        ForkOrSkip.select("POLYGON_RPC_URL", TestConstants.PRODUCTION_STATE_POLYGON_FORK_BLOCK);
 
         StateView stateView = new StateView(IPoolManager(V4_POOL_MANAGER));
         registry = new PositionRegistry(IPositionManager(V4_POSITION_MANAGER), stateView, admin);

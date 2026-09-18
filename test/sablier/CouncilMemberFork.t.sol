@@ -11,6 +11,7 @@ import {TestSablierV2Lockup} from "../../contracts/sablier/test/TestSablierV2Loc
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
 import {RevertingLockup} from "./mocks/RevertingLockup.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /**
  * @title CouncilMemberForkTest
@@ -63,7 +64,7 @@ contract CouncilMemberForkTest is Test {
     // -----
 
     function setUp() public {
-        forkId = vm.createSelectFork(vm.envString("POLYGON_RPC_URL"));
+        forkId = ForkOrSkip.select("POLYGON_RPC_URL");
 
         telcoin = IERC20(TEL_ADDRESS);
 

@@ -7,6 +7,7 @@ import {CouncilMember} from "../../contracts/sablier/core/CouncilMember.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {TestConstants} from "../util/TestConstants.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @notice Polygon-fork test of CreateCouncilNftsAndStreams.
 /// @dev    The script reads hard-coded Polygon addresses for TEL and the
@@ -29,7 +30,7 @@ contract CreateCouncilNftsAndStreamsForkTest is Test {
     function setUp() public {
         uint256 forkBlock =
             vm.envOr("FORK_BLOCK_NUMBER", TestConstants.DEFAULT_POLYGON_FORK_BLOCK);
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), forkBlock);
+        ForkOrSkip.select("POLYGON_RPC_URL", forkBlock);
 
         script = new CreateCouncilNftsAndStreams();
         totalTelRequired = _sumCouncilDeposits(script);

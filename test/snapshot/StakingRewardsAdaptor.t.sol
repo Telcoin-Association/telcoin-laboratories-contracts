@@ -12,6 +12,7 @@ import {IBalancerVault} from "contracts/snapshot/interfaces/IBalancerVault.sol";
 import {IBalancerPool} from "contracts/snapshot/interfaces/IBalancerPool.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
 import {MockStakingRewards} from "./mocks/MockStakingRewards.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title StakingRewardsAdaptorTest
 /// @notice Polygon-fork tests for the StakingRewards voting-weight adaptor. Composes a fresh
@@ -34,7 +35,7 @@ contract StakingRewardsAdaptorTest is Test {
     StakingRewardsAdaptor adaptor;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), FORK_BLOCK);
+        ForkOrSkip.select("POLYGON_RPC_URL", FORK_BLOCK);
 
         // Deploy a fresh BalancerAdaptor to use as the source
         balancerAdaptor = new BalancerAdaptor(

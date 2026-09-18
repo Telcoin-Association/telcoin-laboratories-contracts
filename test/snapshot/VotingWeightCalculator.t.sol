@@ -12,6 +12,7 @@ import {IBalancerPool} from "contracts/snapshot/interfaces/IBalancerPool.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
 import {MockSource} from "./mocks/MockSource.sol";
 import {NonSourceERC165} from "./mocks/NonSourceERC165.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title VotingWeightCalculatorTest
 /// @notice Polygon-fork tests for the central voting-weight calculator that aggregates `ISource`
@@ -34,7 +35,7 @@ contract VotingWeightCalculatorTest is Test {
     address nonOwner;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), FORK_BLOCK);
+        ForkOrSkip.select("POLYGON_RPC_URL", FORK_BLOCK);
 
         owner = address(this);
         nonOwner = makeAddr("nonOwner");

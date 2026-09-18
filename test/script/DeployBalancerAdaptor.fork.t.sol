@@ -9,6 +9,7 @@ import {VotingWeightCalculator} from "../../contracts/snapshot/core/VotingWeight
 import {ISource} from "../../contracts/snapshot/interfaces/ISource.sol";
 import {TestConstants} from "../util/TestConstants.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @notice Polygon-fork test of DeployBalancerAdaptor. Exercises the full
 ///         `runWithSigner(signer)` flow: deploys VotingWeightCalculator,
@@ -46,7 +47,7 @@ contract DeployBalancerAdaptorForkTest is Test {
     function setUp() public {
         uint256 forkBlock =
             vm.envOr("FORK_BLOCK_NUMBER", TestConstants.DEFAULT_POLYGON_FORK_BLOCK);
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), forkBlock);
+        ForkOrSkip.select("POLYGON_RPC_URL", forkBlock);
         deployer = makeAddr("deployer");
         deployScript = new DeployBalancerAdaptor();
     }

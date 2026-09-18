@@ -13,6 +13,7 @@ import {BaseAddresses} from "../../script/shared/BaseAddresses.sol";
 import {TELxPools} from "../../script/shared/TELxPools.sol";
 import {DeployTELxRegistryHarness} from "./harnesses/DeployTELxRegistryHarness.sol";
 import {ISafe} from "./interfaces/ISafe.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title DeployTELxRegistryForkTest
 /// @notice Executes the registry deploy batch the way the Safe will: through the safe-utils
@@ -40,12 +41,7 @@ abstract contract DeployTELxRegistryForkTest is Test {
     uint256 internal catalogPools;
 
     function _setUpChain() internal {
-        string memory rpc = vm.envOr(rpcEnvVar, string(""));
-        if (bytes(rpc).length == 0) {
-            vm.skip(true);
-            return;
-        }
-        vm.createSelectFork(rpc);
+        ForkOrSkip.select(rpcEnvVar);
 
         address[] memory all = ISafe(GOVERNANCE_SAFE).getOwners();
         owners.push(all[0]);

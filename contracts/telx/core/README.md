@@ -44,18 +44,18 @@ with the confirmed addresses once the Safe batches execute.
 
 **Legacy TEL v2 deployments (still live, unaffected by this migration)**
 
-| Chain | PositionRegistry | TELxSubscriber | TELxIncentiveHook |
-| --- | --- | --- | --- |
-| Polygon | `0x2c33fC9c09CfAC5431e754b8fe708B1dA3F5B954` | `0x3Bf9bAdC67573e7b4756547A2dC0C77368A2062b` | `0xD77cC9230Ded5b6591730032975453744532a500` |
-| Base | `0x3994e3ae3Cf62bD2a3a83dcE73636E954852BB04` | `0x735ee950D979C70C14FAa739f80fC96d9893f7ED` | `0x23aB2e6D4Ab0c5f872567098671F1ffb46Fd2500` |
+| Chain | PositionRegistry | TELxSubscriber |
+| --- | --- | --- |
+| Polygon | `0x2c33fC9c09CfAC5431e754b8fe708B1dA3F5B954` | `0x3Bf9bAdC67573e7b4756547A2dC0C77368A2062b` |
+| Base | `0x3994e3ae3Cf62bD2a3a83dcE73636E954852BB04` | `0x735ee950D979C70C14FAa739f80fC96d9893f7ED` |
 
-These index TEL v2 pools and keep working; they are simply not where TEL v3 liquidity is tracked.
+These index TEL v2 pools and keep working; they are simply not where TEL v3 liquidity is tracked. Each legacy pool carries its own TELxIncentiveHook instance.
 
-| Legacy pool | Pool id |
-| --- | --- |
-| Base ETH/TEL v2 | `0x727b2741ac2b2df8bc9185e1de972661519fc07b156057eeed9b07c50e08829b` |
-| Polygon WETH/TEL v2 | `0x25412ca33f9a2069f0520708da3f70a7843374dd46dc1c7e62f6d5002f5f9fa7` |
-| Polygon USDC/eMXN | `0x37dafec81119c7987538ac000b8a8a16a7f4daeecf91626efc9956ccd5146246` |
+| Legacy pool | Pool id | TELxIncentiveHook |
+| --- | --- | --- |
+| Base ETH/TEL v2 | `0x727b2741ac2b2df8bc9185e1de972661519fc07b156057eeed9b07c50e08829b` | `0x23aB2e6D4Ab0c5f872567098671F1ffb46Fd2500` |
+| Polygon WETH/TEL v2 | `0x25412ca33f9a2069f0520708da3f70a7843374dd46dc1c7e62f6d5002f5f9fa7` | `0xD77cC9230Ded5b6591730032975453744532a500` |
+| Polygon USDC/eMXN | `0x37dafec81119c7987538ac000b8a8a16a7f4daeecf91626efc9956ccd5146246` | `0x13B979ecB3280bFf58A94B50ac6250f7Ca52a500` |
 
 **TEL v3 pool ids**
 

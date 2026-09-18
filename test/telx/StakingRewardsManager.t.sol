@@ -8,6 +8,7 @@ import {StakingRewards} from "contracts/telx/core/StakingRewards.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title StakingRewardsManagerTest
 /// @notice Polygon-fork tests for the upgradeable StakingRewardsManager - coordinates the
@@ -44,7 +45,7 @@ contract StakingRewardsManagerTest is Test {
     uint256 public constant REWARDS_DURATION = 30 days;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), 65_000_000);
+        ForkOrSkip.select("POLYGON_RPC_URL", 65_000_000);
 
         deployer = address(this);
         builder = makeAddr("builder");

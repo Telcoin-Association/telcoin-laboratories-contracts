@@ -4,9 +4,7 @@ pragma solidity ^0.8.24;
 import {Script, console2} from "forge-std/Script.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
-import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
@@ -155,7 +153,9 @@ abstract contract TELxPoolScriptBase is Script {
         // one that does: 65,536 as a uint16 is 0, which would silently mean "full range".
         if (widthBps >= V4PoolMath.BPS) revert InvalidWidthBps(poolName, widthBps);
         if (slippageBps >= V4PoolMath.BPS) revert InvalidSlippageBps(poolName, slippageBps);
-        if (maxTickDeviation > uint256(uint24(TickMath.MAX_TICK))) revert InvalidTickDeviation(poolName, maxTickDeviation);
+        if (maxTickDeviation > uint256(uint24(TickMath.MAX_TICK))) {
+            revert InvalidTickDeviation(poolName, maxTickDeviation);
+        }
 
         params.widthBps = uint16(widthBps);
         params.maxTickDeviation = int24(uint24(maxTickDeviation));
@@ -244,7 +244,11 @@ abstract contract TELxPoolScriptBase is Script {
     // -----------
 
     /// @notice Current price of a pool, or zero when it has never been initialized.
-    function _currentSqrtPriceX96(ChainConfig memory config, PoolId poolId) internal view returns (uint160 sqrtPriceX96) {
+    function _currentSqrtPriceX96(ChainConfig memory config, PoolId poolId)
+        internal
+        view
+        returns (uint160 sqrtPriceX96)
+    {
         (sqrtPriceX96,,,) = StateView(config.stateView).getSlot0(poolId);
     }
 
@@ -311,11 +315,11 @@ abstract contract TELxPoolScriptBase is Script {
         console2.log("  tick:        ", int256(TickMath.getTickAtSqrtPrice(sqrtPriceX96)));
 
         uint256 price1Per0 = V4PoolMath.humanPriceE18(sqrtPriceX96, s.decimals0, s.decimals1);
+        console2.log(string.concat("  ", _fmtE18(price1Per0), " ", s.symbol1, " per ", s.symbol0));
         console2.log(
-            string.concat("  ", _fmtE18(price1Per0), " ", s.symbol1, " per ", s.symbol0)
-        );
-        console2.log(
-            string.concat("  ", _fmtE18(V4PoolMath.humanInversePriceE18(price1Per0)), " ", s.symbol0, " per ", s.symbol1)
+            string.concat(
+                "  ", _fmtE18(V4PoolMath.humanInversePriceE18(price1Per0)), " ", s.symbol0, " per ", s.symbol1
+            )
         );
     }
 
@@ -339,14 +343,22 @@ abstract contract TELxPoolScriptBase is Script {
         uint256 bal0 = _balance(s.currency0, who);
         uint256 bal1 = _balance(s.currency1, who);
         console2.log("Signer balances for", who);
-        console2.log(string.concat("  ", s.symbol0, ": ", _fmtUnits(bal0, s.decimals0), bal0 < budget0 ? "  SHORT" : ""));
-        console2.log(string.concat("  ", s.symbol1, ": ", _fmtUnits(bal1, s.decimals1), bal1 < budget1 ? "  SHORT" : ""));
+        console2.log(
+            string.concat("  ", s.symbol0, ": ", _fmtUnits(bal0, s.decimals0), bal0 < budget0 ? "  SHORT" : "")
+        );
+        console2.log(
+            string.concat("  ", s.symbol1, ": ", _fmtUnits(bal1, s.decimals1), bal1 < budget1 ? "  SHORT" : "")
+        );
     }
 
     /// @dev Prints a raw amount as whole tokens with its raw form beside it, so the reviewed
     ///      figure and the figure the chain sees appear on one line.
     function _logAmount(string memory label, uint256 raw, uint8 decimals, string memory symbol) internal pure {
-        console2.log(string.concat("  ", label, ": ", _fmtUnits(raw, decimals), " ", symbol, "  (raw ", Strings.toString(raw), ")"));
+        console2.log(
+            string.concat(
+                "  ", label, ": ", _fmtUnits(raw, decimals), " ", symbol, "  (raw ", Strings.toString(raw), ")"
+            )
+        );
     }
 
     /// @dev Fixed-point rendering of an 18-decimal figure with six fractional digits.

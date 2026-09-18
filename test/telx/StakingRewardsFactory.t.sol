@@ -6,6 +6,7 @@ import {StakingRewardsFactory} from "contracts/telx/core/StakingRewardsFactory.s
 import {StakingRewards} from "contracts/telx/core/StakingRewards.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title StakingRewardsFactoryTest
 /// @notice Polygon-fork tests for the StakingRewardsFactory - the deterministic-deployer for
@@ -27,7 +28,7 @@ contract StakingRewardsFactoryTest is Test {
     address public alice;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), 65_000_000);
+        ForkOrSkip.select("POLYGON_RPC_URL", 65_000_000);
 
         owner = address(this);
         alice = makeAddr("alice");

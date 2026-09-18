@@ -6,6 +6,7 @@ import {StakingRewards} from "contracts/telx/core/StakingRewards.sol";
 import {RewardsDistributionRecipient} from "contracts/telx/abstract/RewardsDistributionRecipient.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title StakingRewardsTest
 /// @notice Polygon-fork tests for the standalone StakingRewards contract. Validates
@@ -30,7 +31,7 @@ contract StakingRewardsTest is Test {
     uint256 public constant REWARD_AMOUNT = 10_000e18;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), 65_000_000);
+        ForkOrSkip.select("POLYGON_RPC_URL", 65_000_000);
 
         owner = makeAddr("owner");
         alice = makeAddr("alice");

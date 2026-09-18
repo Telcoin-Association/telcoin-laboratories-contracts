@@ -13,6 +13,7 @@ import {BaseAddresses} from "../../script/shared/BaseAddresses.sol";
 import {TELxPools} from "../../script/shared/TELxPools.sol";
 import {VerifyTELxRegistry} from "../../script/telx/VerifyTELxRegistry.s.sol";
 import {TELxRegistryScriptBase} from "../../script/telx/base/TELxRegistryScriptBase.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title VerifyTELxRegistryForkTest
 /// @notice Proves the post-deploy verification script accepts a correctly wired registry and
@@ -44,7 +45,7 @@ contract VerifyTELxRegistryForkTest is Test {
     bytes32 internal constant SUPPORT_ROLE = keccak256("SUPPORT_ROLE");
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"));
+        ForkOrSkip.select("POLYGON_RPC_URL");
 
         verifier = new VerifyTELxRegistry();
         target = TELxRegistryScriptBase.ChainTarget({
@@ -208,7 +209,8 @@ contract VerifyTELxRegistryForkTest is Test {
     ///         the failure a copy-paste of the wrong address in the batch would produce.
     function test_verifyOn_rejectsSubscriberPointingElsewhere() public {
         (PositionRegistry registry,) = _deployWired();
-        PositionRegistry other = new PositionRegistry(IPositionManager(positionManager), StateView(stateView), governance);
+        PositionRegistry other =
+            new PositionRegistry(IPositionManager(positionManager), StateView(stateView), governance);
         TELxSubscriber strayed = new TELxSubscriber(IPositionRegistry(address(other)), positionManager, governance);
         vm.prank(governance);
         registry.grantRole(SUBSCRIBER_ROLE, address(strayed));
@@ -229,7 +231,8 @@ contract VerifyTELxRegistryForkTest is Test {
     /// @notice Ownership landing anywhere but governance, including the ops Safe, is rejected.
     ///         `setRegistry` repoints every LP subscription and is a governance lever.
     function test_verifyOn_rejectsWrongSubscriberOwner() public {
-        (PositionRegistry registry, TELxSubscriber subscriber) = _deployWith(positionManager, stateView, governance, support);
+        (PositionRegistry registry, TELxSubscriber subscriber) =
+            _deployWith(positionManager, stateView, governance, support);
         vm.expectRevert(bytes("TELxSubscriber owner -> governance Safe: owner mismatch"));
         verifier.verifyOn(target, address(registry), address(subscriber));
     }

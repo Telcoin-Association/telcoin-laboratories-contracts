@@ -10,6 +10,7 @@ import {TelcoinDistributor} from "contracts/protocol/core/TelcoinDistributor.sol
 import {CouncilMember} from "contracts/sablier/core/CouncilMember.sol";
 import {ISablierV2Lockup} from "contracts/sablier/interfaces/ISablierV2Lockup.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /**
  * @title TelcoinDistributor Polygon Fork Tests
@@ -47,7 +48,7 @@ contract TelcoinDistributorForkTest is Test {
     // setup
     // -----
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), FORK_BLOCK);
+        ForkOrSkip.select("POLYGON_RPC_URL", FORK_BLOCK);
 
         owner = makeAddr("owner");
         nonMember = makeAddr("nonMember");

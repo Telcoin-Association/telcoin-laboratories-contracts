@@ -25,6 +25,7 @@ import {IPositionRegistry} from "../../contracts/telx/interfaces/IPositionRegist
 import {SeedV4LiquidityHarness} from "./harnesses/SeedV4LiquidityHarness.sol";
 import {EmptyPoolPriceMover} from "./mocks/EmptyPoolPriceMover.sol";
 import {FlashPruneAttacker} from "./mocks/FlashPruneAttacker.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title TELxPoolLifecycleForkTest
 /// @notice End-to-end coverage of the TELx pool scripts against live Uniswap v4 deployments:
@@ -72,12 +73,7 @@ abstract contract TELxPoolLifecycleForkTest is Test {
     uint256 internal amount1Human;
 
     function _setUpChain() internal {
-        string memory rpc = vm.envOr(rpcEnvVar, string(""));
-        if (bytes(rpc).length == 0) {
-            vm.skip(true);
-            return;
-        }
-        vm.createSelectFork(rpc);
+        ForkOrSkip.select(rpcEnvVar);
 
         createScript = new CreateV4Pool();
         seedScript = new SeedV4LiquidityHarness();
@@ -85,9 +81,7 @@ abstract contract TELxPoolLifecycleForkTest is Test {
 
         TELxPools.PoolSpec memory s = TELxPools.spec(poolName);
 
-        registry = new PositionRegistry(
-            IPositionManager(_positionManager()), StateView(_stateView()), admin
-        );
+        registry = new PositionRegistry(IPositionManager(_positionManager()), StateView(_stateView()), admin);
         subscriber = new TELxSubscriber(IPositionRegistry(address(registry)), _positionManager(), support);
 
         vm.startPrank(admin);
@@ -190,8 +184,7 @@ abstract contract TELxPoolLifecycleForkTest is Test {
         PoolKey memory key = TELxPools.poolKey(s);
         uint160 expected = _intendedSqrtPrice(s);
 
-        (PoolId poolId, uint160 sqrtPriceX96) =
-            createScript.runWithSigner(poolName, amount0Human, amount1Human, signer);
+        (PoolId poolId, uint160 sqrtPriceX96) = createScript.runWithSigner(poolName, amount0Human, amount1Human, signer);
 
         (uint160 live,,,) = StateView(_stateView()).getSlot0(poolId);
         assertEq(PoolId.unwrap(poolId), PoolId.unwrap(key.toId()), "poolId");
@@ -413,8 +406,9 @@ abstract contract TELxPoolLifecycleForkTest is Test {
     function test_pruneSubscription_refusedInsideUnlock() public {
         uint256 tokenId = _createSeedSubscribe();
 
-        FlashPruneAttacker attacker =
-            new FlashPruneAttacker(IPoolManager(StateView(_stateView()).poolManager()), IPositionRegistry(address(registry)));
+        FlashPruneAttacker attacker = new FlashPruneAttacker(
+            IPoolManager(StateView(_stateView()).poolManager()), IPositionRegistry(address(registry))
+        );
         attacker.attack(tokenId);
 
         assertFalse(attacker.pruneSucceeded(), "prune must not succeed inside unlock");
@@ -492,10 +486,12 @@ abstract contract TELxPoolLifecycleForkTest is Test {
         vm.startPrank(signer);
         if (!TELxPools.isNativeCurrency0(s)) {
             IERC20(s.currency0).approve(config.permit2, p.amount0Max);
-            IAllowanceTransfer(config.permit2).approve(s.currency0, config.positionManager, uint160(p.amount0Max), expiration);
+            IAllowanceTransfer(config.permit2)
+                .approve(s.currency0, config.positionManager, uint160(p.amount0Max), expiration);
         }
         IERC20(s.currency1).approve(config.permit2, p.amount1Max);
-        IAllowanceTransfer(config.permit2).approve(s.currency1, config.positionManager, uint160(p.amount1Max), expiration);
+        IAllowanceTransfer(config.permit2)
+            .approve(s.currency1, config.positionManager, uint160(p.amount1Max), expiration);
         vm.stopPrank();
     }
 
@@ -527,7 +523,9 @@ abstract contract TELxPoolLifecycleForkTest is Test {
         } else {
             assertEq(spent0, p.amount0Cost, "currency0 spent should equal the planned cost");
         }
-        assertEq(before1 - _balance(s.currency1, signer), p.amount1Cost, "currency1 spent should equal the planned cost");
+        assertEq(
+            before1 - _balance(s.currency1, signer), p.amount1Cost, "currency1 spent should equal the planned cost"
+        );
         assertLe(p.amount0Cost, V4PoolMath.toRawAmount(amount0Human, s.decimals0), "cost exceeds the currency0 budget");
         assertLe(p.amount1Cost, V4PoolMath.toRawAmount(amount1Human, s.decimals1), "cost exceeds the currency1 budget");
 
@@ -539,11 +537,14 @@ abstract contract TELxPoolLifecycleForkTest is Test {
     }
 
     /// @dev The minted range must be exactly what `V4PoolMath` says for this price and width.
-    function _assertRangeMatchesMath(uint256 tokenId, uint160 sqrtPriceX96, uint16 widthBps, int24 spacing) internal view {
+    function _assertRangeMatchesMath(uint256 tokenId, uint160 sqrtPriceX96, uint16 widthBps, int24 spacing)
+        internal
+        view
+    {
         (int24 expectedLower, int24 expectedUpper) = widthBps == FULL
             ? V4PoolMath.fullRangeTicks(spacing)
             : V4PoolMath.percentRangeTicks(sqrtPriceX96, widthBps, spacing);
-        (, , int24 lower, int24 upper) = registry.getPosition(tokenId);
+        (,, int24 lower, int24 upper) = registry.getPosition(tokenId);
         assertEq(lower, expectedLower, "tickLower");
         assertEq(upper, expectedUpper, "tickUpper");
     }
@@ -553,7 +554,7 @@ abstract contract TELxPoolLifecycleForkTest is Test {
     }
 
     function _positionSpan(uint256 tokenId) internal view returns (uint256) {
-        (, , int24 lower, int24 upper) = registry.getPosition(tokenId);
+        (,, int24 lower, int24 upper) = registry.getPosition(tokenId);
         return uint256(int256(upper) - int256(lower));
     }
 

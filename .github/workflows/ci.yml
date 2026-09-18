@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # Moderate fuzz coverage without the full 256-run cost. See foundry.toml.
+  FOUNDRY_PROFILE: ci
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -15,34 +19,47 @@ jobs:
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          # Pinned to the release the fork suites and the Safe simulations were verified on, so a
+          # toolchain change is a deliberate commit rather than a surprise on the next run.
+          version: v1.8.1
 
       - name: Build
         run: forge build
 
       - name: Test
-        # Fork tests require an archive RPC (free public RPCs only serve
-        # recent state, not historical blocks like Polygon 84M). If the
-        # POLYGON_RPC_URL secret is configured (paid Alchemy/Infura with
-        # archive), we run the full suite. Otherwise we skip fork tests - # they remain fully runnable locally via `.env`. This matches the
-        # CI pattern in sibling Telcoin repos (tel-v3-staking, tel-v3,
-        # tn-contracts). GitHub does not pass repo secrets to workflows
-        # triggered by PRs from forks, so adding keys here is safe on a
-        # public repo.
+        # Fork suites read their RPC URL through `test/util/ForkOrSkip.sol` and skip themselves
+        # when it is unset, so the same command is correct with or without secrets: with them the
+        # full suite runs, without them the fork suites report as skipped and everything else
+        # still has to pass. Fork tests need an archive RPC (free public endpoints do not serve
+        # the pinned historical blocks). GitHub does not pass repo secrets to workflows triggered
+        # by PRs from forks, so adding keys here is safe on a public repo.
         run: |
           if [ -z "${POLYGON_RPC_URL}" ]; then
-            echo "::notice::RPC secrets not configured. Skipping fork-dependent tests (everything matching contract name 'Fork' or 'Polygon'). Add ETHEREUM_RPC_URL, POLYGON_RPC_URL, BASE_RPC_URL, SEPOLIA_RPC_URL repo secrets to run the full suite."
-            forge test --no-match-contract "(Fork|Polygon)" -vvv
-          else
-            forge test -vvv
+            echo "::notice::RPC secrets not configured; fork suites will skip themselves. Add ETHEREUM_RPC_URL, POLYGON_RPC_URL, BASE_RPC_URL and SEPOLIA_RPC_URL repo secrets to run the full suite."
           fi
+          forge test -vvv
         env:
           ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
           POLYGON_RPC_URL: ${{ secrets.POLYGON_RPC_URL }}
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
 
+      - name: Coverage
+        # The production contracts the TELx migration deploys must stay at 100% on every axis
+        # (INVARIANTS.md, coverage expectations). Measured from the unit suites alone, so this
+        # step needs no secrets.
+        run: |
+          forge coverage --no-match-coverage "(test|script|lib)" --report summary | tee coverage.txt
+          for f in contracts/telx/core/PositionRegistry.sol contracts/telx/core/TELxSubscriber.sol; do
+            if ! grep -F "$f" coverage.txt | grep -Eq '100\.00% \([0-9]+/[0-9]+\) *\| 100\.00% \([0-9]+/[0-9]+\) *\| 100\.00% \([0-9]+/[0-9]+\) *\| 100\.00%'; then
+              echo "::error::$f is below 100% coverage on at least one axis"
+              exit 1
+            fi
+          done
+
       - name: Gas Report
-        if: ${{ env.POLYGON_RPC_URL != '' }}
+        if: ${{ secrets.POLYGON_RPC_URL != '' }}
         run: forge test --gas-report
         env:
           ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}

@@ -65,7 +65,9 @@ contract VerifyTELxRegistry is TELxRegistryScriptBase, VerificationBase {
             ChainTarget memory target = allChains[i];
             if (!_selectChain(target)) continue;
 
-            console.log("\n=== Verifying TELx registry on %s (chainId %s) ===", target.name, vm.toString(target.chainId));
+            console.log(
+                "\n=== Verifying TELx registry on %s (chainId %s) ===", target.name, vm.toString(target.chainId)
+            );
 
             (address registry, address subscriber) = _resolveAddresses(target);
             verifyOn(target, registry, subscriber);
@@ -144,7 +146,9 @@ contract VerifyTELxRegistry is TELxRegistryScriptBase, VerificationBase {
             address(registry.poolManager()) == address(StateView(target.stateView).poolManager()),
             "registry: wrong PoolManager"
         );
-        console.log("[OK] registry dependencies: PositionManager %s, StateView %s", target.positionManager, target.stateView);
+        console.log(
+            "[OK] registry dependencies: PositionManager %s, StateView %s", target.positionManager, target.stateView
+        );
 
         // 3. Governance owns the registry
         _requireRole(registryAddr, DEFAULT_ADMIN_ROLE, target.admin, "registry DEFAULT_ADMIN_ROLE -> governance Safe");
@@ -153,9 +157,12 @@ contract VerifyTELxRegistry is TELxRegistryScriptBase, VerificationBase {
 
         // 4. Only the subscriber can drive the subscription lifecycle
         _requireRole(registryAddr, SUBSCRIBER_ROLE, subscriberAddr, "registry SUBSCRIBER_ROLE -> TELxSubscriber");
-        require(!registry.hasRole(SUBSCRIBER_ROLE, target.admin), "registry: governance Safe must not hold SUBSCRIBER_ROLE");
         require(
-            !registry.hasRole(SUBSCRIBER_ROLE, target.supportSafe), "registry: support Safe must not hold SUBSCRIBER_ROLE"
+            !registry.hasRole(SUBSCRIBER_ROLE, target.admin), "registry: governance Safe must not hold SUBSCRIBER_ROLE"
+        );
+        require(
+            !registry.hasRole(SUBSCRIBER_ROLE, target.supportSafe),
+            "registry: support Safe must not hold SUBSCRIBER_ROLE"
         );
 
         // 5. Ops can rescue tokens, and only ops
@@ -198,9 +205,8 @@ contract VerifyTELxRegistry is TELxRegistryScriptBase, VerificationBase {
      *      for the subscriber rather than deploying a fresh registry.
      */
     function verifyBytecode(ChainTarget memory target, address registryAddr, address subscriberAddr) public {
-        PositionRegistry twinRegistry = new PositionRegistry(
-            IPositionManager(target.positionManager), StateView(target.stateView), target.admin
-        );
+        PositionRegistry twinRegistry =
+            new PositionRegistry(IPositionManager(target.positionManager), StateView(target.stateView), target.admin);
         require(
             registryAddr.codehash == address(twinRegistry).codehash,
             "PositionRegistry: deployed bytecode does not match this tree"

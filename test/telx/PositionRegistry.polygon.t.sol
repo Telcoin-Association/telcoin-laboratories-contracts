@@ -13,6 +13,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {TestConstants} from "../util/TestConstants.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /**
  * @title PositionRegistry Polygon Fork Tests
@@ -41,7 +42,7 @@ contract PositionRegistryPolygonTest is Test {
     StateView stateView;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), TestConstants.PRODUCTION_STATE_POLYGON_FORK_BLOCK);
+        ForkOrSkip.select("POLYGON_RPC_URL", TestConstants.PRODUCTION_STATE_POLYGON_FORK_BLOCK);
 
         // a fresh StateView lens over the live PoolManager reads real pool state
         stateView = new StateView(IPoolManager(V4_POOL_MANAGER));

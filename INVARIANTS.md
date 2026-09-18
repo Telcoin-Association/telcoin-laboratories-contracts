@@ -149,8 +149,10 @@ Multi-line descriptive blocks use the dash-bar heading + `//` body lines:
 
 ### CI workflow
 
-- Use the secrets-aware fallback pattern: full suite when `POLYGON_RPC_URL` is set, non-fork only when absent (with `::notice::` explaining the skip).
-- Fork test naming: `*.polygon.t.sol`, `*.fork.t.sol`, or contracts matching `*Fork*` / `*Polygon*` - single-regex skip via `--no-match-contract "(Fork|Polygon)"`.
+- CI runs `forge test` under `[profile.ci]` with whatever RPC secrets it has, and never filters by contract name. Every fork suite MUST read its RPC URL through `test/util/ForkOrSkip.sol`, which forks when the variable is set and `vm.skip`s the suite when it is not. A suite that reads `vm.envString("<CHAIN>_RPC_URL")` directly fails the build in any environment without that secret, which is every PR from a fork; `ForkOrSkip` is the only sanctioned way to fork.
+- Fork test naming stays `*.polygon.t.sol`, `*.fork.t.sol`, or contracts matching `*Fork*` / `*Polygon*`, for humans reading the tree, not for a CI filter.
+- The workflow pins the Foundry release it runs, and a coverage step fails the build if `PositionRegistry` or `TELxSubscriber` drop below 100% on any axis. Both are measured from the unit suites alone, so the gate holds without secrets.
+- "CI is green without secrets" is a claim to be tested, not assumed: `forge` loads `.env` automatically, so a local check has to set each `<CHAIN>_RPC_URL` to the empty string on the command line rather than rely on `env -u`.
 
 ### Deploy script pattern
 
