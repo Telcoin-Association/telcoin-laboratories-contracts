@@ -5,9 +5,10 @@ import {CrossChainAddresses} from "./CrossChainAddresses.sol";
 
 /// @title EthereumAddresses
 /// @notice Canonical Ethereum-mainnet (chain 1) addresses used by deploy scripts and fork tests.
-///         These are protocol facts, not per-developer config, so they belong in code, not `.env`.
-///         Per-environment overrides remain available via `vm.envOr(KEY, EthereumAddresses.X)` in
-///         the consuming script when needed.
+///         These are protocol facts, not per-developer config, so they belong in code, not `.env`,
+///         and the scripts read them from here with no environment override: a mainnet script
+///         that a stray `.env` line could point at a different PositionManager is a script whose
+///         preview cannot be trusted.
 library EthereumAddresses {
     uint256 internal constant CHAIN_ID = 1;
 
@@ -52,10 +53,17 @@ library EthereumAddresses {
     /// @notice Holds DEFAULT_ADMIN_ROLE on the TELx PositionRegistry.
     address internal constant GOVERNANCE_SAFE = CrossChainAddresses.GOVERNANCE_SAFE;
 
-    /// @notice Holds SUPPORT_ROLE on the registry and owns the subscriber.
-    /// FIXME: Ethereum has no TELx support multisig yet. Polygon and Base both use
-    ///        0x3F00a8CE88C8cf367AD10A5675161e7AFd2472bE. Blocks the Ethereum deploy until the
-    ///        deployment team supplies one; the deploy script reverts on a zero value rather than
-    ///        silently granting SUPPORT_ROLE to address(0).
+    /// @notice Holds SUPPORT_ROLE on the registry, for token rescue and nothing else.
+    /// @dev    Unset: the TELx ops multisig is not deployed on Ethereum. It is the 2-of-6 Safe whose
+    ///         owner set `PolygonAddresses.SUPPORT_SAFE` and `BaseAddresses.SUPPORT_SAFE` share,
+    ///         and the value to put here is a Safe on Ethereum with THAT owner set, once one is
+    ///         deployed. It is not 0x3F00a8CE88C8cf367AD10A5675161e7AFd2472bE: that address is a
+    ///         live 2-of-3 Safe on Ethereum with an unrelated owner set, and it passes every "is a
+    ///         Safe" check while granting SUPPORT_ROLE to the wrong people.
+    ///
+    ///         While this is zero the deploy script reverts `MissingSupportSafe("ethereum")` rather
+    ///         than granting SUPPORT_ROLE to address(0). When it is filled in, replace
+    ///         `test_supportSafe_stillUnset` in `ChainAddresses.fork.t.sol` with the owner-set
+    ///         comparison the Base suite already performs against Polygon.
     address internal constant SUPPORT_SAFE = address(0);
 }

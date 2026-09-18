@@ -52,8 +52,8 @@ library BaseAddresses {
     /// @notice Holds DEFAULT_ADMIN_ROLE on the TELx PositionRegistry.
     address internal constant GOVERNANCE_SAFE = CrossChainAddresses.GOVERNANCE_SAFE;
 
-    /// @notice Holds SUPPORT_ROLE on the registry and owns the subscriber. A 2-of-6 Safe whose
-    ///         owner set matches the Polygon support Safe (`PolygonAddresses.SUPPORT_SAFE`).
+    /// @notice Holds SUPPORT_ROLE on the registry, for token rescue and nothing else. A 2-of-6 Safe
+    ///         whose owner set matches the Polygon support Safe (`PolygonAddresses.SUPPORT_SAFE`).
     /// @dev    Not to be confused with 0x3F00a8CE88C8cf367AD10A5675161e7AFd2472bE, which also holds
     ///         SUPPORT_ROLE on the live Base registry. That address is a Safe on Base with a
     ///         different owner set, and a plain EOA on Polygon, so it is not the cross-chain TELx

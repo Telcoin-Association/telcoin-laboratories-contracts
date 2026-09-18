@@ -5,9 +5,10 @@ import {CrossChainAddresses} from "./CrossChainAddresses.sol";
 
 /// @title PolygonAddresses
 /// @notice Canonical Polygon-mainnet (chain 137) addresses used by deploy scripts and fork tests.
-///         These are protocol facts, not per-developer config, so they belong in code, not `.env`.
-///         Per-environment overrides remain available via `vm.envOr(KEY, PolygonAddresses.X)` in
-///         the consuming script when needed (e.g., testnet swaps).
+///         These are protocol facts, not per-developer config, so they belong in code, not `.env`,
+///         and the scripts read them from here with no environment override: a mainnet script
+///         that a stray `.env` line could point at a different PositionManager is a script whose
+///         preview cannot be trusted.
 library PolygonAddresses {
     uint256 internal constant CHAIN_ID = 137;
 
@@ -54,8 +55,8 @@ library PolygonAddresses {
     /// @notice Holds DEFAULT_ADMIN_ROLE on the TELx PositionRegistry.
     address internal constant GOVERNANCE_SAFE = CrossChainAddresses.GOVERNANCE_SAFE;
 
-    /// @notice Holds SUPPORT_ROLE on the registry and owns the subscriber. A 2-of-6 Safe whose
-    ///         owner set matches the Base support Safe (`BaseAddresses.SUPPORT_SAFE`), which is how
+    /// @notice Holds SUPPORT_ROLE on the registry, for token rescue and nothing else. A 2-of-6 Safe
+    ///         whose owner set matches the Base support Safe (`BaseAddresses.SUPPORT_SAFE`), which is how
     ///         the pair was identified: the live registry granted SUPPORT_ROLE to several
     ///         addresses per chain, and only these two are deployed Safes with the same owners.
     address internal constant SUPPORT_SAFE = 0x583D596b0a79C0e83C87851eA9FB1A91e80290B2;

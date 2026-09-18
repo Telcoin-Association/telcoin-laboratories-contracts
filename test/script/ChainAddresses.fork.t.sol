@@ -119,13 +119,23 @@ contract EthereumAddressesForkTest is ChainAddressesForkTest {
 
     /// @notice Ethereum has no TELx support multisig yet, and the registry deploy cannot run until
     ///         it does. This test documents the gap and fails the moment someone fills the
-    ///         constant in, prompting them to delete it and add the real assertion.
+    ///         constant in, prompting them to delete it and add the owner-set comparison against
+    ///         Polygon that `BaseAddressesForkTest.test_supportSafe_ownersMatchPolygon` performs.
     function test_supportSafe_stillUnset() public pure {
         assertEq(
             EthereumAddresses.SUPPORT_SAFE,
             address(0),
-            "Ethereum SUPPORT_SAFE is now set; assert it has code and drop this placeholder test"
+            "Ethereum SUPPORT_SAFE is now set; replace this test with the owner-set comparison against Polygon"
         );
+    }
+
+    /// @notice The address that is easy to reach for and wrong. It is a live Safe on Ethereum, so
+    ///         every structural check passes, but its owners are not the TELx ops owners. Pinned
+    ///         here so the constant can never be filled with it without a test saying why not.
+    function test_supportSafe_isNotTheUnrelatedEthereumSafe() public view {
+        address unrelated = 0x3F00a8CE88C8cf367AD10A5675161e7AFd2472bE;
+        assertTrue(unrelated.code.length > 0, "the decoy is a deployed contract on Ethereum");
+        assertNotEq(EthereumAddresses.SUPPORT_SAFE, unrelated, "SUPPORT_SAFE must not be the unrelated Safe");
     }
 }
 

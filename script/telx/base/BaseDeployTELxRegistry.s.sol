@@ -66,11 +66,9 @@ abstract contract BaseDeployTELxRegistry is TELxRegistryScriptBase {
     // -----------
 
     function run() public virtual {
-        // The address record is written after the batch is proposed, and `vm.writeJson` cannot
-        // create a missing directory. Guarantee it up front so the one failure mode this could have
-        // - a proposal that went out but whose addresses were never recorded - cannot happen.
-        // Only on a real broadcast: simulation writes nothing, and `createDir` needs filesystem
-        // write permission that only the deploy profile grants.
+        // `vm.writeJson` can create a missing file but not a missing directory. Guarantee the
+        // directory up front, on a real broadcast only: simulation writes nothing, and `createDir`
+        // needs filesystem write permission that only the deploy profile grants.
         if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) {
             vm.createDir(string.concat(vm.projectRoot(), "/deployments"), true);
         }
@@ -122,10 +120,11 @@ abstract contract BaseDeployTELxRegistry is TELxRegistryScriptBase {
 
         // Role grants and pool registrations ride in the same batch. The admin is the Safe itself,
         // so it can grant and register inside the very transaction that creates the registry.
-        _batchTargets.push(registry);
-        _batchDatas.push(abi.encodeCall(IAccessControl.grantRole, (keccak256("SUBSCRIBER_ROLE"), subscriber)));
-        _batchTargets.push(registry);
-        _batchDatas.push(abi.encodeCall(IAccessControl.grantRole, (keccak256("SUPPORT_ROLE"), target.supportSafe)));
+        // Each is skipped when the live registry already has it, so a rerun after a partially
+        // executed batch proposes only what is missing and a rerun after a complete one proposes
+        // nothing.
+        _addGrantToBatch(registry, keccak256("SUBSCRIBER_ROLE"), subscriber, "SUBSCRIBER_ROLE -> TELxSubscriber");
+        _addGrantToBatch(registry, keccak256("SUPPORT_ROLE"), target.supportSafe, "SUPPORT_ROLE -> support Safe");
 
         // Allowlist the chain's catalog pools. Registration is by PoolKey and needs no on-chain
         // state, so pools can be registered before they are created; a subscription still needs
@@ -145,16 +144,19 @@ abstract contract BaseDeployTELxRegistry is TELxRegistryScriptBase {
             ++registered;
         }
 
+        // The addresses are a function of the Safe and the salts alone, so they are known before
+        // the proposal goes out. Record them first: a proposal that went out but whose addresses
+        // were never recorded is the one failure this script must not be able to produce.
+        if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) {
+            _saveDeploymentAddress(target.name, "PositionRegistry", registry);
+            _saveDeploymentAddress(target.name, "TELxSubscriber", subscriber);
+        }
+
         _flushBatch(string.concat("Deploy + wire TELx registry on ", target.name));
 
         console.log("  PositionRegistry: %s", registry);
         console.log("  TELxSubscriber:   %s", subscriber);
         console.log("  Pools registered: %s", vm.toString(registered));
-
-        if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) {
-            _saveDeploymentAddress(target.name, "PositionRegistry", registry);
-            _saveDeploymentAddress(target.name, "TELxSubscriber", subscriber);
-        }
     }
 
     // -----------
@@ -189,6 +191,18 @@ abstract contract BaseDeployTELxRegistry is TELxRegistryScriptBase {
         console.log("  [batch] %s (expected: %s)", label, expectedAddress);
         _batchTargets.push(CREATEX);
         _batchDatas.push(abi.encodeCall(ICreateX.deployCreate3, (guardedSalt, initCode)));
+    }
+
+    /// @dev Queues a role grant unless the live registry already has it. Before the registry
+    ///      exists there is nothing to read, so the grant is always queued.
+    function _addGrantToBatch(address registry, bytes32 role, address account, string memory label) internal {
+        if (registry.code.length > 0 && IAccessControl(registry).hasRole(role, account)) {
+            console.log("  [batch] %s already granted, skipping", label);
+            return;
+        }
+        _batchTargets.push(registry);
+        _batchDatas.push(abi.encodeCall(IAccessControl.grantRole, (role, account)));
+        console.log("  [batch] grantRole %s", label);
     }
 
     function _flushBatch(string memory description) internal {
