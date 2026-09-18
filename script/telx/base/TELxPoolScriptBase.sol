@@ -13,6 +13,7 @@ import {PolygonAddresses} from "../../shared/PolygonAddresses.sol";
 import {BaseAddresses} from "../../shared/BaseAddresses.sol";
 import {TELxPools} from "../../shared/TELxPools.sol";
 import {V4PoolMath} from "../../shared/V4PoolMath.sol";
+import {PoolsJson} from "./PoolsJson.sol";
 
 /// @title TELxPoolScriptBase
 /// @notice Shared chain resolution, parameter loading, signer resolution and preview logging for
@@ -36,36 +37,8 @@ abstract contract TELxPoolScriptBase is Script {
         string name;
     }
 
-    /// @notice Per-pool seed parameters, as read from `script/telx/pools.json`.
-    /// @param amount0Human Whole tokens of currency0 budgeted for the seed.
-    /// @param amount1Human Whole tokens of currency1 budgeted for the seed.
-    /// @param widthBps Half-width of the seeded band in basis points; 0 selects the full range.
-    /// @param maxTickDeviation How far the pool's live tick may sit from the tick the amounts imply
-    ///        before seeding is refused.
-    /// @param slippageBps How far above the computed mint cost the on-chain maximums are set.
-    struct PoolParams {
-        uint256 amount0Human;
-        uint256 amount1Human;
-        uint16 widthBps;
-        int24 maxTickDeviation;
-        uint16 slippageBps;
-    }
-
-    /// @dev No real seed approaches this many whole tokens of anything, and every raw-unit typo
-    ///      (an amount pasted with its decimals already applied) sails past it.
-    uint256 internal constant MAX_HUMAN_AMOUNT = 1e15;
-
-    /// @dev Path of the checked-in parameter file, relative to the project root.
-    string internal constant POOLS_CONFIG = "script/telx/pools.json";
-
     error UnsupportedChain(uint256 chainId);
     error MissingChainAddress(string what);
-    error PoolNotConfigured(string poolName);
-    error PoolAmountsNotSet(string poolName);
-    error AmountImplausible(string poolName, uint256 humanAmount);
-    error InvalidWidthBps(string poolName, uint256 widthBps);
-    error InvalidSlippageBps(string poolName, uint256 slippageBps);
-    error InvalidTickDeviation(string poolName, uint256 maxTickDeviation);
 
     // -----------
     // Chain resolution
@@ -123,68 +96,21 @@ abstract contract TELxPoolScriptBase is Script {
     // Pool parameters
     // -----------
 
-    /**
-     * @notice Reads a pool's seed parameters from `script/telx/pools.json`.
-     * @dev The file is the single place the per-pool amounts live, so the seven pools can be filled
-     *      in and reviewed together and each script invocation then needs only the pool name. It
-     *      also leaves a record of what each pool was seeded with, in git, next to the code that
-     *      seeded it, rather than only in a transaction somewhere.
-     *
-     *      Amounts of zero mean "not decided yet" and are refused by `_requireAmountsSet`; the
-     *      file ships that way so that nothing can be seeded at a placeholder price by accident.
-     *
-     *      `maxTickDeviation` and `slippageBps` come from the file's `defaults` block unless the
-     *      pool's own entry overrides them. Every value is range-checked here, at the point it is
-     *      read, so an out-of-range figure fails the preview rather than the broadcast.
-     */
-    function _poolParams(string memory poolName) internal view returns (PoolParams memory params) {
-        string memory json = vm.readFile(string.concat(vm.projectRoot(), "/", POOLS_CONFIG));
-        string memory key = string.concat(".pools.", poolName);
-        if (!vm.keyExistsJson(json, key)) revert PoolNotConfigured(poolName);
-
-        params.amount0Human = vm.parseJsonUint(json, string.concat(key, ".amount0"));
-        params.amount1Human = vm.parseJsonUint(json, string.concat(key, ".amount1"));
-
-        uint256 widthBps = vm.parseJsonUint(json, string.concat(key, ".widthBps"));
-        uint256 maxTickDeviation = _paramOrDefault(json, key, "maxTickDeviation");
-        uint256 slippageBps = _paramOrDefault(json, key, "slippageBps");
-
-        // Narrow only after checking, so a value that does not fit the field can never wrap into
-        // one that does: 65,536 as a uint16 is 0, which would silently mean "full range".
-        if (widthBps >= V4PoolMath.BPS) revert InvalidWidthBps(poolName, widthBps);
-        if (slippageBps >= V4PoolMath.BPS) revert InvalidSlippageBps(poolName, slippageBps);
-        if (maxTickDeviation > uint256(uint24(TickMath.MAX_TICK))) {
-            revert InvalidTickDeviation(poolName, maxTickDeviation);
-        }
-
-        params.widthBps = uint16(widthBps);
-        params.maxTickDeviation = int24(uint24(maxTickDeviation));
-        params.slippageBps = uint16(slippageBps);
-    }
-
-    /// @dev A per-pool value when the entry has one, otherwise the file-level default.
-    function _paramOrDefault(string memory json, string memory poolKey, string memory field)
-        internal
-        view
-        returns (uint256)
-    {
-        string memory perPool = string.concat(poolKey, ".", field);
-        if (vm.keyExistsJson(json, perPool)) return vm.parseJsonUint(json, perPool);
-        return vm.parseJsonUint(json, string.concat(".defaults.", field));
+    /// @notice Reads a pool's parameters from `script/telx/pools.json`. See `PoolsJson`.
+    function _poolParams(string memory poolName) internal view returns (PoolsJson.PoolParams memory) {
+        return PoolsJson.read(poolName);
     }
 
     /// @dev The defaults block alone, for the explicit-parameter entrypoints that take amounts on
     ///      the command line but still want the reviewed tolerances.
     function _defaultTolerances() internal view returns (int24 maxTickDeviation, uint16 slippageBps) {
-        string memory json = vm.readFile(string.concat(vm.projectRoot(), "/", POOLS_CONFIG));
-        maxTickDeviation = int24(uint24(vm.parseJsonUint(json, ".defaults.maxTickDeviation")));
-        slippageBps = uint16(vm.parseJsonUint(json, ".defaults.slippageBps"));
+        return PoolsJson.defaultTolerances();
     }
 
     /// @dev Zero amounts are the file's "not decided" marker. Refuse them on any path that would
     ///      set a price or move tokens.
-    function _requireAmountsSet(string memory poolName, PoolParams memory params) internal pure {
-        if (params.amount0Human == 0 || params.amount1Human == 0) revert PoolAmountsNotSet(poolName);
+    function _requireAmountsSet(string memory poolName, PoolsJson.PoolParams memory params) internal pure {
+        PoolsJson.requireAmountsSet(poolName, params);
     }
 
     /// @dev Scales whole-token amounts by each side's decimals, refusing anything that cannot be
@@ -197,10 +123,7 @@ abstract contract TELxPoolScriptBase is Script {
         uint256 amount0Human,
         uint256 amount1Human
     ) internal pure returns (uint256 amount0, uint256 amount1) {
-        if (amount0Human > MAX_HUMAN_AMOUNT) revert AmountImplausible(poolName, amount0Human);
-        if (amount1Human > MAX_HUMAN_AMOUNT) revert AmountImplausible(poolName, amount1Human);
-        amount0 = V4PoolMath.toRawAmount(amount0Human, s.decimals0);
-        amount1 = V4PoolMath.toRawAmount(amount1Human, s.decimals1);
+        return PoolsJson.rawAmounts(poolName, s, amount0Human, amount1Human);
     }
 
     /// @notice The catalog pools that belong to the connected chain.
@@ -325,6 +248,60 @@ abstract contract TELxPoolScriptBase is Script {
         console2.log(
             string.concat(
                 "  ", _fmtE18(V4PoolMath.humanInversePriceE18(price1Per0)), " ", s.symbol0, " per ", s.symbol1
+            )
+        );
+    }
+
+    /// @dev Prints the registry floor the configured amounts and floor value imply, with the
+    ///      capital it takes to reach that liquidity in the narrowest band, the configured band and
+    ///      the full range, so the governance decision is visible in the units it is made in.
+    function _logFloor(string memory poolName, TELxPools.PoolSpec memory s, PoolsJson.PoolParams memory params)
+        internal
+        pure
+    {
+        if (params.minPositionValue1Human == 0) {
+            console2.log("Registry liquidity floor: minPositionValue1 not set in pools.json");
+            return;
+        }
+        uint160 sqrtPriceX96 = PoolsJson.openingSqrtPrice(poolName, s, params);
+        uint128 floor = PoolsJson.minLiquidityFloor(poolName, s, params);
+        console2.log("Registry liquidity floor (minLiquidity):", uint256(floor));
+        console2.log(
+            string.concat(
+                "  narrowest band holds about ",
+                _fmtUnits(V4PoolMath.toRawAmount(params.minPositionValue1Human, s.decimals1), s.decimals1),
+                " ",
+                s.symbol1,
+                " at this liquidity"
+            )
+        );
+        _logFloorCost("  configured band needs", sqrtPriceX96, floor, params.widthBps, s);
+        _logFloorCost("  full range needs", sqrtPriceX96, floor, 0, s);
+    }
+
+    function _logFloorCost(
+        string memory label,
+        uint160 sqrtPriceX96,
+        uint128 floor,
+        uint16 widthBps,
+        TELxPools.PoolSpec memory s
+    ) internal pure {
+        (int24 lower, int24 upper) = widthBps == 0
+            ? V4PoolMath.fullRangeTicks(s.tickSpacing)
+            : V4PoolMath.percentRangeTicks(sqrtPriceX96, widthBps, s.tickSpacing);
+        (uint160 sqrtLower, uint160 sqrtUpper) = V4PoolMath.sqrtPricesAtTicks(lower, upper);
+        (uint256 amount0, uint256 amount1) = V4PoolMath.amountsForLiquidity(sqrtPriceX96, sqrtLower, sqrtUpper, floor);
+        console2.log(
+            string.concat(
+                label,
+                " ",
+                _fmtUnits(amount0, s.decimals0),
+                " ",
+                s.symbol0,
+                " + ",
+                _fmtUnits(amount1, s.decimals1),
+                " ",
+                s.symbol1
             )
         );
     }

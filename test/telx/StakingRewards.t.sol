@@ -458,9 +458,7 @@ contract StakingRewardsTest is Test {
         _notifyRewardAmount(REWARD_AMOUNT);
 
         // Try to change during active period
-        vm.expectRevert(
-            "Previous rewards period must be complete before changing the duration for the new period"
-        );
+        vm.expectRevert("Previous rewards period must be complete before changing the duration for the new period");
         vm.prank(owner);
         stakingRewards.setRewardsDuration(60 days);
     }

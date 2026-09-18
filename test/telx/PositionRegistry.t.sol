@@ -16,7 +16,12 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {
+    IAccessControlDefaultAdminRules
+} from "@openzeppelin/contracts/access/extensions/IAccessControlDefaultAdminRules.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 
 /// @title PositionRegistryTest
 /// @notice Deterministic, non-fork unit tests for the thin PositionRegistry.
@@ -57,7 +62,8 @@ contract PositionRegistryTest is Test {
     /// @dev Storage slot of the `subscribed` address[] (length lives directly in this slot).
     ///      AccessControl occupies slot 0; `subscribed` is the first variable PositionRegistry
     ///      declares. Guarded at runtime by `_forceSubscribedLength`.
-    uint256 internal constant SUBSCRIBED_LENGTH_SLOT = 1;
+    uint256 internal constant SUBSCRIBED_LENGTH_SLOT = 3;
+    bytes32 internal constant DEFAULT_ADMIN_ROLE = 0x00;
 
     function setUp() public {
         poolManager = new MockPoolManager();
@@ -100,8 +106,51 @@ contract PositionRegistryTest is Test {
     }
 
     function testRevert_constructor_zeroAdmin() public {
-        vm.expectRevert(IPositionRegistry.ZeroAddress.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControlDefaultAdminRules.AccessControlInvalidDefaultAdmin.selector, address(0)
+            )
+        );
         new PositionRegistry(IPositionManager(address(pm)), StateView(address(sv)), address(0));
+    }
+
+    // -----------
+    // Admin role rules
+    // -----------
+
+    /// @notice The admin role cannot be handed out or dropped in one step: no second admin, no
+    ///         instant renounce, only the delayed two-step transfer.
+    function testRevert_adminRole_cannotBeGrantedDirectly() public {
+        vm.expectRevert(IAccessControlDefaultAdminRules.AccessControlEnforcedDefaultAdminRules.selector);
+        vm.prank(admin);
+        registry.grantRole(DEFAULT_ADMIN_ROLE, makeAddr("second"));
+    }
+
+    function testRevert_adminRole_cannotBeRenouncedDirectly() public {
+        vm.expectRevert(IAccessControlDefaultAdminRules.AccessControlEnforcedDefaultAdminRules.selector);
+        vm.prank(admin);
+        registry.revokeRole(DEFAULT_ADMIN_ROLE, admin);
+    }
+
+    function test_adminRole_transfersInTwoStepsAfterTheDelay() public {
+        address next = makeAddr("nextAdmin");
+        assertEq(registry.ADMIN_TRANSFER_DELAY(), 3 days, "delay");
+
+        vm.prank(admin);
+        registry.beginDefaultAdminTransfer(next);
+
+        // too early
+        vm.expectRevert();
+        vm.prank(next);
+        registry.acceptDefaultAdminTransfer();
+
+        vm.warp(block.timestamp + 3 days + 1);
+        vm.prank(next);
+        registry.acceptDefaultAdminTransfer();
+
+        assertTrue(registry.hasRole(DEFAULT_ADMIN_ROLE, next), "new admin");
+        assertFalse(registry.hasRole(DEFAULT_ADMIN_ROLE, admin), "old admin gone");
+        assertEq(registry.defaultAdmin(), next, "defaultAdmin");
     }
 
     function testRevert_constructor_codelessStateView() public {
@@ -564,6 +613,101 @@ contract PositionRegistryTest is Test {
         assertFalse(registry.isTokenSubscribed(1), "pruned after drain");
     }
 
+    // -----------
+    // resubscribe
+    // -----------
+
+    /// @notice The drain, prune, refill sequence. v4 still has the position subscribed, the index
+    ///         does not, and v4 refuses a second `subscribe`. Anyone can put the entry back.
+    function test_resubscribe_restoresAPrunedAndRefilledPosition() public {
+        _subscribe(1, alice, DEFAULT_LIQUIDITY);
+        pm.setSubscriber(1, subscriber);
+
+        pm.setLiquidity(1, 0);
+        registry.pruneSubscription(1);
+        pm.setLiquidity(1, DEFAULT_LIQUIDITY);
+        assertEq(registry.getSubscriptions(alice).length, 0, "stranded");
+
+        vm.expectEmit(true, true, false, false);
+        emit IPositionRegistry.Subscribed(1, alice);
+        vm.prank(makeAddr("anyone"));
+        registry.resubscribe(1);
+
+        assertTrue(registry.isTokenSubscribed(1), "re-indexed");
+        assertEq(registry.getSubscriptions(alice).length, 1, "votes again");
+    }
+
+    /// @notice A position v4 does not have subscribed cannot be indexed through this path.
+    function testRevert_resubscribe_notSubscribedOnUniswap() public {
+        _setPosition(1, alice, DEFAULT_LIQUIDITY);
+        vm.expectRevert(abi.encodeWithSelector(IPositionRegistry.NotSubscribedOnUniswap.selector, uint256(1)));
+        registry.resubscribe(1);
+    }
+
+    /// @notice A position subscribed to some other subscriber, one this registry never trusted,
+    ///         cannot be indexed either.
+    function testRevert_resubscribe_subscribedToAnUntrustedSubscriber() public {
+        _setPosition(1, alice, DEFAULT_LIQUIDITY);
+        pm.setSubscriber(1, makeAddr("someoneElsesSubscriber"));
+        vm.expectRevert(abi.encodeWithSelector(IPositionRegistry.NotSubscribedOnUniswap.selector, uint256(1)));
+        registry.resubscribe(1);
+    }
+
+    /// @notice The same eligibility rules as a fresh subscribe apply.
+    function testRevert_resubscribe_ineligible() public {
+        _setPosition(1, alice, 0);
+        pm.setSubscriber(1, subscriber);
+        vm.expectRevert(abi.encodeWithSelector(IPositionRegistry.LiquidityBelowThreshold.selector, uint128(0)));
+        registry.resubscribe(1);
+    }
+
+    function testRevert_resubscribe_whilePoolManagerUnlocked() public {
+        _setPosition(1, alice, DEFAULT_LIQUIDITY);
+        pm.setSubscriber(1, subscriber);
+        poolManager.setUnlocked(true);
+        vm.expectRevert(IPositionRegistry.PoolManagerUnlocked.selector);
+        registry.resubscribe(1);
+    }
+
+    /// @notice Already indexed under the same owner: a no-op, not a duplicate.
+    function test_resubscribe_alreadyIndexedIsNoop() public {
+        _subscribe(1, alice, DEFAULT_LIQUIDITY);
+        pm.setSubscriber(1, subscriber);
+        registry.resubscribe(1);
+        assertEq(registry.getSubscriptionsRaw(alice).length, 1, "no duplicate");
+    }
+
+    // -----------
+    // Stale record migration
+    // -----------
+
+    /// @notice A stale entry under a previous owner (an unsubscribe notification v4 swallowed,
+    ///         then a transfer) must not turn the new owner's subscribe into a silent no-op. The
+    ///         record moves to the new owner.
+    function test_handleSubscribe_movesAStaleRecordToTheNewOwner() public {
+        _subscribe(1, alice, DEFAULT_LIQUIDITY);
+        pm.setOwner(1, bob); // transfer whose unsubscribe never reached the registry
+
+        vm.prank(subscriber);
+        registry.handleSubscribe(1);
+
+        assertEq(registry.getSubscriptionsRaw(alice).length, 0, "old owner's record gone");
+        assertFalse(registry.isSubscribed(alice), "old owner out of the global set");
+        assertEq(registry.getSubscriptionsRaw(bob).length, 1, "new owner indexed");
+        assertEq(registry.getSubscriptions(bob)[0], 1, "new owner votes");
+    }
+
+    function test_resubscribe_movesAStaleRecordToTheNewOwner() public {
+        _subscribe(1, alice, DEFAULT_LIQUIDITY);
+        pm.setOwner(1, bob);
+        pm.setSubscriber(1, subscriber);
+
+        registry.resubscribe(1);
+
+        assertEq(registry.getSubscriptionsRaw(alice).length, 0, "old owner's record gone");
+        assertEq(registry.getSubscriptions(bob).length, 1, "new owner votes");
+    }
+
     /// @notice The flash-liquidity attack, minus the flash. A third party inflates the pool's
     ///         aggregate liquidity so that a healthy position becomes a vanishing fraction of it;
     ///         under the old relative gate that alone made the position prunable. Now the pool
@@ -629,6 +773,113 @@ contract PositionRegistryTest is Test {
         vm.prank(admin);
         registry.forceUnsubscribe(99);
         assertFalse(registry.isTokenSubscribed(99), "still not subscribed");
+    }
+
+    /// @notice Clearing a filled cap must not take one transaction per entry.
+    function test_forceUnsubscribeBatch_evictsManyAndSkipsUnknown() public {
+        _subscribe(1, alice, DEFAULT_LIQUIDITY);
+        _subscribe(2, alice, DEFAULT_LIQUIDITY);
+        _subscribe(3, bob, DEFAULT_LIQUIDITY);
+
+        uint256[] memory ids = new uint256[](4);
+        ids[0] = 1;
+        ids[1] = 99; // never subscribed
+        ids[2] = 3;
+        ids[3] = 2;
+        vm.prank(admin);
+        registry.forceUnsubscribeBatch(ids);
+
+        assertFalse(registry.isTokenSubscribed(1), "1 evicted");
+        assertFalse(registry.isTokenSubscribed(2), "2 evicted");
+        assertFalse(registry.isTokenSubscribed(3), "3 evicted");
+        assertEq(registry.getSubscribed().length, 0, "global set empty");
+    }
+
+    function testRevert_forceUnsubscribeBatch_onlyAdmin() public {
+        uint256[] memory ids = new uint256[](1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, support, registry.DEFAULT_ADMIN_ROLE()
+            )
+        );
+        vm.prank(support);
+        registry.forceUnsubscribeBatch(ids);
+    }
+
+    // -----------
+    // getSubscribed pagination
+    // -----------
+
+    function test_getSubscribed_paginated() public {
+        _subscribe(1, alice, DEFAULT_LIQUIDITY);
+        _subscribe(2, bob, DEFAULT_LIQUIDITY);
+        _subscribe(3, makeAddr("carol"), DEFAULT_LIQUIDITY);
+
+        (address[] memory page, uint256 total) = registry.getSubscribed(1, 1);
+        assertEq(total, 3, "total");
+        assertEq(page.length, 1, "one entry");
+        assertEq(page[0], bob, "second owner");
+
+        (page, total) = registry.getSubscribed(2, type(uint256).max);
+        assertEq(page.length, 1, "clamped to the end");
+
+        (page, total) = registry.getSubscribed(3, 10);
+        assertEq(page.length, 0, "offset past the end");
+        assertEq(total, 3, "total still reported");
+    }
+
+    // -----------
+    // deregisterPool clears the floor
+    // -----------
+
+    function test_deregisterPool_clearsMinLiquidity() public {
+        vm.startPrank(admin);
+        registry.setMinLiquidity(poolId, 500);
+        vm.expectEmit(true, false, false, true);
+        emit IPositionRegistry.MinLiquiditySet(poolId, 0);
+        registry.deregisterPool(poolId);
+        vm.stopPrank();
+        assertEq(registry.minLiquidity(poolId), 0, "floor cleared");
+    }
+
+    // -----------
+    // getAmountsForLiquidity matches the reference library
+    // -----------
+
+    /// @notice The core `SqrtPriceMath` path must agree, to the wei, with Uniswap's own
+    ///         `LiquidityAmounts.getAmountsForLiquidity`, which is what the Snapshot strategy was
+    ///         written against.
+    function testFuzz_getAmountsForLiquidity_matchesReference(uint128 liquidity, int24 tick, int24 lower, int24 upper)
+        public
+    {
+        tick = int24(bound(tick, TickMath.MIN_TICK + 1, TickMath.MAX_TICK - 1));
+        lower = int24(bound(lower, TickMath.MIN_TICK, TickMath.MAX_TICK - 1));
+        upper = int24(bound(upper, lower + 1, TickMath.MAX_TICK));
+        uint160 sqrtP = TickMath.getSqrtPriceAtTick(tick);
+        sv.setSlot0(poolId, sqrtP, tick);
+
+        (uint256 got0, uint256 got1,) = registry.getAmountsForLiquidity(poolId, liquidity, lower, upper);
+        (uint256 want0, uint256 want1) = LiquidityAmounts.getAmountsForLiquidity(
+            sqrtP, TickMath.getSqrtPriceAtTick(lower), TickMath.getSqrtPriceAtTick(upper), liquidity
+        );
+        assertEq(got0, want0, "amount0");
+        assertEq(got1, want1, "amount1");
+    }
+
+    /// @notice The reference tolerates an inverted tick pair by swapping; so does the view.
+    function test_getAmountsForLiquidity_invertedTicksMatchReference() public {
+        sv.setSlot0(poolId, SQRT_PRICE_1_1, 0);
+        (uint256 got0, uint256 got1,) =
+            registry.getAmountsForLiquidity(poolId, DEFAULT_LIQUIDITY, TICK_UPPER, TICK_LOWER);
+        (uint256 want0, uint256 want1) = LiquidityAmounts.getAmountsForLiquidity(
+            SQRT_PRICE_1_1,
+            TickMath.getSqrtPriceAtTick(TICK_UPPER),
+            TickMath.getSqrtPriceAtTick(TICK_LOWER),
+            DEFAULT_LIQUIDITY
+        );
+        assertEq(got0, want0, "amount0");
+        assertEq(got1, want1, "amount1");
+        assertGt(got0 + got1, 0, "non-trivial");
     }
 
     function testRevert_forceUnsubscribe_onlyAdmin() public {

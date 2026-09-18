@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {TELxPools} from "../../script/shared/TELxPools.sol";
 import {TELxPoolScriptBase} from "../../script/telx/base/TELxPoolScriptBase.sol";
 import {TELxPoolScriptHarness} from "./harnesses/TELxPoolScriptHarness.sol";
+import {PoolsJson} from "../../script/telx/base/PoolsJson.sol";
 
 /// @title TELxPoolsConfigTest
 /// @notice Keeps `script/telx/pools.json` and the pool catalog in `TELxPools.sol` in step with each
@@ -24,7 +25,7 @@ contract TELxPoolsConfigTest is Test {
     function test_everyCatalogPoolIsConfigured() public view {
         string[] memory names = TELxPools.allNames();
         for (uint256 i; i < names.length; ++i) {
-            TELxPoolScriptBase.PoolParams memory p = harness.poolParams(names[i]);
+            PoolsJson.PoolParams memory p = harness.poolParams(names[i]);
             // The tolerances must be meaningful even before amounts are decided, since they are
             // what the seed's two price guards run on.
             assertLt(p.widthBps, 10_000, string.concat(names[i], ": widthBps must be below 10000"));
@@ -43,7 +44,7 @@ contract TELxPoolsConfigTest is Test {
 
         string[] memory names = TELxPools.allNames();
         for (uint256 i; i < names.length; ++i) {
-            TELxPoolScriptBase.PoolParams memory p = harness.poolParams(names[i]);
+            PoolsJson.PoolParams memory p = harness.poolParams(names[i]);
             assertEq(p.maxTickDeviation, maxTickDeviation, string.concat(names[i], ": maxTickDeviation"));
             assertEq(p.slippageBps, slippageBps, string.concat(names[i], ": slippageBps"));
         }
@@ -68,16 +69,47 @@ contract TELxPoolsConfigTest is Test {
         }
     }
 
+    /// @notice Every entry carries a `minPositionValue1`, and the floor cannot be derived while it
+    ///         or the amounts are undecided, so a registry cannot go out with a zero floor.
+    function test_floorIsRefusedWhileUndecided() public {
+        string[] memory names = TELxPools.allNames();
+        for (uint256 i; i < names.length; ++i) {
+            PoolsJson.PoolParams memory p = harness.poolParams(names[i]);
+            if (p.amount0Human == 0 || p.amount1Human == 0) {
+                vm.expectRevert(abi.encodeWithSelector(PoolsJson.PoolAmountsNotSet.selector, names[i]));
+                harness.minLiquidityFloor(names[i], p);
+                continue;
+            }
+            if (p.minPositionValue1Human == 0) {
+                vm.expectRevert(abi.encodeWithSelector(PoolsJson.MinPositionValueNotSet.selector, names[i]));
+                harness.minLiquidityFloor(names[i], p);
+                continue;
+            }
+            assertGt(harness.minLiquidityFloor(names[i], p), 0, string.concat(names[i], ": floor"));
+        }
+    }
+
+    /// @notice With amounts and a floor value set, the floor is non-zero and scales with the value.
+    function test_floorScalesWithTheValue() public {
+        PoolsJson.PoolParams memory p = _params(100_000, 20_000_000);
+        p.minPositionValue1Human = 200;
+        uint128 one = harness.minLiquidityFloor("POLYGON_EUSD_TEL", p);
+        p.minPositionValue1Human = 400;
+        uint128 two = harness.minLiquidityFloor("POLYGON_EUSD_TEL", p);
+        assertGt(one, 0, "non-zero");
+        assertApproxEqAbs(two, 2 * one, 1, "doubles with the value");
+    }
+
     /// @notice A whole-token amount past the sanity bound is refused as a probable raw-unit
     ///         paste, on either side.
     function test_implausibleAmountsAreRefused() public {
         TELxPools.PoolSpec memory s = TELxPools.spec("POLYGON_EUSD_TEL");
         uint256 tooMany = 1e15 + 1;
 
-        vm.expectRevert(abi.encodeWithSelector(TELxPoolScriptBase.AmountImplausible.selector, "X", tooMany));
+        vm.expectRevert(abi.encodeWithSelector(PoolsJson.AmountImplausible.selector, "X", tooMany));
         harness.rawAmounts("X", s, tooMany, 1);
 
-        vm.expectRevert(abi.encodeWithSelector(TELxPoolScriptBase.AmountImplausible.selector, "X", tooMany));
+        vm.expectRevert(abi.encodeWithSelector(PoolsJson.AmountImplausible.selector, "X", tooMany));
         harness.rawAmounts("X", s, 1, tooMany);
 
         (uint256 raw0, uint256 raw1) = harness.rawAmounts("X", s, 1e15, 1e15);
@@ -88,7 +120,7 @@ contract TELxPoolsConfigTest is Test {
     /// @notice A name that is not in the catalog cannot have an entry either. Guards against a
     ///         typo in the JSON silently configuring a pool that nothing will ever deploy.
     function test_unknownPoolIsRejected() public {
-        vm.expectRevert(abi.encodeWithSelector(TELxPoolScriptBase.PoolNotConfigured.selector, "POLYGON_TEL_DOGE"));
+        vm.expectRevert(abi.encodeWithSelector(PoolsJson.PoolNotConfigured.selector, "POLYGON_TEL_DOGE"));
         harness.poolParams("POLYGON_TEL_DOGE");
     }
 
@@ -96,14 +128,14 @@ contract TELxPoolsConfigTest is Test {
     ///         set a price or move tokens. Both sides are checked because either one at zero yields
     ///         a division by zero or an infinite price.
     function test_unsetAmountsAreRefused() public {
-        TELxPoolScriptBase.PoolParams memory p;
+        PoolsJson.PoolParams memory p;
 
         p = _params(0, 1);
-        vm.expectRevert(abi.encodeWithSelector(TELxPoolScriptBase.PoolAmountsNotSet.selector, "X"));
+        vm.expectRevert(abi.encodeWithSelector(PoolsJson.PoolAmountsNotSet.selector, "X"));
         harness.requireAmountsSet("X", p);
 
         p = _params(1, 0);
-        vm.expectRevert(abi.encodeWithSelector(TELxPoolScriptBase.PoolAmountsNotSet.selector, "X"));
+        vm.expectRevert(abi.encodeWithSelector(PoolsJson.PoolAmountsNotSet.selector, "X"));
         harness.requireAmountsSet("X", p);
 
         // and non-zero passes
@@ -127,17 +159,14 @@ contract TELxPoolsConfigTest is Test {
         assertEq(harness.poolsOnThisChain().length, 0, "an unknown chain has no pools");
     }
 
-    function _params(uint256 amount0Human, uint256 amount1Human)
-        internal
-        pure
-        returns (TELxPoolScriptBase.PoolParams memory)
-    {
-        return TELxPoolScriptBase.PoolParams({
+    function _params(uint256 amount0Human, uint256 amount1Human) internal pure returns (PoolsJson.PoolParams memory) {
+        return PoolsJson.PoolParams({
             amount0Human: amount0Human,
             amount1Human: amount1Human,
             widthBps: 1000,
             maxTickDeviation: 50,
-            slippageBps: 50
+            slippageBps: 50,
+            minPositionValue1Human: 0
         });
     }
 }

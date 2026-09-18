@@ -97,6 +97,14 @@ contract TELxSubscriberTest is Test {
         new TELxSubscriber(IPositionRegistry(address(0)), address(pm), owner);
     }
 
+    /// @notice `try` does not catch the code-existence check before an external call, so a
+    ///         codeless registry would make the wrapped burn notification revert every burn.
+    function testRevert_constructor_codelessRegistry() public {
+        address nothing = makeAddr("nothing");
+        vm.expectRevert(abi.encodeWithSelector(TELxSubscriber.RegistryHasNoCode.selector, nothing));
+        new TELxSubscriber(IPositionRegistry(nothing), address(pm), owner);
+    }
+
     /// @notice Every notification is gated on the PositionManager address, so a codeless one is a
     ///         subscriber nothing can ever reach.
     function testRevert_constructor_codelessPositionManager() public {

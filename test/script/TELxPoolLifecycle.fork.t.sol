@@ -6,6 +6,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {IPoolInitializer_v4} from "@uniswap/v4-periphery/src/interfaces/IPoolInitializer_v4.sol";
+import {INotifier} from "@uniswap/v4-periphery/src/interfaces/INotifier.sol";
+import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {SlippageCheck} from "@uniswap/v4-periphery/src/libraries/SlippageCheck.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -17,8 +19,10 @@ import {CreateV4Pool} from "../../script/telx/CreateV4Pool.s.sol";
 import {SeedV4Liquidity} from "../../script/telx/SeedV4Liquidity.s.sol";
 import {TELxPoolScriptBase} from "../../script/telx/base/TELxPoolScriptBase.sol";
 import {CrossChainAddresses} from "../../script/shared/CrossChainAddresses.sol";
+import {TELxPoolFixtures} from "./TELxPoolFixtures.sol";
 import {TELxPools} from "../../script/shared/TELxPools.sol";
 import {V4PoolMath} from "../../script/shared/V4PoolMath.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {PositionRegistry} from "../../contracts/telx/core/PositionRegistry.sol";
 import {TELxSubscriber} from "../../contracts/telx/core/TELxSubscriber.sol";
 import {IPositionRegistry} from "../../contracts/telx/interfaces/IPositionRegistry.sol";
@@ -26,6 +30,7 @@ import {SeedV4LiquidityHarness} from "./harnesses/SeedV4LiquidityHarness.sol";
 import {EmptyPoolPriceMover} from "./mocks/EmptyPoolPriceMover.sol";
 import {FlashPruneAttacker} from "./mocks/FlashPruneAttacker.sol";
 import {ForkOrSkip} from "../util/ForkOrSkip.sol";
+import {PoolsJson} from "../../script/telx/base/PoolsJson.sol";
 
 /// @title TELxPoolLifecycleForkTest
 /// @notice End-to-end coverage of the TELx pool scripts against live Uniswap v4 deployments:
@@ -71,6 +76,7 @@ abstract contract TELxPoolLifecycleForkTest is Test {
     string internal poolName;
     uint256 internal amount0Human;
     uint256 internal amount1Human;
+    uint128 internal floor;
 
     function _setUpChain() internal {
         ForkOrSkip.select(rpcEnvVar);
@@ -87,8 +93,11 @@ abstract contract TELxPoolLifecycleForkTest is Test {
         vm.startPrank(admin);
         registry.grantRole(registry.SUBSCRIBER_ROLE(), address(subscriber));
         registry.grantRole(registry.SUPPORT_ROLE(), support);
-        // the allowlist is what makes a pool a TELx pool; the Safe batch does this on mainnet
+        // the allowlist is what makes a pool a TELx pool, and the floor is what makes a cap slot
+        // cost capital; the Safe batch does both on mainnet
         registry.registerPool(TELxPools.poolKey(s));
+        floor = PoolsJson.minLiquidityFloor(poolName, s, TELxPoolFixtures.params(poolName));
+        registry.setMinLiquidity(TELxPools.poolKey(s).toId(), floor);
         vm.stopPrank();
 
         _fund(s);
@@ -145,7 +154,7 @@ abstract contract TELxPoolLifecycleForkTest is Test {
     ///         so it must refuse rather than fall through to a mint at an unchecked price.
     function test_createAndSeed_revertsWhenPoolExists() public {
         createScript.runWithSigner(poolName, amount0Human, amount1Human, signer);
-        TELxPoolScriptBase.PoolParams memory params = _params(BAND);
+        PoolsJson.PoolParams memory params = _params(BAND);
         vm.expectRevert(abi.encodeWithSelector(SeedV4Liquidity.PoolAlreadyInitialized.selector, poolName));
         seedScript.createAndSeedWithOptions(poolName, params, _opts(signer));
     }
@@ -247,8 +256,8 @@ abstract contract TELxPoolLifecycleForkTest is Test {
     function test_seed_concentratedIsNarrowerThanFullRange() public {
         createScript.runWithSigner(poolName, amount0Human, amount1Human, signer);
 
-        uint256 fullId = seedScript.runWithOptions(poolName, _params(FULL), _opts(signer));
         uint256 bandId = seedScript.runWithOptions(poolName, _params(BAND), _opts(signer));
+        uint256 fullId = seedScript.runWithOptions(poolName, _params(FULL), _opts(signer));
 
         assertGt(_positionSpan(fullId), _positionSpan(bandId), "full range should span more ticks than a +/-10% band");
     }
@@ -263,7 +272,7 @@ abstract contract TELxPoolLifecycleForkTest is Test {
         seedScript.runWithOptions(poolName, _params(FULL), _opts(signer));
 
         // the accidental rerun
-        TELxPoolScriptBase.PoolParams memory band = _params(BAND);
+        PoolsJson.PoolParams memory band = _params(BAND);
         vm.expectPartialRevert(SeedV4Liquidity.RangeAlreadySeeded.selector);
         seedScript.runWithOptions(poolName, band, _opts(signer));
 
@@ -276,7 +285,7 @@ abstract contract TELxPoolLifecycleForkTest is Test {
     /// @notice Seeding a pool that was never created must fail loudly rather than mint into a
     ///         zero-priced pool.
     function test_seed_revertsWhenPoolNotInitialized() public {
-        TELxPoolScriptBase.PoolParams memory params = _params(BAND);
+        PoolsJson.PoolParams memory params = _params(BAND);
         vm.expectRevert(abi.encodeWithSelector(SeedV4Liquidity.PoolNotInitialized.selector, poolName));
         seedScript.runWithOptions(poolName, params, _opts(signer));
     }
@@ -287,7 +296,7 @@ abstract contract TELxPoolLifecycleForkTest is Test {
         (, uint160 opened) = createScript.runWithSigner(poolName, amount0Human, amount1Human, signer);
         _movePriceByTicks(opened, 200);
 
-        TELxPoolScriptBase.PoolParams memory params = _params(BAND);
+        PoolsJson.PoolParams memory params = _params(BAND);
         vm.expectPartialRevert(SeedV4Liquidity.PriceDeviation.selector);
         seedScript.runWithOptions(poolName, params, _opts(signer));
     }
@@ -347,13 +356,13 @@ abstract contract TELxPoolLifecycleForkTest is Test {
     /// @notice The `pools.json` path refuses the shipped file, whose amounts are all unset, before
     ///         it gets anywhere near a signer or a price.
     function test_run_refusesUnsetAmountsInPoolsJson() public {
-        vm.expectRevert(abi.encodeWithSelector(TELxPoolScriptBase.PoolAmountsNotSet.selector, poolName));
+        vm.expectRevert(abi.encodeWithSelector(PoolsJson.PoolAmountsNotSet.selector, poolName));
         seedScript.run(poolName);
 
-        vm.expectRevert(abi.encodeWithSelector(TELxPoolScriptBase.PoolAmountsNotSet.selector, poolName));
+        vm.expectRevert(abi.encodeWithSelector(PoolsJson.PoolAmountsNotSet.selector, poolName));
         seedScript.createAndSeed(poolName);
 
-        vm.expectRevert(abi.encodeWithSelector(TELxPoolScriptBase.PoolAmountsNotSet.selector, poolName));
+        vm.expectRevert(abi.encodeWithSelector(PoolsJson.PoolAmountsNotSet.selector, poolName));
         createScript.run(poolName);
     }
 
@@ -371,6 +380,135 @@ abstract contract TELxPoolLifecycleForkTest is Test {
         seedScript.plan(poolName, amount0Human, amount1Human, BAND);
         seedScript.plan(poolName, amount0Human, amount1Human, FULL);
         createScript.plan(poolName, amount0Human, amount1Human);
+    }
+
+    // -----------
+    // Cap slots cost capital
+    // -----------
+
+    /// @notice With the floor set, a position of liquidity 1 (one wei of each token) in the real
+    ///         pool cannot subscribe. This is the cap-fill attack at its cheapest, refused.
+    function test_capSlot_dustPositionIsRefusedByTheFloor() public {
+        seedScript.createAndSeedWithOptions(poolName, _params(BAND), _opts(signer));
+        TELxPools.PoolSpec memory s = TELxPools.spec(poolName);
+        address attacker = makeAddr("attacker");
+        _fundFor(s, attacker, 1e6, 1e18);
+
+        (int24 lower, int24 upper) = V4PoolMath.fullRangeTicks(s.tickSpacing);
+        uint256 tokenId = _mintAs(attacker, s, lower, upper, 1);
+
+        vm.expectRevert();
+        vm.prank(attacker);
+        IPositionManager(_positionManager()).subscribe(tokenId, address(subscriber), "");
+        assertFalse(registry.isTokenSubscribed(tokenId), "dust holds no slot");
+    }
+
+    /// @notice And a position exactly at the floor, in the narrowest band, holds about the
+    ///         configured value of currency1: that is the price of one cap slot.
+    function test_capSlot_costsTheConfiguredValueAtTheFloor() public {
+        seedScript.createAndSeedWithOptions(poolName, _params(BAND), _opts(signer));
+        TELxPools.PoolSpec memory s = TELxPools.spec(poolName);
+        address attacker = makeAddr("attacker");
+        _fundFor(
+            s, attacker, V4PoolMath.toRawAmount(1_000, s.decimals0), V4PoolMath.toRawAmount(1_000_000, s.decimals1)
+        );
+
+        (uint160 sqrtP, int24 tick,,) = StateView(_stateView()).getSlot0(TELxPools.poolKey(s).toId());
+        int24 lower = V4PoolMath.alignTick(tick, s.tickSpacing, false);
+        int24 upper = lower + s.tickSpacing;
+
+        uint256 before0 = _balance(s.currency0, attacker);
+        uint256 before1 = _balance(s.currency1, attacker);
+        uint256 tokenId = _mintAs(attacker, s, lower, upper, floor);
+        vm.prank(attacker);
+        IPositionManager(_positionManager()).subscribe(tokenId, address(subscriber), "");
+        assertTrue(registry.isTokenSubscribed(tokenId), "at the floor it subscribes");
+
+        // value both legs in currency1 at the pool price
+        uint256 spent0 = before0 - _balance(s.currency0, attacker);
+        uint256 spent1 = before1 - _balance(s.currency1, attacker);
+        uint256 spent0In1 = FullMath.mulDiv(FullMath.mulDiv(spent0, sqrtP, 1 << 96), sqrtP, 1 << 96);
+        uint256 target = V4PoolMath.toRawAmount(TELxPoolFixtures.params(poolName).minPositionValue1Human, s.decimals1);
+        assertApproxEqRel(spent0In1 + spent1, target, 0.02e18, "a slot costs about minPositionValue1 of currency1");
+    }
+
+    // -----------
+    // Drained, pruned, refilled
+    // -----------
+
+    /// @notice A third party prunes a temporarily drained position; the owner refills it; v4 still
+    ///         has it subscribed and refuses a second subscribe. `resubscribe` puts it back.
+    function test_resubscribe_restoresAPrunedAndRefilledPosition() public {
+        uint256 tokenId = _createSeedSubscribe();
+        TELxPools.PoolSpec memory s = TELxPools.spec(poolName);
+        uint128 liquidity = IPositionManager(_positionManager()).getPositionLiquidity(tokenId);
+
+        _decrease(tokenId, s, liquidity);
+        vm.prank(makeAddr("thirdParty"));
+        registry.pruneSubscription(tokenId);
+        _increase(tokenId, s, liquidity);
+        assertEq(registry.getSubscriptions(signer).length, 0, "stranded");
+
+        vm.expectRevert(abi.encodeWithSelector(INotifier.AlreadySubscribed.selector, tokenId, address(subscriber)));
+        vm.prank(signer);
+        IPositionManager(_positionManager()).subscribe(tokenId, address(subscriber), "");
+
+        vm.prank(makeAddr("anyone"));
+        registry.resubscribe(tokenId);
+        assertEq(registry.getSubscriptions(signer).length, 1, "votes again");
+    }
+
+    /// @notice A position that v4 does not have subscribed cannot be indexed through resubscribe,
+    ///         so the entry point adds nothing v4 did not opt in.
+    function test_resubscribe_refusedWhenNotSubscribedOnUniswap() public {
+        uint256 tokenId = seedScript.createAndSeedWithOptions(poolName, _params(BAND), _opts(signer));
+        vm.expectRevert(abi.encodeWithSelector(IPositionRegistry.NotSubscribedOnUniswap.selector, tokenId));
+        registry.resubscribe(tokenId);
+    }
+
+    // -----------
+    // Create path: exact price or nothing
+    // -----------
+
+    /// @notice The create path sets its maximums at the exact cost. A front-run initialize that is
+    ///         off by less than the existing-pool margin, and would have passed with that margin,
+    ///         fails the multicall.
+    function test_createAndSeed_frontRunInsideTheRunMarginStillReverts() public {
+        TELxPools.PoolSpec memory s = TELxPools.spec(poolName);
+        PoolsJson.PoolParams memory params = _params(BAND);
+        params.slippageBps = 0; // what createAndSeed applies
+        SeedV4Liquidity.SeedPlan memory p = seedScript.buildPlan(poolName, params, true);
+        bytes memory mint = seedScript.encodeMint(poolName, p, _opts(signer));
+
+        // 10 bps off, inside the 50 bps the existing-pool path tolerates
+        uint160 attackerPrice = uint160(uint256(p.sqrtPriceX96) * 10_005 / 10_000);
+        IPoolManager(StateView(_stateView()).poolManager()).initialize(p.key, attackerPrice);
+
+        bytes[] memory calls = new bytes[](2);
+        calls[0] = abi.encodeCall(IPoolInitializer_v4.initializePool, (p.key, p.sqrtPriceX96));
+        calls[1] = abi.encodeCall(IPositionManager.modifyLiquidities, (mint, block.timestamp + 30 minutes));
+
+        _approveForMint(s, p);
+        uint256 value = seedScript.nativeValue(poolName, p);
+        vm.expectPartialRevert(SlippageCheck.MaximumAmountExceeded.selector);
+        vm.prank(signer);
+        IPositionManager(_positionManager()).multicall{value: value}(calls);
+    }
+
+    /// @notice A second concentrated band into a pool that already has live liquidity is refused
+    ///         even at different ticks; the full-range backstop is not.
+    function test_seed_secondBandIntoLivePoolIsRefused() public {
+        seedScript.createAndSeedWithOptions(poolName, _params(BAND), _opts(signer));
+
+        PoolsJson.PoolParams memory narrower = _params(500);
+        vm.expectPartialRevert(SeedV4Liquidity.PoolAlreadySeeded.selector);
+        seedScript.runWithOptions(poolName, narrower, _opts(signer));
+
+        seedScript.runWithOptions(poolName, _params(FULL), _opts(signer));
+
+        SeedV4Liquidity.SeedOptions memory opts = _opts(signer);
+        opts.allowExistingRange = true;
+        seedScript.runWithOptions(poolName, narrower, opts);
     }
 
     // -----------
@@ -449,7 +587,7 @@ abstract contract TELxPoolLifecycleForkTest is Test {
     // Helpers
     // -----------
 
-    function _params(uint16 widthBps) internal view returns (TELxPoolScriptBase.PoolParams memory) {
+    function _params(uint16 widthBps) internal view returns (PoolsJson.PoolParams memory) {
         return seedScript.explicitParams(amount0Human, amount1Human, widthBps);
     }
 
@@ -559,6 +697,81 @@ abstract contract TELxPoolLifecycleForkTest is Test {
 
     function _balance(address currency, address who) internal view returns (uint256) {
         return currency == TELxPools.NATIVE ? who.balance : IERC20(currency).balanceOf(who);
+    }
+
+    function _fundFor(TELxPools.PoolSpec memory s, address who, uint256 raw0, uint256 raw1) internal {
+        if (TELxPools.isNativeCurrency0(s)) {
+            vm.deal(who, raw0);
+        } else {
+            deal(s.currency0, who, raw0, true);
+        }
+        deal(s.currency1, who, raw1, true);
+    }
+
+    /// @dev Mints a position of exactly `liquidity` over [lower, upper] for `who`, paying whatever
+    ///      it costs, the way an attacker would.
+    function _mintAs(address who, TELxPools.PoolSpec memory s, int24 lower, int24 upper, uint128 liquidity)
+        internal
+        returns (uint256 tokenId)
+    {
+        _approveAll(who, s);
+        PoolKey memory key = TELxPools.poolKey(s);
+        bytes memory mintParams =
+            abi.encode(key, lower, upper, uint256(liquidity), type(uint128).max, type(uint128).max, who, bytes(""));
+        tokenId = IPositionManager(_positionManager()).nextTokenId();
+        _modifyAs(who, s, uint8(Actions.MINT_POSITION), mintParams);
+    }
+
+    function _decrease(uint256 tokenId, TELxPools.PoolSpec memory s, uint128 liquidity) internal {
+        PoolKey memory key = TELxPools.poolKey(s);
+        bytes memory actions = abi.encodePacked(uint8(Actions.DECREASE_LIQUIDITY), uint8(Actions.TAKE_PAIR));
+        bytes[] memory params = new bytes[](2);
+        params[0] = abi.encode(tokenId, uint256(liquidity), uint128(0), uint128(0), bytes(""));
+        params[1] = abi.encode(key.currency0, key.currency1, signer);
+        vm.prank(signer);
+        IPositionManager(_positionManager()).modifyLiquidities(abi.encode(actions, params), block.timestamp + 60);
+    }
+
+    function _increase(uint256 tokenId, TELxPools.PoolSpec memory s, uint128 liquidity) internal {
+        _approveAll(signer, s);
+        bytes memory increaseParams =
+            abi.encode(tokenId, uint256(liquidity), type(uint128).max, type(uint128).max, bytes(""));
+        _modifyAs(signer, s, uint8(Actions.INCREASE_LIQUIDITY), increaseParams);
+    }
+
+    /// @dev Unlimited Permit2 approvals for both legs, the way a wallet would set them up.
+    function _approveAll(address who, TELxPools.PoolSpec memory s) internal {
+        TELxPoolScriptBase.ChainConfig memory config = seedScript.chainConfig();
+        vm.startPrank(who);
+        if (!TELxPools.isNativeCurrency0(s)) {
+            IERC20(s.currency0).approve(config.permit2, type(uint256).max);
+            IAllowanceTransfer(config.permit2)
+                .approve(s.currency0, config.positionManager, type(uint160).max, type(uint48).max);
+        }
+        IERC20(s.currency1).approve(config.permit2, type(uint256).max);
+        IAllowanceTransfer(config.permit2)
+            .approve(s.currency1, config.positionManager, type(uint160).max, type(uint48).max);
+        vm.stopPrank();
+    }
+
+    /// @dev One liquidity-adding action followed by SETTLE_PAIR, plus SWEEP on a native leg, sent
+    ///      as `who` with half their ETH as value when the leg is native.
+    function _modifyAs(address who, TELxPools.PoolSpec memory s, uint8 action, bytes memory actionParams) internal {
+        PoolKey memory key = TELxPools.poolKey(s);
+        bool native = TELxPools.isNativeCurrency0(s);
+        bytes memory actions = native
+            ? abi.encodePacked(action, uint8(Actions.SETTLE_PAIR), uint8(Actions.SWEEP))
+            : abi.encodePacked(action, uint8(Actions.SETTLE_PAIR));
+        bytes[] memory params = new bytes[](native ? 3 : 2);
+        params[0] = actionParams;
+        params[1] = abi.encode(key.currency0, key.currency1);
+        if (native) params[2] = abi.encode(key.currency0, who);
+
+        uint256 value = native ? who.balance / 2 : 0;
+        vm.prank(who);
+        IPositionManager(_positionManager()).modifyLiquidities{value: value}(
+            abi.encode(actions, params), block.timestamp + 60
+        );
     }
 
     function _positionSpan(uint256 tokenId) internal view returns (uint256) {

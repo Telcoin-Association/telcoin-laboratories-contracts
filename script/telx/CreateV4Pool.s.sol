@@ -9,6 +9,7 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {TELxPools} from "../shared/TELxPools.sol";
 import {V4PoolMath} from "../shared/V4PoolMath.sol";
 import {TELxPoolScriptBase} from "./base/TELxPoolScriptBase.sol";
+import {PoolsJson} from "./base/PoolsJson.sol";
 
 /**
  * @title CreateV4Pool
@@ -58,7 +59,7 @@ contract CreateV4Pool is TELxPoolScriptBase {
     function planAll() external view {
         string[] memory names = _poolsOnThisChain();
         for (uint256 i; i < names.length; ++i) {
-            PoolParams memory params = _poolParams(names[i]);
+            PoolsJson.PoolParams memory params = _poolParams(names[i]);
             if (params.amount0Human == 0 || params.amount1Human == 0) {
                 console2.log("=== %s: amounts not set in pools.json ===", names[i]);
                 continue;
@@ -70,7 +71,7 @@ contract CreateV4Pool is TELxPoolScriptBase {
 
     /// @notice Previews one pool using the amounts in `pools.json`.
     function plan(string memory poolName) external view {
-        PoolParams memory params = _poolParams(poolName);
+        PoolsJson.PoolParams memory params = _poolParams(poolName);
         _requireAmountsSet(poolName, params);
         _plan(poolName, params);
     }
@@ -86,7 +87,7 @@ contract CreateV4Pool is TELxPoolScriptBase {
      *      the pool already exists and at what price, before spending gas or committing to a
      *      price.
      */
-    function _plan(string memory poolName, PoolParams memory params) internal view {
+    function _plan(string memory poolName, PoolsJson.PoolParams memory params) internal view {
         ChainConfig memory config = _chainConfig();
         TELxPools.PoolSpec memory s = _poolSpec(poolName);
         PoolKey memory key = TELxPools.poolKey(s);
@@ -122,7 +123,7 @@ contract CreateV4Pool is TELxPoolScriptBase {
 
     /// @notice Production entrypoint using the amounts in `pools.json`.
     function run(string memory poolName) external returns (PoolId poolId, uint160 sqrtPriceX96) {
-        PoolParams memory params = _poolParams(poolName);
+        PoolsJson.PoolParams memory params = _poolParams(poolName);
         _requireAmountsSet(poolName, params);
         return runWithSigner(poolName, params, _resolveSigner());
     }
@@ -154,7 +155,7 @@ contract CreateV4Pool is TELxPoolScriptBase {
      * @return sqrtPriceX96 The pool's price after the run: the intended one if it was created here,
      *         the live one if it already existed within tolerance.
      */
-    function runWithSigner(string memory poolName, PoolParams memory params, address signer)
+    function runWithSigner(string memory poolName, PoolsJson.PoolParams memory params, address signer)
         public
         returns (PoolId poolId, uint160 sqrtPriceX96)
     {
@@ -203,7 +204,11 @@ contract CreateV4Pool is TELxPoolScriptBase {
 
     /// @dev Explicit amounts with the tolerances from the file's defaults block. `widthBps` is not
     ///      used by this script and is left at zero.
-    function _explicitParams(uint256 amount0Human, uint256 amount1Human) internal view returns (PoolParams memory p) {
+    function _explicitParams(uint256 amount0Human, uint256 amount1Human)
+        internal
+        view
+        returns (PoolsJson.PoolParams memory p)
+    {
         p.amount0Human = amount0Human;
         p.amount1Human = amount1Human;
         (p.maxTickDeviation, p.slippageBps) = _defaultTolerances();

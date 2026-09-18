@@ -8,6 +8,8 @@ import {EthereumAddresses} from "../../shared/EthereumAddresses.sol";
 import {PolygonAddresses} from "../../shared/PolygonAddresses.sol";
 import {BaseAddresses} from "../../shared/BaseAddresses.sol";
 import {Salts} from "../../shared/Salts.sol";
+import {TELxPools} from "../../shared/TELxPools.sol";
+import {PoolsJson} from "./PoolsJson.sol";
 
 /// @title TELxRegistryScriptBase
 /// @notice What the TELx registry deploy and verify scripts have in common: the per-chain targets,
@@ -105,6 +107,24 @@ abstract contract TELxRegistryScriptBase is DeployBase {
             )
         );
         return true;
+    }
+
+    // -----------
+    // Liquidity floors
+    // -----------
+
+    /// @dev A pool's parameters from `pools.json`. Virtual so a fork test can supply fixture values
+    ///      without editing the checked-in file, whose amounts are a business decision.
+    function _poolParams(string memory poolName) internal view virtual returns (PoolsJson.PoolParams memory) {
+        return PoolsJson.read(poolName);
+    }
+
+    /// @notice The registry liquidity floor for a catalog pool, derived from its configured
+    ///         opening price and `minPositionValue1`. Reverts while either is undecided.
+    /// @dev The deploy batch sets this and the verify script asserts it, from the same derivation,
+    ///      so the two cannot disagree. A zero floor is what makes a cap slot cost nothing.
+    function _expectedFloor(string memory poolName) internal view returns (uint128) {
+        return PoolsJson.minLiquidityFloor(poolName, TELxPools.spec(poolName), _poolParams(poolName));
     }
 
     // -----------

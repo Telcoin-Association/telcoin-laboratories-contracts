@@ -11,7 +11,9 @@ import {IPositionRegistry} from "../../contracts/telx/interfaces/IPositionRegist
 import {PolygonAddresses} from "../../script/shared/PolygonAddresses.sol";
 import {BaseAddresses} from "../../script/shared/BaseAddresses.sol";
 import {TELxPools} from "../../script/shared/TELxPools.sol";
-import {VerifyTELxRegistry} from "../../script/telx/VerifyTELxRegistry.s.sol";
+import {VerifyTELxRegistryHarness} from "./harnesses/VerifyTELxRegistryHarness.sol";
+import {TELxPoolFixtures} from "./TELxPoolFixtures.sol";
+import {PoolsJson} from "../../script/telx/base/PoolsJson.sol";
 import {TELxRegistryScriptBase} from "../../script/telx/base/TELxRegistryScriptBase.sol";
 import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
@@ -30,7 +32,7 @@ import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 ///         real ones; the registry and subscriber are deployed fresh here rather than read from
 ///         `deployments/`, since no real deploy exists yet.
 contract VerifyTELxRegistryForkTest is Test {
-    VerifyTELxRegistry internal verifier;
+    VerifyTELxRegistryHarness internal verifier;
     TELxRegistryScriptBase.ChainTarget internal target;
 
     address internal governance = PolygonAddresses.GOVERNANCE_SAFE;
@@ -47,7 +49,7 @@ contract VerifyTELxRegistryForkTest is Test {
     function setUp() public {
         ForkOrSkip.select("POLYGON_RPC_URL");
 
-        verifier = new VerifyTELxRegistry();
+        verifier = new VerifyTELxRegistryHarness();
         target = TELxRegistryScriptBase.ChainTarget({
             name: "polygon",
             rpcUrl: "",
@@ -94,7 +96,12 @@ contract VerifyTELxRegistryForkTest is Test {
             TELxPools.PoolSpec memory spec = TELxPools.spec(names[i]);
             if (spec.chainId != PolygonAddresses.CHAIN_ID) continue;
             registry.registerPool(TELxPools.poolKey(spec));
+            registry.setMinLiquidity(TELxPools.poolKey(spec).toId(), _fixtureFloor(names[i]));
         }
+    }
+
+    function _fixtureFloor(string memory poolName) internal pure returns (uint128) {
+        return PoolsJson.minLiquidityFloor(poolName, TELxPools.spec(poolName), TELxPoolFixtures.params(poolName));
     }
 
     // -----------
@@ -170,12 +177,23 @@ contract VerifyTELxRegistryForkTest is Test {
         verifier.verifyOn(target, address(registry), address(subscriber));
     }
 
+    /// @notice The admin role is single-holder under the default-admin rules, so a registry that
+    ///         has the support Safe as admin is one that was deployed that way. Since governance is
+    ///         then not the admin, that check fires first.
     function test_verifyOn_rejectsSupportSafeAsAdmin() public {
-        (PositionRegistry registry, TELxSubscriber subscriber) = _deployWired();
+        (PositionRegistry registry, TELxSubscriber subscriber) =
+            _deployWith(positionManager, stateView, support, governance);
+        vm.expectRevert(bytes("registry DEFAULT_ADMIN_ROLE -> governance Safe: role not granted"));
+        verifier.verifyOn(target, address(registry), address(subscriber));
+    }
+
+    /// @notice And a second admin cannot be granted at all, which is the property the rules exist
+    ///         for: no operator error can leave two admins or none.
+    function testRevert_secondAdminCannotBeGranted() public {
+        (PositionRegistry registry,) = _deployWired();
+        vm.expectRevert();
         vm.prank(governance);
         registry.grantRole(DEFAULT_ADMIN_ROLE, support);
-        vm.expectRevert(bytes("registry: support Safe must not be admin"));
-        verifier.verifyOn(target, address(registry), address(subscriber));
     }
 
     function test_verifyOn_rejectsMissingSubscriberRole() public {
@@ -298,6 +316,26 @@ contract VerifyTELxRegistryForkTest is Test {
         LookalikeRegistry lookalike = new LookalikeRegistry(address(registry));
         vm.expectRevert(bytes("TELxSubscriber: deployed bytecode does not match this tree"));
         verifier.verifyBytecode(target, address(registry), address(lookalike));
+    }
+
+    /// @notice A pool on the allowlist with no liquidity floor is a pool whose cap slots cost gas,
+    ///         and the gate must refuse it.
+    function test_verifyOn_rejectsMissingFloor() public {
+        (PositionRegistry registry, TELxSubscriber subscriber) = _deployWired();
+        vm.prank(governance);
+        registry.setMinLiquidity(TELxPools.poolKey(TELxPools.spec("POLYGON_EUSD_TEL")).toId(), 0);
+        vm.expectRevert(bytes("registry: liquidity floor does not match pools.json for POLYGON_EUSD_TEL"));
+        verifier.verifyOn(target, address(registry), address(subscriber));
+    }
+
+    /// @notice And a floor that is set but differs from what the file implies is a mismatch, not
+    ///         a pass.
+    function test_verifyOn_rejectsWrongFloor() public {
+        (PositionRegistry registry, TELxSubscriber subscriber) = _deployWired();
+        vm.prank(governance);
+        registry.setMinLiquidity(TELxPools.poolKey(TELxPools.spec("POLYGON_WETH_TEL")).toId(), 1);
+        vm.expectRevert(bytes("registry: liquidity floor does not match pools.json for POLYGON_WETH_TEL"));
+        verifier.verifyOn(target, address(registry), address(subscriber));
     }
 
     /// @notice Immutables are part of runtime code, so a registry built against a different

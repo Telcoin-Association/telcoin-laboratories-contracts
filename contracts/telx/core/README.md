@@ -117,7 +117,7 @@ The system uses OpenZeppelin's `AccessControl` to manage privileges on the `Posi
 
 - **`DEFAULT_ADMIN_ROLE`**
   - **Holder**: The governance Safe.
-  - **Permissions**: Grants and revokes all other roles. Manages the pool allowlist (`registerPool`, `deregisterPool`), the per-pool absolute liquidity floor (`setMinLiquidity`), the in-range gate (`setInRangeRequired`), and holds the eviction backstop (`forceUnsubscribe`).
+  - **Permissions**: Grants and revokes the other two roles. Manages the pool allowlist (`registerPool`, `deregisterPool`), the per-pool absolute liquidity floor (`setMinLiquidity`), the in-range gate (`setInRangeRequired`), and holds the eviction backstop (`forceUnsubscribe`, `forceUnsubscribeBatch`). The role itself follows OpenZeppelin's `AccessControlDefaultAdminRules`: one holder, moved only through a two-step transfer with a 3 day delay, never granted to a second address or renounced in one call.
 - **`SUBSCRIBER_ROLE`**
   - **Holder**: The deployed `TELxSubscriber` contract address.
   - **Permissions**: `PositionRegistry::handleSubscribe()`, `handleUnsubscribe()`, and `handleBurn()`. This is the sole entry point for mutating the subscription index.
@@ -125,7 +125,7 @@ The system uses OpenZeppelin's `AccessControl` to manage privileges on the `Posi
   - **Holder**: An operational multisig.
   - **Permissions**: `PositionRegistry::erc20Rescue()` only - recovers mis-sent ERC-20 tokens.
 
-`pruneSubscription(uint256)` is **permissionless**: anyone may call it to remove a stale entry whose position has been transferred, burned, or drained to zero liquidity. It decides on those position-local facts only; it never consults the pool's liquidity or tick, and it refuses to run while the `PoolManager` is unlocked.
+`pruneSubscription(uint256)` is **permissionless**: anyone may call it to remove a stale entry whose position has been transferred, burned, or drained to zero liquidity. It decides on those position-local facts only; it never consults the pool's liquidity or tick, and it refuses to run while the `PoolManager` is unlocked. `resubscribe(uint256)` is its permissionless counterpart: it re-indexes a position that Uniswap still reports subscribed to the TELx subscriber but that the index no longer holds (a drained position pruned and later refilled), under the same checks as a fresh subscribe.
 
 There is no `UNI_HOOK_ROLE` - the hook has been removed. `TELxSubscriber` is `Ownable2Step` and owned by the governance Safe; the owner can re-point the registry via `setRegistry(IPositionRegistry)`, which only accepts a deployed registry that has already granted the subscriber `SUBSCRIBER_ROLE`. `renounceOwnership` reverts.
 
@@ -145,22 +145,23 @@ There is no `UNI_HOOK_ROLE` - the hook has been removed. `TELxSubscriber` is `Ow
   - `isTokenSubscribed[tokenId]` and the per-owner `subscriptions[owner]` list, with swap-and-pop indices so subscribe and unsubscribe are O(1).
   - `subscriptionOwner[tokenId]`: the owner at subscribe time, which `pruneSubscription` compares against the live owner.
   - `subscribed`: the list of distinct owners with at least one subscription, bounded by `MAX_SUBSCRIBED`.
-  - `poolAllowed[poolId]` and `minLiquidity[poolId]`: the admin allowlist and the optional absolute liquidity floor per pool.
+  - `poolAllowed[poolId]` and `minLiquidity[poolId]`: the admin allowlist and the absolute liquidity floor per pool. Every allowlisted pool carries a non-zero floor, set in the deploy batch; it is sized so that the narrowest in-range position is worth a governance-chosen amount of currency1, which is what makes a cap slot cost capital rather than gas.
   - `inRangeRequired`: the in-range gate, enabled by default.
 - **It does not store**: liquidity, fee-growth checkpoints, reward balances, JIT/Active/Passive weights, or a trusted-router registry. Every fact about a position is read live from Uniswap.
 - **Caps**:
-  - `MAX_SUBSCRIBED = 50_000` - global cap on distinct subscribed owners across all pools, checked on an owner's first subscription. The allowlist is what makes filling it cost real capital in a real pool.
+  - `MAX_SUBSCRIBED = 50_000` - global cap on distinct subscribed owners across all pools, checked on an owner's first subscription. The allowlist restricts slots to real TELx pools and the per-pool floor makes each one cost capital that stays locked while the slot is held (a drained position is prunable by anyone).
   - `MAX_SUBSCRIPTIONS = 1_000` - per-LP subscription cap. It bounds the `getSubscriptions` view, which is the only path that iterates the per-owner array.
 - **Key Functions & Intended Behavior**:
   - `handleSubscribe()` / `handleUnsubscribe()` / `handleBurn()`: Called exclusively by the subscriber (`SUBSCRIBER_ROLE`). `handleSubscribe` requires an allowlisted, initialized pool, non-zero liquidity at or above the pool's `minLiquidity`, in range when the gate is on, and a locked `PoolManager`; a tokenId already in the index is a no-op. Unsubscribing occurs on transfer or burn, requiring new owners to re-subscribe. `handleUnsubscribe` and `handleBurn` are no-ops for unknown tokenIds and never revert on a stray notification.
   - `pruneSubscription(uint256)`: Permissionless cleanup. Removes an entry whose position has been transferred, burned, or has zero liquidity. Refuses to run while the `PoolManager` is unlocked.
+  - `resubscribe(uint256)`: Permissionless repair. Re-indexes a position that the `PositionManager` reports subscribed to a `SUBSCRIBER_ROLE` holder but that the index does not hold, under the same eligibility checks as `handleSubscribe`. Reverts `NotSubscribedOnUniswap` otherwise, so nothing can be indexed that v4 has not opted in.
   - `subscriptionEligible(uint256)`: View returning whether a position sits in an allowlisted pool, meets the pool's liquidity floor and, when `inRangeRequired` is enabled, is in range. The single source of truth for eligibility.
   - `belowSubscriptionThreshold(uint256)` / `isInRange(uint256)`: Component views for the liquidity-floor and in-range checks respectively.
   - `getPosition`, `getPositionDetails`, `getLiquidityLast`, `validPool`: **Live view shims** that read from the Uniswap v4 `PositionManager` and `StateView` rather than internal storage. `validPool` is true only for an allowlisted pool that is initialized on chain.
   - `getSubscriptions(owner)`: Returns only currently-votable positions (still owned by `owner` and `subscriptionEligible`); the Snapshot strategy consumes this directly. `getSubscriptions(owner, offset, limit)` is the paginated form for callers that batch many voters into one `eth_call`. `getSubscriptionsRaw(owner)` returns the full unfiltered stored set for ops and prune bots. All three are for off-chain `eth_call` only and are never consumed on chain.
-  - `getSubscribed`, `getAmountsForLiquidity`, `isTokenSubscribed`, `isSubscribed`, `poolAllowed`, `minLiquidity`, `inRangeRequired`: Views over the subscription index, configuration, and derived data.
+  - `getSubscribed()`, `getSubscribed(offset, limit)`, `getAmountsForLiquidity`, `isTokenSubscribed`, `isSubscribed`, `poolAllowed`, `minLiquidity`, `inRangeRequired`: Views over the subscription index, configuration, and derived data. `getAmountsForLiquidity` returns exactly what Uniswap's reference `LiquidityAmounts` returns, computed from core `SqrtPriceMath`.
   - `registerPool(PoolKey)` / `deregisterPool(PoolId)` / `setMinLiquidity(PoolId, uint128)` / `setInRangeRequired(bool)`: Called by `DEFAULT_ADMIN_ROLE`. Manage the allowlist, the per-pool floor and the in-range gate.
-  - `forceUnsubscribe(uint256)`: Called by `DEFAULT_ADMIN_ROLE`. Evicts a single entry; the backstop for a cap-fill that the allowlist is expected to make unnecessary.
+  - `forceUnsubscribe(uint256)` / `forceUnsubscribeBatch(uint256[])`: Called by `DEFAULT_ADMIN_ROLE`. Evicts entries regardless of state; the batch form clears a filled cap in one transaction.
   - `erc20Rescue()`: Called by `SUPPORT_ROLE`. Recovers mis-sent ERC-20 tokens.
 
 ### `TELxSubscriber.sol`
@@ -169,14 +170,14 @@ There is no `UNI_HOOK_ROLE` - the hook has been removed. `TELxSubscriber` is `Ow
 - **Security Model**: Its primary security feature is the `onlyPositionManager` modifier, which ensures all notifications (`notifySubscribe`, `notifyUnsubscribe`, `notifyBurn`, `notifyModifyLiquidity`) are authentically from the Uniswap v4 `PositionManager`, preventing spoofed events.
 - **`notifyModifyLiquidity`**: A no-op with no external call. It runs inside the LP's own `unlock`, where any pool-state read is one the transaction controls, so the subscriber does nothing there and cannot affect an increase, decrease or collect under any registry configuration.
 - **`notifyBurn`**: Wrapped in try/catch, emitting `NotificationDropped` on failure, so a misconfigured registry can never block a burn. `notifySubscribe` is deliberately not wrapped: a subscribe the registry rejects fails the LP's opt-in loudly, so Uniswap and the registry never disagree about a fresh subscription.
-- **Configurability**: The contract is `Ownable2Step`, owned by the governance Safe. `setRegistry(IPositionRegistry)` accepts only a deployed registry that has granted this subscriber `SUBSCRIBER_ROLE`. `renounceOwnership` reverts.
+- **Configurability**: The contract is `Ownable2Step`, owned by the governance Safe. `setRegistry(IPositionRegistry)` accepts only a deployed registry that has granted this subscriber `SUBSCRIBER_ROLE`, and the constructor refuses a codeless registry for the same reason the burn wrapper needs one. `renounceOwnership` reverts.
 
 ## 6. Subscription Eligibility
 
 A position is `subscriptionEligible` only if it satisfies **all** of the conditions below:
 
 - **Allowlisted pool:** its pool is on the admin allowlist. A pool that is deregistered takes its positions out of the votable set without touching storage.
-- **Liquidity floor:** its liquidity is non-zero and at least the pool's admin-set absolute `minLiquidity`, which defaults to 0. There is no threshold relative to the pool's total liquidity: such a gate can be moved by anyone inside a single `unlock`, and the Snapshot strategy already values positions in USD, so dust votes as dust.
+- **Liquidity floor:** its liquidity is non-zero and at least the pool's admin-set absolute `minLiquidity`. Every allowlisted pool carries one; it is derived at deploy time so that the narrowest in-range position (one tick spacing wide) is worth `minPositionValue1` of currency1 at the opening price, and wider positions need proportionally more (about 33x for a +/-10% band, 670x for the full range at spacing 60). There is no threshold relative to the pool's total liquidity: such a gate can be moved by anyone inside a single `unlock`, and the Snapshot strategy already values positions in USD, so dust votes as dust. The floor's purpose is the cap, not vote weight.
 - **In range:** when the `inRangeRequired` flag is enabled, the pool's current tick must sit within the position's `[tickLower, tickUpper)` range. An out-of-range position provides no live liquidity and earns no voting power. The flag defaults to enabled and the admin can toggle it via `setInRangeRequired`.
 
 `handleSubscribe` enforces eligibility at subscribe time; `getSubscriptions(owner)` evaluates it live and returns only currently-votable positions, so a pinned-block read by the Snapshot strategy needs no filter of its own. Nothing enforces eligibility by removal: `pruneSubscription` removes only positions that have been transferred, burned or drained, all of which are facts only the position's owner can change. A position that is merely ineligible keeps its slot and simply does not vote until it qualifies again.
@@ -207,8 +208,11 @@ The voting strategy runs entirely off-chain on Snapshot's infrastructure and mak
   - **Risk**: Inside a single `PoolManager.unlock`, a caller can set a pool's active liquidity and current tick to arbitrary values for the cost of gas. Any registry write that read those values could be driven to unsubscribe every voter in a pool one block before a Snapshot.
   - **Mitigation**: No registry write reads pool liquidity or tick. `pruneSubscription` decides on ownership and the position's own liquidity only, and both it and `handleSubscribe` revert while the `PoolManager` is unlocked. `test_pruneSubscription_refusedInsideUnlock` exercises this against the live `PoolManager` on Polygon and Base.
 - **Cap-fill denial of service**:
-  - **Risk**: `MAX_SUBSCRIBED` is a global cap on distinct owners; if gas-only positions could subscribe, an attacker could fill it and block every real LP.
-  - **Mitigation**: Only positions in allowlisted pools may subscribe, so filling the cap costs real capital in a real TELx pool. `forceUnsubscribe` remains as the admin backstop.
+  - **Risk**: `MAX_SUBSCRIBED` is a global cap on distinct owners; if gas-only positions could subscribe, an attacker could fill it and block every real LP. The allowlist alone does not prevent that: a full-range position of liquidity 1 in a real pool costs one wei of each token.
+  - **Mitigation**: Every allowlisted pool carries a non-zero liquidity floor sized to the narrowest in-range position, so each slot held at once locks at least that much capital, and a drained position is prunable by anyone so the capital cannot be recycled. `forceUnsubscribeBatch` clears a fill in one transaction. The floor relies on the in-range gate staying on.
+- **A pruned position that comes back**:
+  - **Risk**: A position drained to zero is prunable; if the owner refills it, Uniswap still holds the subscription and refuses a second `subscribe`, so the position would vote nowhere.
+  - **Mitigation**: `resubscribe` lets anyone re-index it under the same checks as a fresh subscribe, and a stale record under a previous owner is moved rather than ignored when the new owner subscribes.
 - **Registry misconfiguration bricking LP operations**:
   - **Risk**: Uniswap bubbles a revert from `notifyBurn` into the LP's transaction, and a repointed or broken registry could make burns fail.
   - **Mitigation**: `notifyBurn` is wrapped in try/catch and `notifyModifyLiquidity` makes no external call, so no registry state can block an LP's modify or burn. `setRegistry` refuses a target that is not deployed or has not granted the subscriber its role, and `unsubscribe` is the one path Uniswap itself swallows, so an LP can always leave.

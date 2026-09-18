@@ -376,6 +376,94 @@ contract V4PoolMathTest is Test {
     }
 
     // -----------
+    // Liquidity floor
+    // -----------
+
+    /// @notice A one-spacing position holding exactly the floor liquidity is worth the requested
+    ///         value of currency1 at that price, counting both legs, to within a fraction of a
+    ///         percent. This is the cap-slot price the registry floor enforces.
+    function testFuzz_minLiquidityFloor_narrowestPositionIsWorthTheValue(uint160 sqrtPriceX96, uint96 value1)
+        public
+        pure
+    {
+        // Price ratios between 1e-9 and 1e9 and values from one whole 18-decimal token up to about
+        // 79 billion: the space a real pool lives in. Outside it the floor is either a handful of
+        // liquidity units, where integer rounding dominates, or saturates uint128.
+        sqrtPriceX96 = uint160(bound(uint256(sqrtPriceX96), uint256(1 << 96) / 30_000, uint256(1 << 96) * 30_000));
+        value1 = uint96(bound(value1, 1e18, type(uint96).max));
+
+        uint128 floor = V4PoolMath.minLiquidityForNarrowestPosition(sqrtPriceX96, SPACING_MEDIUM, value1);
+        assertLt(floor, type(uint128).max, "floor within range");
+
+        int24 lower = V4PoolMath.alignTick(TickMath.getTickAtSqrtPrice(sqrtPriceX96), SPACING_MEDIUM, false);
+        (uint160 sqrtLower, uint160 sqrtUpper) = V4PoolMath.sqrtPricesAtTicks(lower, lower + SPACING_MEDIUM);
+        (uint256 amount0, uint256 amount1) = V4PoolMath.amountsForLiquidity(sqrtPriceX96, sqrtLower, sqrtUpper, floor);
+
+        // value both legs in currency1 at the price
+        uint256 amount0In1 = FullMath.mulDiv(FullMath.mulDiv(amount0, sqrtPriceX96, 1 << 96), sqrtPriceX96, 1 << 96);
+        assertApproxEqRel(amount0In1 + amount1, value1, 0.01e18, "narrowest position worth about value1");
+    }
+
+    /// @notice Wider positions at the same liquidity hold far more: the floor bounds every eligible
+    ///         position's capital from below, and the standard band and the full range sit well
+    ///         above it.
+    function test_minLiquidityFloor_widerPositionsCostMore() public pure {
+        uint160 sqrtP = V4PoolMath.sqrtPriceX96FromAmounts(100_000 * 1e6, 20_000_000 * 1e18);
+        uint256 value1 = 200 ether; // 200 TEL
+        uint128 floor = V4PoolMath.minLiquidityForNarrowestPosition(sqrtP, SPACING_MEDIUM, value1);
+
+        (int24 bandLower, int24 bandUpper) = V4PoolMath.percentRangeTicks(sqrtP, 1000, SPACING_MEDIUM);
+        (uint160 bl, uint160 bu) = V4PoolMath.sqrtPricesAtTicks(bandLower, bandUpper);
+        (, uint256 band1) = V4PoolMath.amountsForLiquidity(sqrtP, bl, bu, floor);
+
+        (uint160 fl, uint160 fu) = V4PoolMath.fullRangeSqrtPrices(SPACING_MEDIUM);
+        (, uint256 full1) = V4PoolMath.amountsForLiquidity(sqrtP, fl, fu, floor);
+
+        // currency1 leg alone is about half the position's value: the +/-10% band is worth about
+        // 33x the floor value and the full range about 670x, so their currency1 legs alone clear
+        // 15x and 300x
+        assertGt(band1, 15 * value1, "+/-10% band needs an order of magnitude more");
+        assertGt(full1, 300 * value1, "full range needs two orders more");
+    }
+
+    function testRevert_minLiquidityFloor_zeroValue() public {
+        vm.expectRevert(V4PoolMath.ZeroAmount.selector);
+        harness.minLiquidityForNarrowestPosition(SQRT_PRICE_1_1, SPACING_MEDIUM, 0);
+    }
+
+    function testRevert_minLiquidityFloor_priceOutOfRange() public {
+        vm.expectRevert(abi.encodeWithSelector(V4PoolMath.PriceOutOfRange.selector, uint256(TickMath.MAX_SQRT_PRICE)));
+        harness.minLiquidityForNarrowestPosition(TickMath.MAX_SQRT_PRICE, SPACING_MEDIUM, 1);
+    }
+
+    /// @notice At the very top of the tick range the band is pushed down to stay legal.
+    function test_minLiquidityFloor_clampsAtTheTop() public pure {
+        uint128 floor = V4PoolMath.minLiquidityForNarrowestPosition(TickMath.MAX_SQRT_PRICE - 1, SPACING_MEDIUM, 1e18);
+        assertGt(floor, 0, "still a floor");
+    }
+
+    // -----------
+    // amountsForLiquidity
+    // -----------
+
+    /// @notice The preview helper agrees with Uniswap's reference in every price regime.
+    function testFuzz_amountsForLiquidity_matchesReference(uint128 liquidity, int24 tick, int24 lower, int24 upper)
+        public
+        pure
+    {
+        tick = int24(bound(tick, TickMath.MIN_TICK, TickMath.MAX_TICK));
+        lower = int24(bound(lower, TickMath.MIN_TICK, TickMath.MAX_TICK - 1));
+        upper = int24(bound(upper, lower + 1, TickMath.MAX_TICK));
+        uint160 sqrtP = TickMath.getSqrtPriceAtTick(tick);
+        (uint160 sl, uint160 su) = V4PoolMath.sqrtPricesAtTicks(lower, upper);
+
+        (uint256 got0, uint256 got1) = V4PoolMath.amountsForLiquidity(sqrtP, sl, su, liquidity);
+        (uint256 want0, uint256 want1) = LiquidityAmounts.getAmountsForLiquidity(sqrtP, sl, su, liquidity);
+        assertEq(got0, want0, "amount0");
+        assertEq(got1, want1, "amount1");
+    }
+
+    // -----------
     // Human-readable prices
     // -----------
 

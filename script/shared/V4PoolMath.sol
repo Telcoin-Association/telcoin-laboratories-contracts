@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {SqrtPriceMath} from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
 
 /// @title V4PoolMath
 /// @notice Price and tick helpers for creating and seeding Uniswap v4 pools from ordinary inputs.
@@ -201,6 +202,75 @@ library V4PoolMath {
     {
         (int24 tickLower, int24 tickUpper) = fullRangeTicks(tickSpacing);
         return sqrtPricesAtTicks(tickLower, tickUpper);
+    }
+
+    // -----------
+    // Amounts
+    // -----------
+
+    /// @notice What a position of `liquidity` over [sqrtLower, sqrtUpper] holds at `sqrtPriceX96`,
+    ///         rounded down. The "what is it worth" direction, for previews.
+    function amountsForLiquidity(uint160 sqrtPriceX96, uint160 sqrtLower, uint160 sqrtUpper, uint128 liquidity)
+        internal
+        pure
+        returns (uint256 amount0, uint256 amount1)
+    {
+        if (sqrtPriceX96 <= sqrtLower) {
+            amount0 = SqrtPriceMath.getAmount0Delta(sqrtLower, sqrtUpper, liquidity, false);
+        } else if (sqrtPriceX96 < sqrtUpper) {
+            amount0 = SqrtPriceMath.getAmount0Delta(sqrtPriceX96, sqrtUpper, liquidity, false);
+            amount1 = SqrtPriceMath.getAmount1Delta(sqrtLower, sqrtPriceX96, liquidity, false);
+        } else {
+            amount1 = SqrtPriceMath.getAmount1Delta(sqrtLower, sqrtUpper, liquidity, false);
+        }
+    }
+
+    // -----------
+    // Liquidity floor
+    // -----------
+
+    /**
+     * @notice The liquidity at which a position spanning exactly one tick spacing around
+     *         `sqrtPriceX96` is worth `value1` of currency1, counting both legs at that price.
+     * @dev A one-spacing position is the cheapest way to hold a given liquidity, so a registry
+     *      floor sized to it bounds the cost of every in-range position from below; wider positions
+     *      need proportionally more capital to reach the same liquidity. Inside a band
+     *      [sqrtL, sqrtU] a position of liquidity L holds L * (sqrtP - sqrtL) / 2^96 of currency1
+     *      and L * (sqrtU - sqrtP) / (sqrtU * sqrtP) * 2^96 of currency0; valued in currency1 at
+     *      the price sqrtP^2, the two legs sum to L * (sqrtU - sqrtL) / 2^96 to within a fraction
+     *      of the spacing (sqrtP / sqrtU is within 0.3% of one at spacing 60). The floor is the
+     *      liquidity that makes that sum equal `value1`, rounded up.
+     *
+     *      Holds for a position that is in range. A band far below the price holds only currency1
+     *      across a much smaller sqrt-price span, so the same liquidity is worth far less there;
+     *      the floor therefore assumes the registry's in-range gate is on.
+     * @param sqrtPriceX96 The price the floor is sized at, normally the pool's opening price.
+     * @param tickSpacing The pool's tick spacing.
+     * @param value1 Raw currency1 units the narrowest position must be worth.
+     */
+    function minLiquidityForNarrowestPosition(uint160 sqrtPriceX96, int24 tickSpacing, uint256 value1)
+        internal
+        pure
+        returns (uint128)
+    {
+        if (value1 == 0) revert ZeroAmount();
+        if (sqrtPriceX96 < TickMath.MIN_SQRT_PRICE || sqrtPriceX96 >= TickMath.MAX_SQRT_PRICE) {
+            revert PriceOutOfRange(sqrtPriceX96);
+        }
+        (int24 minTick, int24 maxTick) = fullRangeTicks(tickSpacing);
+
+        int24 lower = alignTick(TickMath.getTickAtSqrtPrice(sqrtPriceX96), tickSpacing, false);
+        if (lower < minTick) lower = minTick;
+        int24 upper = lower + tickSpacing;
+        if (upper > maxTick) {
+            upper = maxTick;
+            lower = maxTick - tickSpacing;
+        }
+
+        uint256 span = uint256(TickMath.getSqrtPriceAtTick(upper)) - uint256(TickMath.getSqrtPriceAtTick(lower));
+        uint256 liquidity = FullMath.mulDivRoundingUp(value1, 1 << 96, span);
+        if (liquidity > type(uint128).max) liquidity = type(uint128).max;
+        return uint128(liquidity);
     }
 
     // -----------

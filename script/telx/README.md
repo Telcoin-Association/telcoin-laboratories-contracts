@@ -66,6 +66,10 @@ Before seeding, the deployer EOA needs the tokens. TEL v3 currently has **zero s
 chain**, so the pools cannot be seeded until the TEL v2 to v3 upgrade portal opens and the treasury
 holds upgraded TEL. Pools are created at the moment they are seeded, not before: see step 2.
 
+The registry deploy (step 1) also needs `pools.json` filled in, because each pool's liquidity floor
+is derived from its opening price. Decide the amounts and the floors first, then deploy the
+registry, then seed.
+
 ## Amounts and prices
 
 Per-pool amounts and band widths are set once, for all seven pools, in `script/telx/pools.json`,
@@ -92,16 +96,49 @@ Two tolerances live in the file's `defaults` block and can be overridden per poo
 
 - `maxTickDeviation` (default 50, about 0.5%): when seeding a pool that already exists, how far its
   live tick may sit from the tick the amounts imply before the seed is refused.
-- `slippageBps` (default 50): how far above the computed mint cost the on-chain maximums are set.
-  The PositionManager reverts the mint if the price moves past this margin between simulation and
-  inclusion, in either direction, including out of the band entirely.
+- `slippageBps` (default 50): how far above the computed mint cost the on-chain maximums are set
+  on the existing-pool path. The PositionManager reverts the mint if the price moves past this
+  margin between simulation and inclusion, in either direction, including out of the band
+  entirely. `createAndSeed` ignores it and sets the maximums at the exact cost: a pool that does
+  not exist yet has no legitimate reason to open at any other price, so a front-run initialize at
+  any other price fails the whole transaction.
+
+### The liquidity floor
+
+Each pool also carries `minPositionValue1`: the whole units of currency1 (TEL, or eMXN for the
+eUSD/eMXN pool) that the narrowest possible in-range position must be worth for its owner to
+subscribe to the registry. The deploy batch turns it into the registry's per-pool `minLiquidity`
+at the opening price, and the verify script checks the two agree.
+
+This number is what stops the subscriber cap from being filled for gas. `MAX_SUBSCRIBED` is a
+global cap of 50,000 distinct owners, and without a floor a full-range position of liquidity 1,
+which costs one wei of each token, holds a slot. With the floor, every slot held at once locks at
+least `minPositionValue1` worth of capital, and a drained position can be pruned by anyone so the
+capital cannot be withdrawn and reused.
+
+The same liquidity is worth far more in a wider position, so the floor is felt differently by
+different LPs. At spacing 60 and `minPositionValue1` of 200 TEL (about a dollar at 0.005 USD):
+
+| Position | Capital needed to reach the floor |
+| --- | --- |
+| One tick spacing wide (the cheapest possible) | about 200 TEL |
+| The standard +/-10% band | about 33x that, roughly 6,500 TEL |
+| Full range | about 670x that, roughly 133,000 TEL |
+
+Governance chooses the value; a dollar's worth is the suggested starting point. `planAll` prints
+the derived floor and those three figures for every pool. The floor relies on the in-range gate
+staying on: a band far below the price holds the same liquidity for far less, so
+`setInRangeRequired(false)` reopens gas-only slots unless the floors are raised first.
 
 ## Step 1 - deploy the registry and subscriber
 
 One Safe MultiSend per chain: deploy both contracts via CreateX CREATE3, grant `SUBSCRIBER_ROLE`
-and `SUPPORT_ROLE`, and `registerPool` each of the chain's catalog pools. All-or-nothing, so the
-registry can never be live with the subscriber unwired or the allowlist empty. Registration is by
-PoolKey and needs no on-chain state, so the pools are allowlisted before they exist.
+and `SUPPORT_ROLE`, and for each of the chain's catalog pools `registerPool` and `setMinLiquidity`.
+All-or-nothing, so the registry can never be live with the subscriber unwired, the allowlist empty,
+or a pool whose cap slots cost nothing. Registration is by PoolKey and needs no on-chain state, so
+the pools are allowlisted before they exist; the floor is derived from `pools.json`, so the batch
+refuses to go out (`PoolAmountsNotSet` / `MinPositionValueNotSet`) until every pool on the chain has
+its amounts and `minPositionValue1` decided.
 
 Because CreateX runs in cross-chain mode, both contracts land at the **same address on all three
 chains** despite each chain passing a different PositionManager. With the governance Safe
@@ -120,7 +157,9 @@ both addresses, and the contract bytecode can change freely without moving them.
 run time.
 
 The governance Safe holds `DEFAULT_ADMIN_ROLE` on the registry and owns the subscriber. The support
-Safe holds `SUPPORT_ROLE` for token rescue and nothing else.
+Safe holds `SUPPORT_ROLE` for token rescue and nothing else. The admin role can only move through
+`beginDefaultAdminTransfer` and, three days later, `acceptDefaultAdminTransfer` from the new holder;
+it cannot be granted to a second address or renounced in one call.
 
 Simulate first. This executes the batch against a local fork by manipulating Safe storage, so it
 needs no hardware wallet and proposes nothing:
@@ -139,14 +178,17 @@ Expected output, for Polygon:
   [batch] grantRole SUBSCRIBER_ROLE -> TELxSubscriber
   [batch] grantRole SUPPORT_ROLE -> support Safe
   [batch] registerPool POLYGON_WETH_TEL
+  [batch] setMinLiquidity POLYGON_WETH_TEL = <floor>
   [batch] registerPool POLYGON_EUSD_TEL
+  [batch] setMinLiquidity POLYGON_EUSD_TEL = <floor>
   [batch] registerPool POLYGON_EUSD_EMXN
-  Proposing 7 transactions as a single MultiSend
+  [batch] setMinLiquidity POLYGON_EUSD_EMXN = <floor>
+  Proposing 10 transactions as a single MultiSend
 [safe-utils] simulation succeeded
   Pools registered: 3
 ```
 
-Ethereum and Base have two pools each, so their batches are six transactions. A rerun after the
+Ethereum and Base have two pools each, so their batches are eight transactions. A rerun after the
 batch has executed proposes nothing: every step is skipped when the chain already has it.
 
 Then propose to the Safe Transaction Service, signing with the hardware wallet:
@@ -195,7 +237,8 @@ prediction, and then asserts the full wiring: both contracts have code, the regi
 chain's PositionManager, StateView and PoolManager, the governance Safe holds `DEFAULT_ADMIN_ROLE`
 and owns the subscriber with no transfer pending, the subscriber holds `SUBSCRIBER_ROLE` and nothing
 else does, the support Safe holds `SUPPORT_ROLE` and nothing else, the in-range gate is enabled,
-and every catalog pool for the chain is allowlisted. It then deploys a twin of each contract in the
+and every catalog pool for the chain is allowlisted with the non-zero liquidity floor `pools.json`
+implies. It then deploys a twin of each contract in the
 forked run with the same constructor arguments and requires the deployed `extcodehash` to match, so
 run it from the deploy commit with the same compiler. A clean run ends with `[OK] polygon: all
 checks passed`; anything else reverts on the first mismatch, and a run that selected no chain at
@@ -266,7 +309,9 @@ forge script script/telx/SeedV4Liquidity.s.sol:SeedV4Liquidity \
   --rpc-url $POLYGON_RPC_URL --sig "planAll()"
 ```
 
-Then create and seed one, in one transaction:
+Then create and seed one, in one transaction. On Ethereum, submit it through a private relay
+(Flashbots Protect or equivalent) rather than the public mempool; the maximums make a front-run
+fail rather than cost anything, but a failed seed still costs the gas and the retry.
 
 ```shell
 forge script script/telx/SeedV4Liquidity.s.sol:SeedV4Liquidity \
@@ -311,10 +356,16 @@ ticks of the price the amounts imply, reverting `PriceDeviation(pool, liveTick, 
 tolerance)`. The `plan` shows the distance and whether the run would pass. A pool that has drifted
 is a pool someone moved; do not raise the tolerance to get past it, work out why it moved.
 
-It also refuses to mint a second position over a tick range that already has one, reverting
-`RangeAlreadySeeded`. A band plus a full-range backstop are two different ranges and need no
-override; an accidental rerun is what the guard is for. `SEED_ALLOW_EXISTING_RANGE=true` in the
-environment overrides it for a deliberate second mint.
+It also refuses to mint a second position over a tick range that already has one
+(`RangeAlreadySeeded`), and a second concentrated band into a pool that already has live liquidity
+at all (`PoolAlreadySeeded`), so a rerun after the price moved enough to shift the band by a spacing
+is caught too. The full-range backstop after the band is the intended second mint and needs no
+override. `SEED_ALLOW_EXISTING_RANGE=true` in the environment overrides both for a deliberate second
+mint.
+
+If a subscribed position is ever drained to zero and pruned, then refilled, Uniswap still holds the
+subscription and refuses a second `subscribe`; anyone can call `registry.resubscribe(tokenId)` to
+put it back.
 
 ERC-20 legs are approved for exactly the on-chain maximum with a 30 minute expiry, through
 Permit2, and the ERC-20 approval to Permit2 is zeroed again in the same broadcast, so no allowance

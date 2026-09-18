@@ -19,6 +19,7 @@ import {CrossChainAddresses} from "../shared/CrossChainAddresses.sol";
 import {TELxPools} from "../shared/TELxPools.sol";
 import {V4PoolMath} from "../shared/V4PoolMath.sol";
 import {TELxPoolScriptBase} from "./base/TELxPoolScriptBase.sol";
+import {PoolsJson} from "./base/PoolsJson.sol";
 
 /**
  * @title SeedV4Liquidity
@@ -38,8 +39,9 @@ import {TELxPoolScriptBase} from "./base/TELxPoolScriptBase.sol";
  *         `maxTickDeviation` ticks of the price the configured amounts imply, so a pool that has
  *         been moved is caught in the preview rather than paid for in the mint.
  *
- *         Both paths set the on-chain slippage maximums to the computed mint cost plus
- *         `slippageBps`, never to the whole budget. A price that moves between simulation and
+ *         `run` sets the on-chain slippage maximums to the computed mint cost plus `slippageBps`,
+ *         never to the whole budget; `createAndSeed` sets them to the exact cost, since a pool
+ *         that does not exist yet has no legitimate reason to open at any other price. A price that moves between simulation and
  *         inclusion, by more than that margin in either direction, makes the PositionManager
  *         revert with `MaximumAmountExceeded`. This holds for a move that leaves the band too: a
  *         single-sided mint always costs more of that side than the two-sided one did.
@@ -63,9 +65,9 @@ import {TELxPoolScriptBase} from "./base/TELxPoolScriptBase.sol";
  *             --sig "run(string)" "POLYGON_EUSD_TEL"
  *
  *         The position NFT goes to the governance Safe unless a recipient is passed explicitly.
- *         Seeding the same tick range twice is refused unless `SEED_ALLOW_EXISTING_RANGE=true`;
- *         a concentrated band plus a full-range backstop are two different ranges and need no
- *         override.
+ *         Seeding the same tick range twice, or a second concentrated band into a pool that
+ *         already has live liquidity, is refused unless `SEED_ALLOW_EXISTING_RANGE=true`; a
+ *         concentrated band followed by the full-range backstop needs no override.
  *
  *         `widthBps` is the half-width of the band in basis points: 1000 is +/-10%, and 0 means
  *         full range. Amounts are whole tokens and are a budget, not a target: Uniswap takes the
@@ -88,6 +90,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
     error PoolAlreadyInitialized(string poolName);
     error PriceDeviation(string poolName, int24 liveTick, int24 intendedTick, int24 maxTickDeviation);
     error RangeAlreadySeeded(string poolName, int24 tickLower, int24 tickUpper);
+    error PoolAlreadySeeded(string poolName, uint128 liquidity);
     error NothingToMint();
     error MintNotObserved();
 
@@ -127,7 +130,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
     function planAll() external view {
         string[] memory names = _poolsOnThisChain();
         for (uint256 i; i < names.length; ++i) {
-            PoolParams memory params = _poolParams(names[i]);
+            PoolsJson.PoolParams memory params = _poolParams(names[i]);
             if (params.amount0Human == 0 || params.amount1Human == 0) {
                 console2.log("=== %s: amounts not set in pools.json ===", names[i]);
                 continue;
@@ -139,7 +142,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
 
     /// @notice Previews one pool using the parameters in `pools.json`.
     function plan(string memory poolName) external view {
-        PoolParams memory params = _poolParams(poolName);
+        PoolsJson.PoolParams memory params = _poolParams(poolName);
         _requireAmountsSet(poolName, params);
         _plan(poolName, params);
     }
@@ -155,7 +158,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
      *      projecting the price `createAndSeed` would open it at, so the whole sequence can be
      *      rehearsed without writing to any chain.
      */
-    function _plan(string memory poolName, PoolParams memory params) internal view {
+    function _plan(string memory poolName, PoolsJson.PoolParams memory params) internal view {
         ChainConfig memory config = _chainConfig();
         TELxPools.PoolSpec memory s = _poolSpec(poolName);
 
@@ -204,6 +207,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
 
         console2.log("Position recipient:", _defaultRecipient());
         _logBalances(s, _trySigner(), p.amount0Max, p.amount1Max);
+        _logFloor(poolName, s, params);
     }
 
     // -----------
@@ -218,7 +222,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
 
     /// @notice As `createAndSeed(string)`, with an explicit position recipient.
     function createAndSeed(string memory poolName, address recipient) public returns (uint256 tokenId) {
-        PoolParams memory params = _poolParams(poolName);
+        PoolsJson.PoolParams memory params = _poolParams(poolName);
         _requireAmountsSet(poolName, params);
         return createAndSeedWithOptions(poolName, params, _defaultOptions(recipient));
     }
@@ -228,15 +232,22 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
      *         call it directly with a controlled signer, per the repo's deploy-script convention.
      * @return tokenId The minted position's NFT id, read from the mint's Transfer event.
      */
-    function createAndSeedWithOptions(string memory poolName, PoolParams memory params, SeedOptions memory opts)
-        public
-        returns (uint256 tokenId)
-    {
+    function createAndSeedWithOptions(
+        string memory poolName,
+        PoolsJson.PoolParams memory params,
+        SeedOptions memory opts
+    ) public returns (uint256 tokenId) {
         ChainConfig memory config = _chainConfig();
         TELxPools.PoolSpec memory s = _poolSpec(poolName);
 
         // A pool that already exists has a price of its own, and this path does not read it.
         if (_currentSqrtPriceX96(config, TELxPools.poolKey(s).toId()) != 0) revert PoolAlreadyInitialized(poolName);
+
+        // The pool does not exist, so the only way the mint can execute at a price other than the
+        // one we initialize is somebody initializing it first. The cost is computed with the exact
+        // rounding the PoolManager applies, so the maximums can sit at the cost itself: same price
+        // or revert, no margin for a front-runner.
+        params.slippageBps = 0;
 
         SeedPlan memory p = _buildPlan(config, s, poolName, params, true);
         if (p.liquidity == 0) revert NothingToMint();
@@ -246,6 +257,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
         console2.log("Creating at:");
         _logPrice(p.sqrtPriceX96, s);
         _logRange(p.tickLower, p.tickUpper, s.tickSpacing);
+        console2.log("On-chain maximums equal the exact cost (no slippage margin on this path).");
 
         IPositionManager positionManager = IPositionManager(config.positionManager);
 
@@ -292,7 +304,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
 
     /// @notice As `run(string)`, with an explicit position recipient.
     function run(string memory poolName, address recipient) public returns (uint256 tokenId) {
-        PoolParams memory params = _poolParams(poolName);
+        PoolsJson.PoolParams memory params = _poolParams(poolName);
         _requireAmountsSet(poolName, params);
         return runWithOptions(poolName, params, _defaultOptions(recipient));
     }
@@ -314,7 +326,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
      *         directly with a controlled signer, per the repo's deploy-script convention.
      * @return tokenId The minted position's NFT id, read from the mint's Transfer event.
      */
-    function runWithOptions(string memory poolName, PoolParams memory params, SeedOptions memory opts)
+    function runWithOptions(string memory poolName, PoolsJson.PoolParams memory params, SeedOptions memory opts)
         public
         returns (uint256 tokenId)
     {
@@ -329,8 +341,16 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
         if (_tickDistance(p.liveTick, p.intendedTick) > params.maxTickDeviation) {
             revert PriceDeviation(poolName, p.liveTick, p.intendedTick, params.maxTickDeviation);
         }
-        if (!opts.allowExistingRange && _rangeHasLiquidity(config, p.poolId, p.tickLower, p.tickUpper)) {
-            revert RangeAlreadySeeded(poolName, p.tickLower, p.tickUpper);
+        if (!opts.allowExistingRange) {
+            if (_rangeHasLiquidity(config, p.poolId, p.tickLower, p.tickUpper)) {
+                revert RangeAlreadySeeded(poolName, p.tickLower, p.tickUpper);
+            }
+            // A second concentrated band into a pool that already has live liquidity is the
+            // accidental rerun this guard exists for, even when the price moved enough since the
+            // first run for the band to align one spacing over. The full-range backstop
+            // (widthBps == 0) into a pool that has the band is the intended second mint.
+            uint128 live = _poolLiquidity(config, p.poolId);
+            if (params.widthBps != FULL_RANGE && live > 0) revert PoolAlreadySeeded(poolName, live);
         }
 
         _logChain(config);
@@ -375,7 +395,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
         ChainConfig memory config,
         TELxPools.PoolSpec memory s,
         string memory poolName,
-        PoolParams memory params,
+        PoolsJson.PoolParams memory params,
         bool allowProjected
     ) internal view returns (SeedPlan memory p) {
         p.key = TELxPools.poolKey(s);
@@ -449,7 +469,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
     function _explicitParams(uint256 amount0Human, uint256 amount1Human, uint16 widthBps)
         internal
         view
-        returns (PoolParams memory p)
+        returns (PoolsJson.PoolParams memory p)
     {
         p.amount0Human = amount0Human;
         p.amount1Human = amount1Human;

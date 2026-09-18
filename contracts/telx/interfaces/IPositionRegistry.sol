@@ -71,6 +71,7 @@ interface IPositionRegistry {
     error MaxSubscribed();
     error NotSubscribed(uint256 tokenId);
     error NotPrunable(uint256 tokenId);
+    error NotSubscribedOnUniswap(uint256 tokenId);
 
     // -----------
     // Subscription lifecycle (subscriber-gated)
@@ -82,7 +83,9 @@ interface IPositionRegistry {
      *      while the PoolManager is locked. Reverts if the position's pool is not on the allowlist
      *      or not initialized, the position has no liquidity or less than the pool's minimum, it is
      *      out of range while `inRangeRequired` is set, or either cap is reached. A tokenId that is
-     *      already indexed is a no-op, so a repeated notification can never corrupt the index.
+     *      already indexed under its current owner is a no-op, so a repeated notification can never
+     *      corrupt the index; one indexed under a previous owner is re-indexed under the current
+     *      one, so a stale record can never block a new owner's opt-in.
      */
     function handleSubscribe(uint256 tokenId) external;
 
@@ -114,6 +117,20 @@ interface IPositionRegistry {
      *      Reverts `NotSubscribed` if the token is not subscribed and `NotPrunable` otherwise.
      */
     function pruneSubscription(uint256 tokenId) external;
+
+    /**
+     * @notice Re-indexes a position that Uniswap v4 still has subscribed to a SUBSCRIBER_ROLE
+     *         holder but that this index no longer records. Callable by anyone, only while the
+     *         PoolManager is locked.
+     * @dev The index can fall behind v4 in two ways: a drained position is pruned and later
+     *      refilled, or a stale entry survives a swallowed unsubscribe notification. v4 refuses a
+     *      second `subscribe` for a position it already considers subscribed, so without this
+     *      entry point the owner's only recovery would be to unsubscribe and subscribe again.
+     *      Applies exactly the checks `handleSubscribe` applies; the v4-side subscription is read
+     *      from the PositionManager and must belong to a holder of SUBSCRIBER_ROLE on this
+     *      registry, so nothing can be indexed here that v4 has not opted in.
+     */
+    function resubscribe(uint256 tokenId) external;
 
     // -----------
     // Views
@@ -179,7 +196,12 @@ interface IPositionRegistry {
     function getLiquidityLast(uint256 tokenId) external view returns (uint128);
 
     /// @notice Returns the list of all addresses that have active subscriptions.
+    /// @dev Up to MAX_SUBSCRIBED entries. For off-chain `eth_call` only; use the paginated form for
+    ///      anything that batches.
     function getSubscribed() external view returns (address[] memory);
+
+    /// @notice Returns `subscribed[offset, offset + limit)` clamped to the set, and the set's size.
+    function getSubscribed(uint256 offset, uint256 limit) external view returns (address[] memory page, uint256 total);
 
     /**
      * @notice Returns an owner's currently votable subscribed tokenIds: those still owned by
@@ -215,11 +237,19 @@ interface IPositionRegistry {
     /// @notice Adds a pool to the allowlist. Gated to DEFAULT_ADMIN_ROLE.
     function registerPool(PoolKey calldata key) external;
 
-    /// @notice Removes a pool from the allowlist. Gated to DEFAULT_ADMIN_ROLE. Existing
-    ///         subscriptions in that pool stop being eligible but are not evicted.
+    /// @notice Removes a pool from the allowlist and clears its liquidity floor. Gated to
+    ///         DEFAULT_ADMIN_ROLE. Existing subscriptions in that pool stop being eligible but are
+    ///         not evicted.
     function deregisterPool(PoolId poolId) external;
 
-    /// @notice Sets a pool's absolute minimum position liquidity. Gated to DEFAULT_ADMIN_ROLE.
+    /**
+     * @notice Sets a pool's absolute minimum position liquidity. Gated to DEFAULT_ADMIN_ROLE.
+     * @dev This is what makes a cap slot cost capital. With a zero floor, a position of liquidity
+     *      1 in an allowlisted pool costs a wei of each token and holds a slot in the global set;
+     *      with a floor sized so that the narrowest in-range position is worth a chosen amount,
+     *      every slot held at once locks at least that much. The deploy batch sets one for every
+     *      catalog pool and refuses to go out without.
+     */
     function setMinLiquidity(PoolId poolId, uint128 minLiquidity_) external;
 
     /// @notice Toggles whether a position must be in range to be subscription-eligible.
@@ -229,11 +259,14 @@ interface IPositionRegistry {
     /**
      * @notice Removes any subscription from the index regardless of its state. Gated to
      *         DEFAULT_ADMIN_ROLE.
-     * @dev The backstop for an index entry that should never have existed. With the allowlist in
-     *      place this should never be needed, which is the right property for a backstop. No-op if
-     *      the token is not subscribed.
+     * @dev The backstop for an index entry that should never have existed. No-op if the token is
+     *      not subscribed.
      */
     function forceUnsubscribe(uint256 tokenId) external;
+
+    /// @notice `forceUnsubscribe` over many tokenIds in one call, so a filled cap can be cleared in
+    ///         one Safe transaction rather than one per entry. Gated to DEFAULT_ADMIN_ROLE.
+    function forceUnsubscribeBatch(uint256[] calldata tokenIds) external;
 
     /// @notice Recovers ERC20 tokens sent to the contract in error. Gated to SUPPORT_ROLE.
     function erc20Rescue(IERC20 token, address destination, uint256 amount) external;

@@ -57,11 +57,7 @@ contract StakingRewardsFactoryTest is Test {
     // ----------------------
 
     function test_createStakingRewards_happyPath() public {
-        StakingRewards created = factory.createStakingRewards(
-            address(this),
-            rewardsToken,
-            stakingToken
-        );
+        StakingRewards created = factory.createStakingRewards(address(this), rewardsToken, stakingToken);
 
         assertTrue(address(created) != address(0), "created contract should not be zero address");
         assertEq(address(created.rewardsToken()), address(rewardsToken));
@@ -77,29 +73,15 @@ contract StakingRewardsFactoryTest is Test {
     function test_createStakingRewards_emitsEvent() public {
         // Check only the indexed params (topics), not the non-indexed data (implementation address is unpredictable)
         vm.expectEmit(true, true, true, false);
-        emit StakingRewardsFactory.NewStakingRewardsContract(
-            0, rewardsToken, stakingToken, StakingRewards(address(0))
-        );
+        emit StakingRewardsFactory.NewStakingRewardsContract(0, rewardsToken, stakingToken, StakingRewards(address(0)));
 
         factory.createStakingRewards(address(this), rewardsToken, stakingToken);
     }
 
     function test_createStakingRewards_multipleContracts() public {
-        StakingRewards first = factory.createStakingRewards(
-            address(this),
-            rewardsToken,
-            stakingToken
-        );
-        StakingRewards second = factory.createStakingRewards(
-            address(this),
-            rewardsToken,
-            stakingToken2
-        );
-        StakingRewards third = factory.createStakingRewards(
-            alice,
-            rewardsToken,
-            stakingToken
-        );
+        StakingRewards first = factory.createStakingRewards(address(this), rewardsToken, stakingToken);
+        StakingRewards second = factory.createStakingRewards(address(this), rewardsToken, stakingToken2);
+        StakingRewards third = factory.createStakingRewards(alice, rewardsToken, stakingToken);
 
         assertEq(factory.getStakingRewardsContractCount(), 3);
         assertEq(address(factory.getStakingRewardsContract(0)), address(first));
@@ -137,11 +119,7 @@ contract StakingRewardsFactoryTest is Test {
     // --------------------
 
     function test_getStakingRewardsContract_returnsCorrectAddress() public {
-        StakingRewards created = factory.createStakingRewards(
-            address(this),
-            rewardsToken,
-            stakingToken
-        );
+        StakingRewards created = factory.createStakingRewards(address(this), rewardsToken, stakingToken);
 
         StakingRewards retrieved = factory.getStakingRewardsContract(0);
         assertEq(address(retrieved), address(created));
@@ -164,11 +142,7 @@ contract StakingRewardsFactoryTest is Test {
     }
 
     function test_stakingRewardsContracts_directMapping() public {
-        StakingRewards created = factory.createStakingRewards(
-            address(this),
-            rewardsToken,
-            stakingToken
-        );
+        StakingRewards created = factory.createStakingRewards(address(this), rewardsToken, stakingToken);
 
         // Access the public array directly
         StakingRewards direct = factory.stakingRewardsContracts(0);

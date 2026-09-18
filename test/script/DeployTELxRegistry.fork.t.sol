@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {PositionRegistry} from "../../contracts/telx/core/PositionRegistry.sol";
 import {TELxSubscriber} from "../../contracts/telx/core/TELxSubscriber.sol";
 import {BaseDeployTELxRegistry} from "../../script/telx/base/BaseDeployTELxRegistry.s.sol";
-import {VerifyTELxRegistry} from "../../script/telx/VerifyTELxRegistry.s.sol";
+import {VerifyTELxRegistryHarness} from "./harnesses/VerifyTELxRegistryHarness.sol";
 import {TELxRegistryScriptBase} from "../../script/telx/base/TELxRegistryScriptBase.sol";
 import {CrossChainAddresses} from "../../script/shared/CrossChainAddresses.sol";
 import {PolygonAddresses} from "../../script/shared/PolygonAddresses.sol";
@@ -78,12 +78,18 @@ abstract contract DeployTELxRegistryForkTest is Test {
             TELxPools.PoolSpec memory spec = TELxPools.spec(names[i]);
             if (spec.chainId != chainId) continue;
             assertTrue(registry.poolAllowed(TELxPools.poolKey(spec).toId()), names[i]);
+            // the floor is what makes a cap slot cost capital; it must be set and non-zero
+            uint128 floor = deployer.expectedFloor(names[i]);
+            assertGt(floor, 0, string.concat(names[i], ": floor"));
+            assertEq(
+                registry.minLiquidity(TELxPools.poolKey(spec).toId()), floor, string.concat(names[i], ": floor set")
+            );
             ++registered;
         }
         assertEq(registered, catalogPools, "catalog pool count for this chain");
 
         // the post-execution gate accepts exactly this state
-        VerifyTELxRegistry verifier = new VerifyTELxRegistry();
+        VerifyTELxRegistryHarness verifier = new VerifyTELxRegistryHarness();
         TELxRegistryScriptBase.ChainTarget memory target = deployer.chainTarget(chainName);
         verifier.verifyOn(target, registryAddr, subscriberAddr);
         verifier.verifyBytecode(target, registryAddr, subscriberAddr);

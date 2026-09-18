@@ -12,6 +12,14 @@ import {V4PoolMath} from "../../../script/shared/V4PoolMath.sol";
 ///         restores the frame, which is the only reason it exists: the happy paths are asserted
 ///         against the library directly.
 contract V4PoolMathHarness {
+    function minLiquidityForNarrowestPosition(uint160 sqrtPriceX96, int24 tickSpacing, uint256 value1)
+        external
+        pure
+        returns (uint128)
+    {
+        return V4PoolMath.minLiquidityForNarrowestPosition(sqrtPriceX96, tickSpacing, value1);
+    }
+
     function sqrtPriceX96FromAmounts(uint256 amount0, uint256 amount1) external pure returns (uint160) {
         return V4PoolMath.sqrtPriceX96FromAmounts(amount0, amount1);
     }

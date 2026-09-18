@@ -3,14 +3,17 @@ pragma solidity ^0.8.24;
 
 import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {
+    AccessControlDefaultAdminRules
+} from "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
 import {IPositionRegistry, PoolId} from "../interfaces/IPositionRegistry.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
-import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
+import {SqrtPriceMath} from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {IPositionManager, PoolKey, PositionInfo} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
+import {ISubscriber} from "@uniswap/v4-periphery/src/interfaces/ISubscriber.sol";
 
 /**
  * @title PositionRegistry
@@ -24,18 +27,21 @@ import {IPositionManager, PoolKey, PositionInfo} from "@uniswap/v4-periphery/src
  *
  *      Two rules keep that state safe against anyone but the position's owner:
  *
- *      1. State-changing paths decide only on facts a third party cannot move: pool allowlisting,
- *         position ownership, and whether the position has any liquidity at all. The pool's
- *         aggregate liquidity and its current tick are never inputs to a write, because both can
- *         be set to anything inside a single `PoolManager.unlock` for the cost of gas.
- *      2. Every entry point that touches the index refuses to run while the PoolManager is
- *         unlocked, mirroring `PositionManager.onlyIfPoolManagerLocked`. That closes the class of
- *         flash-state attacks rather than any one instance of it.
+ *      1. No removal from the index decides on anything a third party can move. Entries leave on
+ *         pool allowlisting, position ownership, the position's own liquidity, or an admin call.
+ *         The pool's aggregate liquidity and its current tick never decide a removal, because
+ *         both can be set to anything inside a single `PoolManager.unlock` for the cost of gas.
+ *         The one write that reads the tick is the in-range gate at subscribe time, which can only
+ *         refuse, never remove, and runs under the guard below.
+ *      2. Every entry point that adds to or prunes the index refuses to run while the PoolManager
+ *         is unlocked, mirroring `PositionManager.onlyIfPoolManagerLocked`. That closes the class
+ *         of flash-state attacks rather than any one instance of it.
  *
  *      Voting correctness never depended on the index being pruned: `getSubscriptions` filters
- *      eligibility live at the read block. Removal from storage exists only to free cap slots.
+ *      eligibility live at the read block. Removal from storage exists only to free cap slots, and
+ *      `resubscribe` lets anyone put back an entry that v4 still considers opted in.
  */
-contract PositionRegistry is IPositionRegistry, AccessControl {
+contract PositionRegistry is IPositionRegistry, AccessControlDefaultAdminRules {
     using SafeERC20 for IERC20;
     using TransientStateLibrary for IPoolManager;
 
@@ -57,9 +63,18 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
     ///      the one linear path is the `getSubscriptions` view, which has a paginated overload.
     uint256 public constant MAX_SUBSCRIPTIONS = 1_000;
     /// @notice Maximum distinct LPs in the global subscribed set, across all pools.
-    /// @dev Global, not per pool. Filling it requires that many distinct owners each holding a
-    ///      live position in an allowlisted pool, which costs real capital rather than gas.
+    /// @dev Global, not per pool. Filling it requires that many distinct owners each holding, at
+    ///      the same time, a position in an allowlisted pool at or above that pool's liquidity
+    ///      floor. With a floor set that is capital locked per slot; with the floor at zero it is
+    ///      gas, which is why the deploy batch sets one for every pool. A drained position is
+    ///      prunable by anyone, so capital cannot be withdrawn and reused while the slot is held.
     uint256 public constant MAX_SUBSCRIBED = 50_000;
+
+    /// @notice Delay before a scheduled transfer of DEFAULT_ADMIN_ROLE can be accepted.
+    /// @dev The admin role is held by the governance Safe and can only move through the two-step,
+    ///      delayed transfer of `AccessControlDefaultAdminRules`; it cannot be granted to a second
+    ///      address or renounced in one call.
+    uint48 public constant ADMIN_TRANSFER_DELAY = 3 days;
 
     // -----------
     // Subscription index
@@ -107,13 +122,13 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
      * @param stateView_ Uniswap v4 StateView lens, used for pool liquidity and price reads.
      * @param admin Holder of DEFAULT_ADMIN_ROLE.
      */
-    constructor(IPositionManager positionManager_, StateView stateView_, address admin) {
+    constructor(IPositionManager positionManager_, StateView stateView_, address admin)
+        AccessControlDefaultAdminRules(ADMIN_TRANSFER_DELAY, admin)
+    {
         // A wrong immutable deploys fine at the CREATE3 address and burns it, so the arguments are
         // checked here as well as by the verify script. The StateView read doubles as its code
-        // check: a codeless lens cannot answer.
+        // check: a codeless lens cannot answer. A zero admin is refused by the base constructor.
         if (address(positionManager_).code.length == 0) revert NotAContract(address(positionManager_));
-        if (admin == address(0)) revert ZeroAddress();
-        _grantRole(DEFAULT_ADMIN_ROLE, admin);
         positionManager = positionManager_;
         stateView = stateView_;
         poolManager = stateView_.poolManager();
@@ -138,10 +153,34 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
 
     /// @inheritdoc IPositionRegistry
     function handleSubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) whenPoolManagerLocked {
-        // A repeated notification for an indexed token must not push a duplicate entry. Reachable
-        // only if a prior unsubscribe notification was swallowed by v4 while the registry was
-        // misconfigured; guarded regardless, since the corruption it would cause is permanent.
-        if (isTokenSubscribed[tokenId]) return;
+        _index(tokenId);
+    }
+
+    /// @inheritdoc IPositionRegistry
+    function resubscribe(uint256 tokenId) external whenPoolManagerLocked {
+        // v4 is the authority on whether the position is opted in. Its subscriber for this token
+        // must be one this registry trusts, so nobody can index a position through a subscriber
+        // of their own.
+        ISubscriber current = positionManager.subscriber(tokenId);
+        if (!hasRole(SUBSCRIBER_ROLE, address(current))) revert NotSubscribedOnUniswap(tokenId);
+        _index(tokenId);
+    }
+
+    /**
+     * @dev Adds `tokenId` to the index under its current owner after the full eligibility check.
+     *      A token already indexed under that owner is a no-op, so a repeated notification cannot
+     *      push a duplicate. A token indexed under a previous owner (an unsubscribe notification
+     *      the v4 gas limit swallowed, followed by a transfer) is moved: the stale record is
+     *      removed first so the new owner's opt-in is recorded rather than silently dropped.
+     */
+    function _index(uint256 tokenId) internal {
+        // approved operators may initiate the subscribe flow, but the NFT owner is what counts
+        address tokenOwner = IERC721(address(positionManager)).ownerOf(tokenId);
+
+        if (isTokenSubscribed[tokenId]) {
+            if (subscriptionOwner[tokenId] == tokenOwner) return;
+            _removeSubscription(tokenId, subscriptionOwner[tokenId]);
+        }
 
         (PoolKey memory key, PositionInfo info) = positionManager.getPoolAndPositionInfo(tokenId);
         PoolId poolId = key.toId();
@@ -152,9 +191,6 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
         if (!_meetsMinimum(poolId, currentLiquidity)) revert LiquidityBelowThreshold(currentLiquidity);
         // an out-of-range position provides no live liquidity; gated unless the admin disabled it
         if (inRangeRequired && !_isInRange(poolId, info)) revert OutOfRange(tokenId);
-
-        // approved operators may initiate the subscribe flow, but the NFT owner is what counts
-        address tokenOwner = IERC721(address(positionManager)).ownerOf(tokenId);
 
         uint256[] storage ownerSubscriptions = subscriptions[tokenOwner];
         if (ownerSubscriptions.length >= MAX_SUBSCRIPTIONS) revert MaxSubscriptions();
@@ -395,15 +431,42 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
     }
 
     /// @inheritdoc IPositionRegistry
+    function getSubscribed(uint256 offset, uint256 limit) external view returns (address[] memory page, uint256 total) {
+        total = subscribed.length;
+        if (offset >= total) return (new address[](0), total);
+
+        uint256 remaining = total - offset;
+        uint256 end = limit >= remaining ? total : offset + limit;
+
+        page = new address[](end - offset);
+        for (uint256 i = offset; i < end; ++i) {
+            page[i - offset] = subscribed[i];
+        }
+    }
+
+    /// @inheritdoc IPositionRegistry
+    /// @dev The amounts a position of `liquidity` over [tickLower, tickUpper) holds at the pool's
+    ///      current price, rounded down, computed from the core `SqrtPriceMath` the PoolManager
+    ///      itself uses. This is the "what is it worth" direction: below the range the position is
+    ///      all currency0, above it all currency1, inside it both.
     function getAmountsForLiquidity(PoolId poolId, uint128 liquidity, int24 tickLower, int24 tickUpper)
         public
         view
         returns (uint256 amount0, uint256 amount1, uint160 sqrtPriceX96)
     {
         (sqrtPriceX96,,,) = stateView.getSlot0(poolId);
-        (amount0, amount1) = LiquidityAmounts.getAmountsForLiquidity(
-            sqrtPriceX96, TickMath.getSqrtPriceAtTick(tickLower), TickMath.getSqrtPriceAtTick(tickUpper), liquidity
-        );
+        uint160 sqrtLower = TickMath.getSqrtPriceAtTick(tickLower);
+        uint160 sqrtUpper = TickMath.getSqrtPriceAtTick(tickUpper);
+        if (sqrtLower > sqrtUpper) (sqrtLower, sqrtUpper) = (sqrtUpper, sqrtLower);
+
+        if (sqrtPriceX96 <= sqrtLower) {
+            amount0 = SqrtPriceMath.getAmount0Delta(sqrtLower, sqrtUpper, liquidity, false);
+        } else if (sqrtPriceX96 < sqrtUpper) {
+            amount0 = SqrtPriceMath.getAmount0Delta(sqrtPriceX96, sqrtUpper, liquidity, false);
+            amount1 = SqrtPriceMath.getAmount1Delta(sqrtLower, sqrtPriceX96, liquidity, false);
+        } else {
+            amount1 = SqrtPriceMath.getAmount1Delta(sqrtLower, sqrtUpper, liquidity, false);
+        }
     }
 
     /// @dev Resolves the NFT owner, returning address(0) instead of reverting for a token that
@@ -432,6 +495,11 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
     function deregisterPool(PoolId poolId) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!poolAllowed[poolId]) revert PoolNotAllowed(poolId);
         poolAllowed[poolId] = false;
+        // a pool that is registered again later starts with no floor rather than an old one
+        if (minLiquidity[poolId] != 0) {
+            delete minLiquidity[poolId];
+            emit MinLiquiditySet(poolId, 0);
+        }
         emit PoolDeregistered(poolId);
     }
 
@@ -449,6 +517,17 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
 
     /// @inheritdoc IPositionRegistry
     function forceUnsubscribe(uint256 tokenId) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _forceUnsubscribe(tokenId);
+    }
+
+    /// @inheritdoc IPositionRegistry
+    function forceUnsubscribeBatch(uint256[] calldata tokenIds) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        for (uint256 i; i < tokenIds.length; ++i) {
+            _forceUnsubscribe(tokenIds[i]);
+        }
+    }
+
+    function _forceUnsubscribe(uint256 tokenId) internal {
         if (!isTokenSubscribed[tokenId]) return;
         _removeSubscription(tokenId, subscriptionOwner[tokenId]);
     }

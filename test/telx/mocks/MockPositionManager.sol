@@ -6,10 +6,10 @@ import {PositionInfo, PositionInfoLibrary} from "@uniswap/v4-periphery/src/libra
 
 /// @title MockPositionManager
 /// @notice Minimal stand-in for the Uniswap v4 PositionManager exposing only the surface the thin
-///         PositionRegistry reads: `getPoolAndPositionInfo`, `getPositionLiquidity`, and the
-///         ERC721 `ownerOf`. Each tokenId's data is set explicitly so registry branches can be
-///         exercised deterministically without a mainnet fork.
-/// @dev Cast to `IPositionManager` by the registry; only the three selectors above are dispatched.
+///         PositionRegistry reads: `getPoolAndPositionInfo`, `getPositionLiquidity`, the ERC721
+///         `ownerOf`, and the Notifier's `subscriber`. Each tokenId's data is set explicitly so
+///         registry branches can be exercised deterministically without a mainnet fork.
+/// @dev Cast to `IPositionManager` by the registry; only the four selectors above are dispatched.
 contract MockPositionManager {
     struct MockPosition {
         PoolKey poolKey;
@@ -21,6 +21,8 @@ contract MockPositionManager {
     }
 
     mapping(uint256 => MockPosition) private _positions;
+    /// @dev v4's record of which subscriber, if any, a position is opted into.
+    mapping(uint256 => address) private _subscriber;
 
     /// @notice Registers a position so registry view shims and the subscribe flow can read it.
     function setPosition(
@@ -47,6 +49,16 @@ contract MockPositionManager {
     /// @notice Simulates a burn: `ownerOf` reverts and liquidity reads zero afterwards.
     function burn(uint256 tokenId) external {
         delete _positions[tokenId];
+        delete _subscriber[tokenId];
+    }
+
+    /// @notice Sets v4's own subscription record for a position, which `resubscribe` consults.
+    function setSubscriber(uint256 tokenId, address subscriber_) external {
+        _subscriber[tokenId] = subscriber_;
+    }
+
+    function subscriber(uint256 tokenId) external view returns (address) {
+        return _subscriber[tokenId];
     }
 
     function getPoolAndPositionInfo(uint256 tokenId) external view returns (PoolKey memory, PositionInfo) {

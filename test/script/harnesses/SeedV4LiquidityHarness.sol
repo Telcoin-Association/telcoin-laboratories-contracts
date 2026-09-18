@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {SeedV4Liquidity} from "../../../script/telx/SeedV4Liquidity.s.sol";
 import {TELxPools} from "../../../script/shared/TELxPools.sol";
+import {PoolsJson} from "../../../script/telx/base/PoolsJson.sol";
 
 /// @title SeedV4LiquidityHarness
 /// @notice Exposes the plan builder and the mint encoder of `SeedV4Liquidity`, so a fork test can
@@ -17,12 +18,12 @@ contract SeedV4LiquidityHarness is SeedV4Liquidity {
     function explicitParams(uint256 amount0Human, uint256 amount1Human, uint16 widthBps)
         external
         view
-        returns (PoolParams memory)
+        returns (PoolsJson.PoolParams memory)
     {
         return _explicitParams(amount0Human, amount1Human, widthBps);
     }
 
-    function buildPlan(string memory poolName, PoolParams memory params, bool allowProjected)
+    function buildPlan(string memory poolName, PoolsJson.PoolParams memory params, bool allowProjected)
         external
         view
         returns (SeedPlan memory)

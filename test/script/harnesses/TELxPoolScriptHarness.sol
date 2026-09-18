@@ -3,17 +3,18 @@ pragma solidity ^0.8.24;
 
 import {TELxPoolScriptBase} from "../../../script/telx/base/TELxPoolScriptBase.sol";
 import {TELxPools} from "../../../script/shared/TELxPools.sol";
+import {PoolsJson} from "../../../script/telx/base/PoolsJson.sol";
 
 /// @title TELxPoolScriptHarness
 /// @notice Exposes the `internal` configuration readers of `TELxPoolScriptBase` so the checked-in
 ///         `pools.json` can be asserted against the pool catalog without going through a full
 ///         script run.
 contract TELxPoolScriptHarness is TELxPoolScriptBase {
-    function poolParams(string memory poolName) external view returns (PoolParams memory) {
+    function poolParams(string memory poolName) external view returns (PoolsJson.PoolParams memory) {
         return _poolParams(poolName);
     }
 
-    function requireAmountsSet(string memory poolName, PoolParams memory params) external pure {
+    function requireAmountsSet(string memory poolName, PoolsJson.PoolParams memory params) external pure {
         _requireAmountsSet(poolName, params);
     }
 
@@ -35,7 +36,14 @@ contract TELxPoolScriptHarness is TELxPoolScriptBase {
 
     /// @dev The pool names present in the file, read the JSON-to-catalog direction.
     function configuredPoolNames() external view returns (string[] memory) {
-        string memory json = vm.readFile(string.concat(vm.projectRoot(), "/", POOLS_CONFIG));
-        return vm.parseJsonKeys(json, ".pools");
+        return PoolsJson.configuredPoolNames();
+    }
+
+    function minLiquidityFloor(string memory poolName, PoolsJson.PoolParams memory params)
+        external
+        view
+        returns (uint128)
+    {
+        return PoolsJson.minLiquidityFloor(poolName, TELxPools.spec(poolName), params);
     }
 }

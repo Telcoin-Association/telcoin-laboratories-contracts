@@ -13,6 +13,7 @@ import {PositionRegistry} from "../../../contracts/telx/core/PositionRegistry.so
 import {TELxSubscriber} from "../../../contracts/telx/core/TELxSubscriber.sol";
 import {IPositionRegistry} from "../../../contracts/telx/interfaces/IPositionRegistry.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Salts} from "../../shared/Salts.sol";
 import {TELxPools} from "../../shared/TELxPools.sol";
 import {TELxRegistryScriptBase} from "./TELxRegistryScriptBase.sol";
@@ -33,9 +34,16 @@ import {TELxRegistryScriptBase} from "./TELxRegistryScriptBase.sol";
  *         every downstream integration then carry one address instead of three.
  *
  *         Everything for a chain goes out as a single MultiSend: both deploys, both role grants,
- *         and one `registerPool` per catalog pool on that chain. The registry can never be live
- *         with the subscriber unwired or with an empty allowlist. A half-applied batch is not
- *         possible; a rejected one leaves nothing behind.
+ *         one `registerPool` and one `setMinLiquidity` per catalog pool on that chain. The
+ *         registry can never be live with the subscriber unwired, with an empty allowlist, or
+ *         with a pool whose cap slots cost nothing. A half-applied batch is not possible; a
+ *         rejected one leaves nothing behind.
+ *
+ *         The floors come from `pools.json`: each pool's `minPositionValue1` at the opening price
+ *         its amounts imply. The batch refuses to go out while either is undecided, which means
+ *         the seed amounts are decided before the registry is deployed. That is the right order:
+ *         the registry has nothing to index until the pools exist, and the pools exist only once
+ *         they are seeded.
  *
  *         The governance Safe is both the registry admin and the subscriber owner. `setRegistry`
  *         repoints every LP subscription, which is a governance decision, and governance holding
@@ -156,22 +164,36 @@ abstract contract BaseDeployTELxRegistry is TELxRegistryScriptBase {
         _addGrantToBatch(registry, keccak256("SUBSCRIBER_ROLE"), subscriber, "SUBSCRIBER_ROLE -> TELxSubscriber");
         _addGrantToBatch(registry, keccak256("SUPPORT_ROLE"), target.supportSafe, "SUPPORT_ROLE -> support Safe");
 
-        // Allowlist the chain's catalog pools. Registration is by PoolKey and needs no on-chain
-        // state, so pools can be registered before they are created; a subscription still needs
-        // the pool initialized, which the registry checks separately.
+        // Allowlist the chain's catalog pools and set each one's liquidity floor. Registration is
+        // by PoolKey and needs no on-chain state, so pools can be registered before they are
+        // created; a subscription still needs the pool initialized, which the registry checks
+        // separately. The floor is derived here and asserted by the verify script from the same
+        // source, and is what makes a cap slot cost capital rather than gas.
         string[] memory names = TELxPools.allNames();
         uint256 registered;
         for (uint256 i; i < names.length; ++i) {
             TELxPools.PoolSpec memory spec = TELxPools.spec(names[i]);
             if (spec.chainId != target.chainId) continue;
-            if (registry.code.length > 0 && IPositionRegistry(registry).poolAllowed(TELxPools.poolKey(spec).toId())) {
+            PoolId poolId = TELxPools.poolKey(spec).toId();
+            uint128 floor = _expectedFloor(names[i]);
+            bool live = registry.code.length > 0;
+
+            if (live && IPositionRegistry(registry).poolAllowed(poolId)) {
                 console.log("  [batch] %s already allowlisted, skipping", names[i]);
-                continue;
+            } else {
+                _batchTargets.push(registry);
+                _batchDatas.push(abi.encodeCall(IPositionRegistry.registerPool, (TELxPools.poolKey(spec))));
+                console.log("  [batch] registerPool %s", names[i]);
+                ++registered;
             }
-            _batchTargets.push(registry);
-            _batchDatas.push(abi.encodeCall(IPositionRegistry.registerPool, (TELxPools.poolKey(spec))));
-            console.log("  [batch] registerPool %s", names[i]);
-            ++registered;
+
+            if (live && IPositionRegistry(registry).minLiquidity(poolId) == floor) {
+                console.log("  [batch] %s floor already set, skipping", names[i]);
+            } else {
+                _batchTargets.push(registry);
+                _batchDatas.push(abi.encodeCall(IPositionRegistry.setMinLiquidity, (poolId, floor)));
+                console.log("  [batch] setMinLiquidity %s = %s", names[i], vm.toString(uint256(floor)));
+            }
         }
 
         // The addresses are a function of the Safe and the salts alone, so they are known before

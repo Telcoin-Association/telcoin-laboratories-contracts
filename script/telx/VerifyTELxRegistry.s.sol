@@ -10,6 +10,7 @@ import {TELxSubscriber} from "../../contracts/telx/core/TELxSubscriber.sol";
 import {IPositionRegistry} from "../../contracts/telx/interfaces/IPositionRegistry.sol";
 import {CrossChainAddresses} from "../shared/CrossChainAddresses.sol";
 import {TELxPools} from "../shared/TELxPools.sol";
+import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {TELxRegistryScriptBase} from "./base/TELxRegistryScriptBase.sol";
 
 /**
@@ -129,7 +130,8 @@ contract VerifyTELxRegistry is TELxRegistryScriptBase, VerificationBase {
      *        6. The subscriber points at the registry and at this chain's PositionManager, and is
      *           owned by the governance Safe with no transfer pending.
      *        7. The in-range eligibility gate is enabled, which is the constructor default.
-     *        8. Every catalog pool for this chain is on the allowlist.
+     *        8. Every catalog pool for this chain is on the allowlist, with the liquidity floor
+     *           `pools.json` implies, and that floor is not zero.
      */
     function verifyOn(ChainTarget memory target, address registryAddr, address subscriberAddr) public view {
         PositionRegistry registry = PositionRegistry(registryAddr);
@@ -179,20 +181,24 @@ contract VerifyTELxRegistry is TELxRegistryScriptBase, VerificationBase {
         require(registry.inRangeRequired(), "registry: inRangeRequired should be enabled by default");
         console.log("[OK] inRangeRequired enabled");
 
-        // 8. Allowlist covers the chain's pool set
+        // 8. Allowlist covers the chain's pool set, each with its floor
         string[] memory names = TELxPools.allNames();
         uint256 expected;
         for (uint256 i; i < names.length; ++i) {
             TELxPools.PoolSpec memory spec = TELxPools.spec(names[i]);
             if (spec.chainId != target.chainId) continue;
+            PoolId poolId = TELxPools.poolKey(spec).toId();
+            require(registry.poolAllowed(poolId), string.concat("registry: catalog pool not allowlisted: ", names[i]));
+            uint128 floor = _expectedFloor(names[i]);
+            require(floor > 0, string.concat("registry: zero liquidity floor for ", names[i]));
             require(
-                registry.poolAllowed(TELxPools.poolKey(spec).toId()),
-                string.concat("registry: catalog pool not allowlisted: ", names[i])
+                registry.minLiquidity(poolId) == floor,
+                string.concat("registry: liquidity floor does not match pools.json for ", names[i])
             );
             ++expected;
         }
         require(expected > 0, "registry: no catalog pools for this chain");
-        console.log("[OK] %s catalog pools allowlisted", vm.toString(expected));
+        console.log("[OK] %s catalog pools allowlisted with floors", vm.toString(expected));
     }
 
     /**

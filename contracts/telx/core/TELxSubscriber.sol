@@ -51,7 +51,11 @@ contract TELxSubscriber is ISubscriber, PositionManagerAuth, Ownable2Step {
         PositionManagerAuth(_positionManager)
         Ownable(_owner)
     {
+        // `try` does not catch the code-existence check that precedes an external call, so a
+        // codeless registry would turn the wrapped `notifyBurn` into a burn that always reverts.
+        // The setter refuses one; so does the constructor.
         if (address(_registry) == address(0)) revert ZeroAddress();
+        if (address(_registry).code.length == 0) revert RegistryHasNoCode(address(_registry));
         registry = _registry;
     }
 

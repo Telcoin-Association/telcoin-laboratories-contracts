@@ -3,6 +3,8 @@ pragma solidity ^0.8.30;
 
 import {Safe} from "@safe-utils/Safe.sol";
 import {BaseDeployTELxRegistry} from "../../../script/telx/base/BaseDeployTELxRegistry.s.sol";
+import {PoolsJson} from "../../../script/telx/base/PoolsJson.sol";
+import {TELxPoolFixtures} from "../TELxPoolFixtures.sol";
 
 /// @title DeployTELxRegistryHarness
 /// @notice Drives `BaseDeployTELxRegistry._deployOnChain` from a test, with the safe-utils client
@@ -32,6 +34,15 @@ contract DeployTELxRegistryHarness is BaseDeployTELxRegistry {
     /// @notice Runs the per-chain batch for `chainName` against the fork the test has selected.
     function deployOn(string memory chainName) external {
         _deployOnChain(chainTarget(chainName));
+    }
+
+    /// @dev Pool parameters from the test fixtures rather than the checked-in file.
+    function _poolParams(string memory poolName) internal pure override returns (PoolsJson.PoolParams memory) {
+        return TELxPoolFixtures.params(poolName);
+    }
+
+    function expectedFloor(string memory poolName) external view returns (uint128) {
+        return _expectedFloor(poolName);
     }
 
     function chainTarget(string memory chainName) public view returns (ChainTarget memory) {
