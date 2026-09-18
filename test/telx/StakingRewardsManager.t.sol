@@ -8,9 +8,10 @@ import {StakingRewards} from "contracts/telx/core/StakingRewards.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title StakingRewardsManagerTest
-/// @notice Polygon-fork tests for the upgradeable StakingRewardsManager — coordinates the
+/// @notice Polygon-fork tests for the upgradeable StakingRewardsManager - coordinates the
 ///         StakingRewardsFactory's per-pool deployments behind a single owner. Tests the BUILDER
 ///         and SUPPORT role gates, factory address swap, and the `addStakingRewards` registry.
 contract StakingRewardsManagerTest is Test {
@@ -18,7 +19,7 @@ contract StakingRewardsManagerTest is Test {
     StakingRewardsFactory public factory;
 
     // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
-    address public constant TEL = PolygonConstants.TEL;
+    address public constant TEL = PolygonConstants.TEL_V2;
     address public constant USDC = PolygonConstants.USDC;
     address public constant WETH = PolygonConstants.WETH;
 
@@ -44,7 +45,7 @@ contract StakingRewardsManagerTest is Test {
     uint256 public constant REWARDS_DURATION = 30 days;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), 65_000_000);
+        ForkOrSkip.select("POLYGON_RPC_URL", 65_000_000);
 
         deployer = address(this);
         builder = makeAddr("builder");
@@ -64,9 +65,7 @@ contract StakingRewardsManagerTest is Test {
 
         // Deploy manager as upgradeable proxy
         StakingRewardsManager managerImpl = new StakingRewardsManager();
-        manager = StakingRewardsManager(
-            address(new ERC1967Proxy(address(managerImpl), ""))
-        );
+        manager = StakingRewardsManager(address(new ERC1967Proxy(address(managerImpl), "")));
         manager.initialize(rewardToken, factory);
 
         // Transfer factory ownership to manager so it can call createStakingRewards
@@ -92,9 +91,7 @@ contract StakingRewardsManagerTest is Test {
 
     function testRevert_initialize_zeroFactory() public {
         StakingRewardsManager newManager = new StakingRewardsManager();
-        StakingRewardsManager proxy = StakingRewardsManager(
-            address(new ERC1967Proxy(address(newManager), ""))
-        );
+        StakingRewardsManager proxy = StakingRewardsManager(address(new ERC1967Proxy(address(newManager), "")));
 
         vm.expectRevert("StakingRewardsManager: cannot intialize to zero");
         proxy.initialize(rewardToken, StakingRewardsFactory(address(0)));
@@ -102,9 +99,7 @@ contract StakingRewardsManagerTest is Test {
 
     function testRevert_initialize_zeroReward() public {
         StakingRewardsManager newManager = new StakingRewardsManager();
-        StakingRewardsManager proxy = StakingRewardsManager(
-            address(new ERC1967Proxy(address(newManager), ""))
-        );
+        StakingRewardsManager proxy = StakingRewardsManager(address(new ERC1967Proxy(address(newManager), "")));
 
         vm.expectRevert("StakingRewardsManager: cannot intialize to zero");
         proxy.initialize(IERC20(address(0)), factory);
@@ -120,10 +115,8 @@ contract StakingRewardsManagerTest is Test {
     // -----------------------------------
 
     function test_createNewStakingRewardsContract() public {
-        StakingRewardsManager.StakingConfig memory config = StakingRewardsManager.StakingConfig({
-            rewardsDuration: REWARDS_DURATION,
-            rewardAmount: REWARD_AMOUNT
-        });
+        StakingRewardsManager.StakingConfig memory config =
+            StakingRewardsManager.StakingConfig({rewardsDuration: REWARDS_DURATION, rewardAmount: REWARD_AMOUNT});
 
         vm.prank(builder);
         manager.createNewStakingRewardsContract(stakingToken, config);
@@ -139,10 +132,8 @@ contract StakingRewardsManagerTest is Test {
     }
 
     function testRevert_createNewStakingRewardsContract_onlyBuilder() public {
-        StakingRewardsManager.StakingConfig memory config = StakingRewardsManager.StakingConfig({
-            rewardsDuration: REWARDS_DURATION,
-            rewardAmount: REWARD_AMOUNT
-        });
+        StakingRewardsManager.StakingConfig memory config =
+            StakingRewardsManager.StakingConfig({rewardsDuration: REWARDS_DURATION, rewardAmount: REWARD_AMOUNT});
 
         vm.expectRevert();
         vm.prank(alice);
@@ -159,10 +150,8 @@ contract StakingRewardsManagerTest is Test {
         // Transfer ownership to manager so it can call setRewardsDistribution
         staking.transferOwnership(address(manager));
 
-        StakingRewardsManager.StakingConfig memory config = StakingRewardsManager.StakingConfig({
-            rewardsDuration: REWARDS_DURATION,
-            rewardAmount: REWARD_AMOUNT
-        });
+        StakingRewardsManager.StakingConfig memory config =
+            StakingRewardsManager.StakingConfig({rewardsDuration: REWARDS_DURATION, rewardAmount: REWARD_AMOUNT});
 
         vm.prank(builder);
         manager.addStakingRewardsContract(staking, config);
@@ -180,10 +169,8 @@ contract StakingRewardsManagerTest is Test {
         StakingRewards staking = new StakingRewards(deployer, rewardToken, stakingToken);
         staking.transferOwnership(address(manager));
 
-        StakingRewardsManager.StakingConfig memory config = StakingRewardsManager.StakingConfig({
-            rewardsDuration: REWARDS_DURATION,
-            rewardAmount: REWARD_AMOUNT
-        });
+        StakingRewardsManager.StakingConfig memory config =
+            StakingRewardsManager.StakingConfig({rewardsDuration: REWARDS_DURATION, rewardAmount: REWARD_AMOUNT});
 
         vm.prank(builder);
         manager.addStakingRewardsContract(staking, config);
@@ -196,10 +183,8 @@ contract StakingRewardsManagerTest is Test {
     function testRevert_addStakingRewardsContract_onlyBuilder() public {
         StakingRewards staking = new StakingRewards(deployer, rewardToken, stakingToken);
 
-        StakingRewardsManager.StakingConfig memory config = StakingRewardsManager.StakingConfig({
-            rewardsDuration: REWARDS_DURATION,
-            rewardAmount: REWARD_AMOUNT
-        });
+        StakingRewardsManager.StakingConfig memory config =
+            StakingRewardsManager.StakingConfig({rewardsDuration: REWARDS_DURATION, rewardAmount: REWARD_AMOUNT});
 
         vm.expectRevert();
         vm.prank(alice);
@@ -266,10 +251,8 @@ contract StakingRewardsManagerTest is Test {
         _createManagedStaking(stakingToken);
         StakingRewards staking = manager.getStakingContract(0);
 
-        StakingRewardsManager.StakingConfig memory newConfig = StakingRewardsManager.StakingConfig({
-            rewardsDuration: 60 days,
-            rewardAmount: 20_000e18
-        });
+        StakingRewardsManager.StakingConfig memory newConfig =
+            StakingRewardsManager.StakingConfig({rewardsDuration: 60 days, rewardAmount: 20_000e18});
 
         vm.expectEmit(true, true, true, true);
         emit StakingRewardsManager.StakingConfigChanged(staking, newConfig);
@@ -286,10 +269,8 @@ contract StakingRewardsManagerTest is Test {
         // setStakingConfig does not require the contract to be in the array
         StakingRewards someContract = StakingRewards(makeAddr("random"));
 
-        StakingRewardsManager.StakingConfig memory config = StakingRewardsManager.StakingConfig({
-            rewardsDuration: 7 days,
-            rewardAmount: 1000e18
-        });
+        StakingRewardsManager.StakingConfig memory config =
+            StakingRewardsManager.StakingConfig({rewardsDuration: 7 days, rewardAmount: 1000e18});
 
         vm.prank(maintainer);
         manager.setStakingConfig(someContract, config);
@@ -303,10 +284,8 @@ contract StakingRewardsManagerTest is Test {
         _createManagedStaking(stakingToken);
         StakingRewards staking = manager.getStakingContract(0);
 
-        StakingRewardsManager.StakingConfig memory config = StakingRewardsManager.StakingConfig({
-            rewardsDuration: 60 days,
-            rewardAmount: 20_000e18
-        });
+        StakingRewardsManager.StakingConfig memory config =
+            StakingRewardsManager.StakingConfig({rewardsDuration: 60 days, rewardAmount: 20_000e18});
 
         vm.expectRevert();
         vm.prank(alice);
@@ -368,8 +347,7 @@ contract StakingRewardsManagerTest is Test {
 
         vm.expectEmit(true, true, true, true);
         emit StakingRewardsManager.ToppedUp(
-            staking,
-            StakingRewardsManager.StakingConfig({rewardsDuration: duration, rewardAmount: amount})
+            staking, StakingRewardsManager.StakingConfig({rewardsDuration: duration, rewardAmount: amount})
         );
 
         vm.prank(executor);
@@ -424,9 +402,7 @@ contract StakingRewardsManagerTest is Test {
         manager.topUp(executor, indices);
 
         // Second top up mid-period should revert because setRewardsDuration will fail
-        vm.expectRevert(
-            "Previous rewards period must be complete before changing the duration for the new period"
-        );
+        vm.expectRevert("Previous rewards period must be complete before changing the duration for the new period");
         vm.prank(executor);
         manager.topUp(executor, indices);
     }
@@ -537,10 +513,8 @@ contract StakingRewardsManagerTest is Test {
         _createManagedStaking(stakingToken);
         StakingRewards staking = manager.getStakingContract(0);
 
-        StakingRewardsManager.StakingConfig memory config = StakingRewardsManager.StakingConfig({
-            rewardsDuration: 60 days,
-            rewardAmount: 20_000e18
-        });
+        StakingRewardsManager.StakingConfig memory config =
+            StakingRewardsManager.StakingConfig({rewardsDuration: 60 days, rewardAmount: 20_000e18});
 
         vm.expectRevert();
         vm.prank(builder);
@@ -548,10 +522,8 @@ contract StakingRewardsManagerTest is Test {
     }
 
     function testRevert_accessControl_maintainerCantBuild() public {
-        StakingRewardsManager.StakingConfig memory config = StakingRewardsManager.StakingConfig({
-            rewardsDuration: REWARDS_DURATION,
-            rewardAmount: REWARD_AMOUNT
-        });
+        StakingRewardsManager.StakingConfig memory config =
+            StakingRewardsManager.StakingConfig({rewardsDuration: REWARDS_DURATION, rewardAmount: REWARD_AMOUNT});
 
         vm.expectRevert();
         vm.prank(maintainer);
@@ -600,10 +572,8 @@ contract StakingRewardsManagerTest is Test {
     // -------
 
     function _createManagedStaking(IERC20 _stakingToken) internal {
-        StakingRewardsManager.StakingConfig memory config = StakingRewardsManager.StakingConfig({
-            rewardsDuration: REWARDS_DURATION,
-            rewardAmount: REWARD_AMOUNT
-        });
+        StakingRewardsManager.StakingConfig memory config =
+            StakingRewardsManager.StakingConfig({rewardsDuration: REWARDS_DURATION, rewardAmount: REWARD_AMOUNT});
 
         vm.prank(builder);
         manager.createNewStakingRewardsContract(_stakingToken, config);

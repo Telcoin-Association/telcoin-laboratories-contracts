@@ -1,0 +1,13 @@
+{
+  "_note": "Seed parameters for the standardized TELx pools. Amounts are whole tokens (100000 eUSD, not 100000000000); the scripts scale by each token's decimals. The two amounts define the pool's opening price as amount1/amount0, so they must be reviewed as a pair. 0 means not yet decided: run() refuses it and planAll() reports it. widthBps is the half-width of the seeded band in basis points, 0 for full range. minPositionValue1 is the whole units of currency1 (TEL, or eMXN for the eUSD/eMXN pool) that the narrowest in-range position must be worth to subscribe to the registry; the deploy batch derives each pool's liquidity floor from it at the opening price and refuses to go out while it is 0. maxTickDeviation is how far the live tick may sit from the tick the amounts imply before seeding is refused (50 ticks is about 0.5%); slippageBps is how far above the computed mint cost the on-chain maximums are set on the existing-pool path. Both come from defaults unless a pool overrides them.",
+  "defaults": { "maxTickDeviation": 50, "slippageBps": 50 },
+  "pools": {
+    "ETHEREUM_ETH_TEL":  { "amount0": 0, "amount1": 0, "widthBps": 1000, "minPositionValue1": 0 },
+    "ETHEREUM_EUSD_TEL": { "amount0": 0, "amount1": 0, "widthBps": 1000, "minPositionValue1": 0 },
+    "POLYGON_WETH_TEL":  { "amount0": 0, "amount1": 0, "widthBps": 1000, "minPositionValue1": 0 },
+    "POLYGON_EUSD_TEL":  { "amount0": 0, "amount1": 0, "widthBps": 1000, "minPositionValue1": 0 },
+    "POLYGON_EUSD_EMXN": { "amount0": 0, "amount1": 0, "widthBps": 100,  "minPositionValue1": 0 },
+    "BASE_ETH_TEL":      { "amount0": 0, "amount1": 0, "widthBps": 1000, "minPositionValue1": 0 },
+    "BASE_EUSD_TEL":     { "amount0": 0, "amount1": 0, "widthBps": 1000, "minPositionValue1": 0 }
+  }
+}

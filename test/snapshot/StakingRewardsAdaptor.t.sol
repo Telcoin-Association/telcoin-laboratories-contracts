@@ -12,6 +12,7 @@ import {IBalancerVault} from "contracts/snapshot/interfaces/IBalancerVault.sol";
 import {IBalancerPool} from "contracts/snapshot/interfaces/IBalancerPool.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
 import {MockStakingRewards} from "./mocks/MockStakingRewards.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title StakingRewardsAdaptorTest
 /// @notice Polygon-fork tests for the StakingRewards voting-weight adaptor. Composes a fresh
@@ -21,7 +22,7 @@ contract StakingRewardsAdaptorTest is Test {
     uint256 constant FORK_BLOCK = 68_000_000;
 
     // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
-    address constant TEL = PolygonConstants.TEL;
+    address constant TEL = PolygonConstants.TEL_V2;
     address constant BALANCER_VAULT = PolygonConstants.BALANCER_VAULT;
     address constant BALANCER_POOL = PolygonConstants.BALANCER_POOL;
     bytes32 constant POOL_ID = PolygonConstants.BALANCER_POOL_ID;
@@ -34,7 +35,7 @@ contract StakingRewardsAdaptorTest is Test {
     StakingRewardsAdaptor adaptor;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), FORK_BLOCK);
+        ForkOrSkip.select("POLYGON_RPC_URL", FORK_BLOCK);
 
         // Deploy a fresh BalancerAdaptor to use as the source
         balancerAdaptor = new BalancerAdaptor(
@@ -98,7 +99,7 @@ contract StakingRewardsAdaptorTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // balanceOf — zero-stake path (only earned)
+    // balanceOf - zero-stake path (only earned)
     // ---------------------------------------------------------------
 
     function test_balanceOf_zeroStake_returnsEarned() public {
@@ -112,7 +113,7 @@ contract StakingRewardsAdaptorTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // balanceOf — with stake (earned + weighted BPT share)
+    // balanceOf - with stake (earned + weighted BPT share)
     // ---------------------------------------------------------------
 
     function test_balanceOf_withStake_returnsEarnedPlusWeightedShare() public {
@@ -143,7 +144,7 @@ contract StakingRewardsAdaptorTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // balanceOf — edge: staking contract holds BPT but voter has 0 stake
+    // balanceOf - edge: staking contract holds BPT but voter has 0 stake
     // ---------------------------------------------------------------
 
     function test_balanceOf_stakingHasBPT_voterHasNoStake() public {

@@ -729,7 +729,7 @@ contract CouncilMemberTest is Test {
 
         assertEq(councilMemberContract.balances(0), 100);
 
-        // Second retrieve in same block — withdrawableAmountOf returns 0, should be a no-op
+        // Second retrieve in same block - withdrawableAmountOf returns 0, should be a no-op
         vm.prank(admin);
         councilMemberContract.retrieve();
 
@@ -751,7 +751,7 @@ contract CouncilMemberTest is Test {
             ISablierV2Lockup(address(badLockup))
         );
 
-        // retrieve() should revert — not silently swallow the error
+        // retrieve() should revert - not silently swallow the error
         vm.prank(admin);
         vm.expectRevert();
         councilMemberContract.retrieve();
@@ -770,7 +770,7 @@ contract CouncilMemberTest is Test {
             ISablierV2Lockup(address(badLockup))
         );
 
-        // claim() calls _retrieve() internally — should also revert
+        // claim() calls _retrieve() internally - should also revert
         vm.prank(member1);
         vm.expectRevert();
         councilMemberContract.claim(0, 0);
@@ -789,7 +789,7 @@ contract CouncilMemberTest is Test {
             ISablierV2Lockup(address(badLockup))
         );
 
-        // mint() calls _retrieve() internally — should also revert
+        // mint() calls _retrieve() internally - should also revert
         vm.prank(admin);
         vm.expectRevert();
         councilMemberContract.mint(member2);
@@ -810,7 +810,7 @@ contract CouncilMemberTest is Test {
             ISablierV2Lockup(address(badLockup))
         );
 
-        // burn() calls _retrieve() via _update() — should also revert
+        // burn() calls _retrieve() via _update() - should also revert
         vm.prank(admin);
         vm.expectRevert();
         councilMemberContract.burn(0, admin);
@@ -1020,7 +1020,7 @@ contract CouncilMemberTest is Test {
 
         assertEq(councilMemberContract.totalSupply(), 1);
 
-        // Counter continues from the last used tokenId — it does not reset.
+        // Counter continues from the last used tokenId - it does not reset.
         address newA = makeAddr("newA");
         address newB = makeAddr("newB");
         vm.startPrank(admin);

@@ -7,6 +7,7 @@ import {CouncilMember} from "../../contracts/sablier/core/CouncilMember.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {TestConstants} from "../util/TestConstants.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @notice Polygon-fork test of CreateCouncilNftsAndStreams.
 /// @dev    The script reads hard-coded Polygon addresses for TEL and the
@@ -16,20 +17,20 @@ import {PolygonConstants} from "../util/PolygonConstants.sol";
 ///         MEXC fallback address ships with balance on-chain.
 contract CreateCouncilNftsAndStreamsForkTest is Test {
     // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
-    address internal constant TEL_TOKEN = PolygonConstants.TEL;
+    address internal constant TEL_TOKEN = PolygonConstants.TEL_V2;
     address internal constant SABLIER_LOCKUP = PolygonConstants.SABLIER_LOCKUP;
 
     CreateCouncilNftsAndStreams internal script;
     address internal sablierSender;
     /// @dev Sum of every council's deposit. Computed at setUp time from the
     ///      script's own `getCouncilsInfo()` so it tracks automatically if
-    ///      deposits are ever adjusted — no manual sync required.
+    ///      deposits are ever adjusted - no manual sync required.
     uint256 internal totalTelRequired;
 
     function setUp() public {
         uint256 forkBlock =
             vm.envOr("FORK_BLOCK_NUMBER", TestConstants.DEFAULT_POLYGON_FORK_BLOCK);
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), forkBlock);
+        ForkOrSkip.select("POLYGON_RPC_URL", forkBlock);
 
         script = new CreateCouncilNftsAndStreams();
         totalTelRequired = _sumCouncilDeposits(script);

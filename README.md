@@ -37,21 +37,25 @@ git config core.longpaths true
 Fork tests require RPC endpoints. Three naming patterns are in use:
 
 - `test/**/*.polygon.t.sol` - Polygon-mainnet fork tests for production contracts
-- `test/**/*.fork.t.sol` - deploy-script fork tests under `test/script/` (all currently use a Polygon fork)
+- `test/**/*.fork.t.sol` - deploy-script fork tests under `test/script/` (Polygon, and Base for the TELx pool and registry suites)
 - Any contract whose name matches `*Fork*` (e.g. `CouncilMemberForkTest`, `DeployBalancerAdaptorForkTest`)
 
-Copy `.env.example` → `.env` (or create one) with:
+Copy `.env.example` to `.env` (or create one) with:
 
 ```
+ETHEREUM_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/<key>
 POLYGON_RPC_URL=https://polygon-mainnet.g.alchemy.com/v2/<key>
 BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/<key>
-SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/<key>
 ```
 
-Foundry auto-loads `.env`. To skip **every** fork test - all our fork test contract names end in either `Fork` or `Polygon`, so a single regex covers them all:
+Every fork suite reads its URL through `test/util/ForkOrSkip.sol`, which forks when the variable
+is set and skips the suite when it is not. A missing URL therefore costs coverage, never a red
+build, and `forge test` is the right command with or without RPC access. To run without any fork
+test, set the variables to the empty string on the command line; Foundry auto-loads `.env`, so
+unsetting them in the shell is not enough:
 
 ```shell
-forge test --no-match-contract "(Fork|Polygon)"
+POLYGON_RPC_URL= BASE_RPC_URL= ETHEREUM_RPC_URL= forge test
 ```
 
 ### Running subsets of the test suite
@@ -104,6 +108,7 @@ A middle-ground `ci` profile (64 fuzz runs, depth 10) is also defined for CI env
 | TELx          | `forge test --match-path "test/telx/*"`                    |
 | Zodiac        | `forge test --match-path "test/zodiac/*"`                  |
 | Deploy scripts | `forge test --match-path "test/script/*"`                 |
+| TELx pools     | `forge test --match-path "test/script/TELxPoolLifecycle.fork.t.sol"` |
 | Fork-only     | `forge test --match-contract "(Fork\|Polygon)"`            |
 | Non-fork      | `forge test --no-match-contract "(Fork\|Polygon)"`         |
 | Benchmarks    | `forge test --match-test "bench_.*" -vvv` (opt-in, see Benchmarks section) |
@@ -115,9 +120,14 @@ contracts/        Solidity sources, grouped by product area
   protocol/       TelcoinDistributor and protocol-level contracts
   sablier/        Council Member NFTs + Sablier v2 lockup integration
   snapshot/       Voting-weight adaptors (Balancer, staking, staking-rewards)
-  telx/           TELx DeFi primitives (v4 hooks, staking rewards, position registry)
+  telx/           TELx DeFi primitives (staking rewards, Uniswap v4 position registry)
   zodiac/         SafeGuard for Zodiac/Safe-based governance
 script/           Foundry deployment + operational scripts (*.s.sol)
+  shared/         Chain address libraries, the TELx pool catalog, v4 price/tick math
+  telx/           TELx v4 pool create/seed scripts, the Safe-based registry deploy and
+                  its verify script, and pools.json (see script/telx/README.md)
+    base/         Abstract bases the telx scripts inherit from
+deployments/      Recorded deployment addresses per chain, written by the Safe deploy scripts
 test/             Foundry tests. Files ending in .polygon.t.sol / .fork.t.sol
                   and contracts matching *Fork* hit mainnet forks via RPC env
                   vars. `test/script/` contains fork tests for deploy scripts.
@@ -142,6 +152,7 @@ All external Solidity dependencies are git submodules. Versions for OZ, Uniswap 
 | `forge-std/`                           | `lib/forge-std`                        | v1.10.0          |
 | `permit2/`                             | `lib/permit2`                          | commit `cc56ad0f` (matches v4-periphery's internal pin - keep in sync when bumping v4-periphery) |
 | `solmate/`                             | `lib/v4-core/lib/solmate/`             | explicit override - points at v4-core's initialized copy rather than permit2's uninit'd nested one |
+| `forge-deploy-utils/`, `@safe-utils/`  | `lib/forge-deploy-utils`               | commit `c5427a6a` (matches the tel-v3 pin). Safe + CreateX deployment tooling; requires `^0.8.30`, which is why `auto_detect_solc` stays on |
 
 `lib/evm-utils` exists but no contract in this repo imports from it; it's a leftover from an earlier Sablier helper and can be removed in a follow-up.
 
@@ -190,9 +201,19 @@ Notes on benchmarks:
 
 ### Current benchmarks
 
-| Benchmark | Location | What it measures |
-| --------- | -------- | ---------------- |
-| `bench_MAX_SUBSCRIBED_MAX_SUBSCRIPTIONS` | `test/telx/PositionRegistry.t.sol` | Attempts to fill `PositionRegistry` to its `MAX_SUBSCRIBED` (50,000) × `MAX_SUBSCRIPTIONS` (100) ceiling - 5,000,000 mint+subscribe operations. Exhausts gas in practice; useful for profiling per-subscription cost curves, not for pass/fail. |
+There are currently no `bench_` functions in the suite.
+
+The one scaling question the TELx registry has - what a full `MAX_SUBSCRIPTIONS` (1,000) subscription
+list costs to read and to mutate - is now covered by an ordinary test that runs on every CI pass,
+`test_maxSubscriptions_capAndQueryGas` in `test/telx/PositionRegistry.t.sol`. It fills one LP to the
+cap, logs the gas for `getSubscriptionsRaw`, `getSubscriptions` and `handleUnsubscribe`, and asserts
+the cap rejects the next subscription. A regular test beats a benchmark here because the thin
+registry has no unbounded state-mutating path left to push toward exhaustion; the numbers are a
+budget to watch, not a cliff to find.
+
+```shell
+forge test --match-test test_maxSubscriptions_capAndQueryGas -vv
+```
 
 ## Notes
 
@@ -207,14 +228,14 @@ This section exists to give LLM tooling enough context to work productively in t
 **Architecture at a glance**
 - `contracts/sablier/core/CouncilMember.sol` - upgradeable ERC-721 + AccessControl representing Telcoin Association council seats; withdraws TEL from a Sablier v2 lockup stream and distributes pro-rata to holders.
 - `contracts/protocol/core/TelcoinDistributor.sol` - Ownable2Step + Pausable distributor for approved token transfers.
-- `contracts/telx/core/` - TELx hooks (Uniswap v4) and staking rewards. `TELxIncentiveHook` is a `BaseHook` that distributes rewards via `StakingRewards`. `PositionRegistry` indexes v4 positions for reward attribution. `TELxSubscriber` subscribes to position events.
+- `contracts/telx/core/` - TELx Uniswap v4 position tracking and staking rewards. `PositionRegistry` is a thin subscription index plus a live view layer over Uniswap's own `PositionManager` and `StateView` - it tracks which v4 LP positions have opted into TELx governance. `TELxSubscriber` is the `ISubscriber` that relays subscribe/unsubscribe/burn/modify-liquidity events from the v4 `PositionManager` into the registry. TELx pools are vanilla Uniswap v4 pools with no custom hook; reward distribution is handled off-chain via Merkl.
 - `contracts/snapshot/adaptors/` - read-only weight adaptors implementing the `ISource` interface (EIP-165 flagged), consumed by `VotingWeightCalculator`.
 - `contracts/zodiac/core/SafeGuard.sol` - a Gnosis Safe guard enforcing transaction-level policies.
 
 **Key conventions**
 - Solidity `^0.8.24`, EVM `cancun`, optimizer 200 runs (`foundry.toml`).
 - `forge fmt` line length 120, tab width 4.
-- Tests end in `.t.sol`. Fork tests: file suffix `.polygon.t.sol` (production-contract Polygon forks), file suffix `.fork.t.sol` (deploy-script forks under `test/script/`), or contract name containing `Fork`. All require `POLYGON_RPC_URL`; `BASE_RPC_URL` and `SEPOLIA_RPC_URL` are used selectively.
+- Tests end in `.t.sol`. Fork tests: file suffix `.polygon.t.sol` (production-contract Polygon forks), file suffix `.fork.t.sol` (deploy-script forks under `test/script/`), or contract name containing `Fork`. Every fork suite forks through `test/util/ForkOrSkip.sol` and skips itself when its RPC variable is unset; most need `POLYGON_RPC_URL`, the TELx pool and registry suites also run on `BASE_RPC_URL`, and the Ethereum address checks need `ETHEREUM_RPC_URL`.
 - Scripts live in `script/` (Foundry convention - not `scripts/`). Any import referring to `scripts/...` is a porting mistake.
 - Imports use the npm-style aliases (`@openzeppelin/...`, `@uniswap/...`, `@sablier/...`, `@prb/...`) resolved by `remappings.txt` to `lib/` submodules.
 - Upgradeable contracts follow the OpenZeppelin proxy pattern; see `script/sablier/UpgradeCouncilMember.s.sol` for the upgrade flow.

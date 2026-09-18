@@ -22,3 +22,6 @@
 [submodule "lib/permit2"]
 	path = lib/permit2
 	url = https://github.com/Uniswap/permit2
+[submodule "lib/forge-deploy-utils"]
+	path = lib/forge-deploy-utils
+	url = https://github.com/Telcoin-Association/forge-deploy-utils

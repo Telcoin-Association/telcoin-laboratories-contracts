@@ -6,16 +6,17 @@ import {StakingRewards} from "contracts/telx/core/StakingRewards.sol";
 import {RewardsDistributionRecipient} from "contracts/telx/abstract/RewardsDistributionRecipient.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title StakingRewardsTest
-/// @notice Polygon-fork tests for the standalone StakingRewards contract (unstaked from the
-///         TELxIncentiveHook flow). Validates `notifyRewardAmount`, per-user `earned()`
-///         accounting, and the `recoverERC20` guard against draining the staking token.
+/// @notice Polygon-fork tests for the standalone StakingRewards contract. Validates
+///         `notifyRewardAmount`, per-user `earned()` accounting, and the `recoverERC20`
+///         guard against draining the staking token.
 contract StakingRewardsTest is Test {
     StakingRewards public stakingRewards;
 
     // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
-    address public constant TEL = PolygonConstants.TEL;
+    address public constant TEL = PolygonConstants.TEL_V2;
     address public constant USDC = PolygonConstants.USDC;
 
     IERC20 public rewardsToken;
@@ -30,7 +31,7 @@ contract StakingRewardsTest is Test {
     uint256 public constant REWARD_AMOUNT = 10_000e18;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), 65_000_000);
+        ForkOrSkip.select("POLYGON_RPC_URL", 65_000_000);
 
         owner = makeAddr("owner");
         alice = makeAddr("alice");
@@ -457,9 +458,7 @@ contract StakingRewardsTest is Test {
         _notifyRewardAmount(REWARD_AMOUNT);
 
         // Try to change during active period
-        vm.expectRevert(
-            "Previous rewards period must be complete before changing the duration for the new period"
-        );
+        vm.expectRevert("Previous rewards period must be complete before changing the duration for the new period");
         vm.prank(owner);
         stakingRewards.setRewardsDuration(60 days);
     }
