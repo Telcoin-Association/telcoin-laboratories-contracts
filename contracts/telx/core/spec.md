@@ -6,7 +6,7 @@ This document outlines a lightweight system of on-chain contracts and one off-ch
 
 **Problem (Governance):** How to accurately represent the value of diverse Uniswap v4 LP positions as TEL-denominated voting power in Snapshot governance, without relying on manipulatable on-chain price oracles.
 
-**Solution:** TELx pools are vanilla Uniswap v4 pools with no custom hook. A thin on-chain `PositionRegistry` tracks which LP positions have opted into the TELx program via Uniswap's native subscriber mechanism. A **custom Snapshot voting strategy** then reads that subscription set, fetches raw position data from the registry's live view shims, and combines it with reliable off-chain price feeds to compute voting power.
+**Solution:** TELx pools are vanilla Uniswap v4 pools with no custom hook. A thin on-chain `PositionRegistry` tracks which LP positions in an admin-allowlisted set of pools have opted into the TELx program via Uniswap's native subscriber mechanism. A **custom Snapshot voting strategy** then reads that subscription set, fetches raw position data from the registry's live view shims, and combines it with reliable off-chain price feeds to compute voting power.
 
 Reward distribution is handled separately and off-chain by **Merkl**. Our contracts perform no reward math, weighting, accrual, or claims.
 
@@ -21,7 +21,7 @@ The system consists of two on-chain contracts and one off-chain service.
 - **PositionRegistry:** A thin subscription index plus a live view layer over Uniswap's own `PositionManager` and `StateView`. It records which v4 position NFTs have opted into TELx and exposes views that read live position data from Uniswap.
 - **TELxSubscriber:** An `ISubscriber` that relays position subscribe/unsubscribe/burn/modify-liquidity notifications from the Uniswap v4 `PositionManager` into the `PositionRegistry`.
 
-There is no custom Uniswap v4 hook. TELx pools are plain v4 pools.
+There is no custom Uniswap v4 hook. TELx pools are plain v4 pools; which pools count is an admin decision recorded in the registry's allowlist.
 
 ### Off-Chain Services (The Logic Layer):
 
@@ -36,17 +36,19 @@ The PositionRegistry is a thin on-chain index of which Uniswap v4 LP positions h
 
 #### Key Responsibilities:
 
-- **Subscription Index:** Tracks which position NFTs have opted into the program via Uniswap v4's native `subscribe()` mechanism, keyed by `tokenId` and grouped per pool and per owner.
+- **Subscription Index:** Tracks which position NFTs have opted into the program via Uniswap v4's native `subscribe()` mechanism, keyed by `tokenId` and grouped per owner.
+- **Pool Allowlist:** An admin-managed set of PoolKeys (`registerPool`, `deregisterPool`). Only positions in allowlisted pools may subscribe, and `validPool` is true only for an allowlisted pool that is initialized on chain.
 - **Live View Layer:** Exposes view shims (`getPosition`, `getPositionDetails`, `getLiquidityLast`, `validPool`) that read live position data directly from Uniswap's `PositionManager` and `StateView` - the registry stores no position data of its own.
-- **Eligibility Enforcement:** Provides `belowSubscriptionThreshold`, `isInRange`, and the permissionless `pruneSubscription` to keep the subscription set free of positions that no longer meet the liquidity threshold or have drifted out of range.
+- **Eligibility Views:** Provides `subscriptionEligible`, `belowSubscriptionThreshold` and `isInRange`, evaluated live at read time and used by `getSubscriptions` to return only currently-votable positions.
+- **Stale-Entry Cleanup:** The permissionless `pruneSubscription` removes an entry whose position has been transferred, burned or drained to zero liquidity. It decides on those position-local facts only and refuses to run while the `PoolManager` is unlocked, so pool liquidity and price, which anyone can move inside a single `unlock`, are never inputs to a removal. `forceUnsubscribe` is the admin backstop.
 - **Access Control:** Uses roles (`DEFAULT_ADMIN_ROLE`, `SUBSCRIBER_ROLE`, `SUPPORT_ROLE`) so only authorized components can mutate state.
 
 The registry does **not** store liquidity, fee-growth checkpoints, reward balances, or LP weights, and it does not hold or distribute TEL. Its constructor is `constructor(IPositionManager positionManager, StateView stateView, address admin)`.
 
 #### Caps:
 
-- `MAX_SUBSCRIBED = 50_000` - per-pool subscription cap.
-- `MAX_SUBSCRIPTIONS = 1_000` - per-LP subscription cap.
+- `MAX_SUBSCRIBED = 50_000` - global cap on distinct subscribed owners across all pools. The allowlist is what makes filling it cost real capital in a real TELx pool.
+- `MAX_SUBSCRIPTIONS = 1_000` - per-LP subscription cap, which bounds the `getSubscriptions` view.
 
 ### 3.2. TELxSubscriber (Position Event Listener)
 
@@ -56,10 +58,10 @@ This contract implements Uniswap's `ISubscriber` interface to keep the registry'
 
 - When an LP subscribes their position NFT via the PositionManager, `notifySubscribe()` is triggered, which calls `registry.handleSubscribe()`.
 - When a position NFT is transferred, `notifyUnsubscribe()` is triggered, unsubscribing the position so the new owner must explicitly re-subscribe.
-- `notifyBurn()` removes a burned position from the index via `registry.handleBurn()`.
-- `notifyModifyLiquidity()` enforces subscription eligibility: if a subscribed position's live liquidity falls below the threshold, or the position is no longer in range, it is unsubscribed.
+- `notifyBurn()` removes a burned position from the index via `registry.handleBurn()`, inside a try/catch so a misconfigured registry can never block a burn.
+- `notifyModifyLiquidity()` is a no-op with no external call. It runs inside the LP's own `unlock`, where any pool-state read is one the transaction controls, so the subscriber does nothing there and cannot affect an increase, decrease or collect.
 
-The contract is `Ownable2Step`; its `registry` pointer is owner-swappable via `setRegistry(IPositionRegistry)`. Its constructor is `constructor(IPositionRegistry registry, address positionManager, address owner)`.
+The contract is `Ownable2Step` and owned by the governance Safe; its `registry` pointer is owner-swappable via `setRegistry(IPositionRegistry)`, which accepts only a deployed registry that has granted this subscriber `SUBSCRIBER_ROLE`. `renounceOwnership` reverts. Its constructor is `constructor(IPositionRegistry registry, address positionManager, address owner)`.
 
 ## 4. Off-Chain Components
 
@@ -81,12 +83,13 @@ This component provides off-chain voting-power calculation for Snapshot governan
 
 ## 5. Subscription Eligibility
 
-A position is `subscriptionEligible` only if it satisfies **both** of the following:
+A position is `subscriptionEligible` only if it satisfies **all** of the following:
 
-- **Liquidity threshold:** its liquidity is at least 1 basis point (0.01%) of the pool's total liquidity - that is, `liquidity >= totalLiquidity / 10_000`. As an exception, if the pool's total liquidity is less than or equal to 10,000, any non-zero position liquidity qualifies.
+- **Allowlisted pool:** its pool is on the admin allowlist.
+- **Liquidity floor:** its liquidity is non-zero and at least the pool's admin-set absolute `minLiquidity`, which defaults to 0. There is no threshold relative to the pool's total liquidity, because such a gate can be moved by anyone inside a single `unlock`, and the Snapshot strategy already values positions in USD.
 - **In range:** when the `inRangeRequired` flag is enabled, the pool's current tick must sit within the position's `[tickLower, tickUpper)` range. An out-of-range position holds a single currency and provides no live liquidity, so it earns no voting power even though its liquidity parameter stays non-zero. The flag defaults to enabled and is toggleable by the admin (`DEFAULT_ADMIN_ROLE`) via `setInRangeRequired`.
 
-`handleSubscribe` enforces eligibility at subscribe time; `notifyModifyLiquidity` re-checks it on liquidity modification, and the permissionless `pruneSubscription` lets anyone drop a position that has become ineligible. Because eligibility is evaluated live, `getSubscriptions(owner)` returns only currently-votable positions (still owned by `owner` and eligible) as of whatever block the call runs against - so a pinned-block read by the Snapshot strategy already excludes out-of-range and below-threshold positions with no strategy-side filter. `getSubscriptionsRaw(owner)` exposes the full unfiltered stored set for ops tooling and prune bots.
+`handleSubscribe` enforces eligibility at subscribe time. Because eligibility is evaluated live, `getSubscriptions(owner)` returns only currently-votable positions (still owned by `owner` and eligible) as of whatever block the call runs against - so a pinned-block read by the Snapshot strategy already excludes out-of-range and below-floor positions with no strategy-side filter. Nothing enforces eligibility by removal: a position that is merely ineligible keeps its slot and does not vote until it qualifies again. `getSubscriptions(owner, offset, limit)` is the paginated form; `getSubscriptionsRaw(owner)` exposes the full unfiltered stored set for ops tooling and prune bots. All three are for off-chain `eth_call` only.
 
 ## 6. System Flow & User Journey
 
@@ -94,7 +97,7 @@ A position is `subscriptionEligible` only if it satisfies **both** of the follow
 
 2. **Opt-In via Subscription:** To gain governance voting power, the LP calls `positionManager.subscribe()` on their NFT, pointing at the `TELxSubscriber`. This is the explicit opt-in action; the subscriber records it in the `PositionRegistry`.
 
-3. **Liquidity Events:** As the LP adds or removes liquidity, the PositionManager notifies the `TELxSubscriber` via `notifyModifyLiquidity()`. If the position has fallen below the liquidity threshold or out of range, it is automatically unsubscribed.
+3. **Liquidity Events:** As the LP adds or removes liquidity, the PositionManager notifies the `TELxSubscriber` via `notifyModifyLiquidity()`, which does nothing. The subscription stays in place; whether the position votes is decided live by `getSubscriptions` at the snapshot block. A position drained to zero can be pruned by anyone.
 
 4. **Earning Rewards:** Rewards accrue and are distributed off-chain via Merkl, independently of the registry. The LP claims rewards directly on Merkl.
 
