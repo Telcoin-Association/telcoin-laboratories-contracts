@@ -2,8 +2,11 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
@@ -14,62 +17,89 @@ import {TELxPools} from "../../shared/TELxPools.sol";
 import {V4PoolMath} from "../../shared/V4PoolMath.sol";
 
 /// @title TELxPoolScriptBase
-/// @notice Shared chain resolution, signer resolution and preview logging for the TELx pool
-///         scripts.
+/// @notice Shared chain resolution, parameter loading, signer resolution and preview logging for
+///         the TELx pool scripts.
 /// @dev    Pool creation and seeding run from an ordinary deployer EOA rather than through
-///         safe-utils: a hookless Uniswap v4 pool is permissionless to initialize, and the thin
-///         PositionRegistry treats any initialized pool as valid, so no admin call sits between
-///         creating a pool and an LP being able to subscribe to it. The registry and subscriber
-///         deploy, which does need governance, goes through the Safe instead.
+///         safe-utils: a hookless Uniswap v4 pool is permissionless to initialize, and the
+///         registry's allowlist is keyed on the PoolKey, which is known before the pool exists.
+///         The registry and subscriber deploy, which does need governance, goes through the Safe.
+///
+///         Chain infrastructure comes from the shared address libraries only. There is no
+///         environment override for a PositionManager or StateView: a script that could be
+///         pointed at an arbitrary contract by a stray `.env` line, on mainnet, from a
+///         treasury-funded signer, is a script whose preview cannot be trusted. Every resolved
+///         address is printed before anything is broadcast instead.
 abstract contract TELxPoolScriptBase is Script {
     struct ChainConfig {
         address positionManager;
         address stateView;
+        address poolManager;
         address permit2;
         string name;
     }
 
     /// @notice Per-pool seed parameters, as read from `script/telx/pools.json`.
+    /// @param amount0Human Whole tokens of currency0 budgeted for the seed.
+    /// @param amount1Human Whole tokens of currency1 budgeted for the seed.
+    /// @param widthBps Half-width of the seeded band in basis points; 0 selects the full range.
+    /// @param maxTickDeviation How far the pool's live tick may sit from the tick the amounts imply
+    ///        before seeding is refused.
+    /// @param slippageBps How far above the computed mint cost the on-chain maximums are set.
     struct PoolParams {
         uint256 amount0Human;
         uint256 amount1Human;
         uint16 widthBps;
+        int24 maxTickDeviation;
+        uint16 slippageBps;
     }
+
+    /// @dev No real seed approaches this many whole tokens of anything, and every raw-unit typo
+    ///      (an amount pasted with its decimals already applied) sails past it.
+    uint256 internal constant MAX_HUMAN_AMOUNT = 1e15;
+
+    /// @dev Path of the checked-in parameter file, relative to the project root.
+    string internal constant POOLS_CONFIG = "script/telx/pools.json";
 
     error UnsupportedChain(uint256 chainId);
     error MissingChainAddress(string what);
     error PoolNotConfigured(string poolName);
     error PoolAmountsNotSet(string poolName);
+    error AmountImplausible(string poolName, uint256 humanAmount);
+    error InvalidWidthBps(string poolName, uint256 widthBps);
+    error InvalidSlippageBps(string poolName, uint256 slippageBps);
+    error InvalidTickDeviation(string poolName, uint256 maxTickDeviation);
 
     // -----------
     // Chain resolution
     // -----------
 
-    /// @notice Resolves Uniswap v4 infrastructure for the chain we are connected to.
-    /// @dev Library constants are the defaults; each is overridable via `vm.envOr` so the same
-    ///      script can be pointed at a testnet deployment without editing code.
+    /// @notice Resolves Uniswap v4 infrastructure for the chain we are connected to, from the
+    ///         shared address libraries.
     function _chainConfig() internal view returns (ChainConfig memory config) {
         uint256 chainId = block.chainid;
 
         if (chainId == EthereumAddresses.CHAIN_ID) {
             config = ChainConfig({
-                positionManager: vm.envOr("ETHEREUM_POSITION_MANAGER", EthereumAddresses.POSITION_MANAGER),
-                stateView: vm.envOr("ETHEREUM_STATE_VIEW", EthereumAddresses.STATE_VIEW),
-                permit2: vm.envOr("ETHEREUM_PERMIT2", EthereumAddresses.PERMIT2),
+                positionManager: EthereumAddresses.POSITION_MANAGER,
+                stateView: EthereumAddresses.STATE_VIEW,
+                poolManager: address(0),
+                permit2: EthereumAddresses.PERMIT2,
                 name: "ethereum"
             });
         } else if (chainId == PolygonAddresses.CHAIN_ID) {
             config = ChainConfig({
-                positionManager: vm.envOr("POLYGON_POSITION_MANAGER", PolygonAddresses.POSITION_MANAGER),
-                stateView: vm.envOr("POLYGON_STATE_VIEW", PolygonAddresses.STATE_VIEW),
-                permit2: vm.envOr("POLYGON_PERMIT2", PolygonAddresses.PERMIT2),
+                positionManager: PolygonAddresses.POSITION_MANAGER,
+                stateView: PolygonAddresses.STATE_VIEW,
+                poolManager: address(0),
+                permit2: PolygonAddresses.PERMIT2,
                 name: "polygon"
             });
         } else if (chainId == BaseAddresses.CHAIN_ID) {
             config = ChainConfig({
-                positionManager: vm.envOr("BASE_POSITION_MANAGER", BaseAddresses.POSITION_MANAGER),
-                stateView: vm.envOr("BASE_STATE_VIEW", BaseAddresses.STATE_VIEW),
-                permit2: vm.envOr("BASE_PERMIT2", BaseAddresses.PERMIT2),
+                positionManager: BaseAddresses.POSITION_MANAGER,
+                stateView: BaseAddresses.STATE_VIEW,
+                poolManager: address(0),
+                permit2: BaseAddresses.PERMIT2,
                 name: "base"
             });
         } else {
@@ -79,6 +109,11 @@ abstract contract TELxPoolScriptBase is Script {
         if (config.positionManager == address(0)) revert MissingChainAddress("positionManager");
         if (config.stateView == address(0)) revert MissingChainAddress("stateView");
         if (config.permit2 == address(0)) revert MissingChainAddress("permit2");
+
+        // The PoolManager is not a catalog constant of its own: StateView is bound to exactly one,
+        // and reading it from there means the two can never disagree.
+        config.poolManager = address(StateView(config.stateView).poolManager());
+        if (config.poolManager == address(0)) revert MissingChainAddress("poolManager");
     }
 
     /// @notice Resolves the pool spec and asserts it belongs to the connected chain.
@@ -90,9 +125,6 @@ abstract contract TELxPoolScriptBase is Script {
     // Pool parameters
     // -----------
 
-    /// @dev Path of the checked-in parameter file, relative to the project root.
-    string internal constant POOLS_CONFIG = "script/telx/pools.json";
-
     /**
      * @notice Reads a pool's seed parameters from `script/telx/pools.json`.
      * @dev The file is the single place the per-pool amounts live, so the seven pools can be filled
@@ -102,21 +134,73 @@ abstract contract TELxPoolScriptBase is Script {
      *
      *      Amounts of zero mean "not decided yet" and are refused by `_requireAmountsSet`; the
      *      file ships that way so that nothing can be seeded at a placeholder price by accident.
+     *
+     *      `maxTickDeviation` and `slippageBps` come from the file's `defaults` block unless the
+     *      pool's own entry overrides them. Every value is range-checked here, at the point it is
+     *      read, so an out-of-range figure fails the preview rather than the broadcast.
      */
     function _poolParams(string memory poolName) internal view returns (PoolParams memory params) {
         string memory json = vm.readFile(string.concat(vm.projectRoot(), "/", POOLS_CONFIG));
         string memory key = string.concat(".pools.", poolName);
-        if (!vm.keyExists(json, key)) revert PoolNotConfigured(poolName);
+        if (!vm.keyExistsJson(json, key)) revert PoolNotConfigured(poolName);
 
         params.amount0Human = vm.parseJsonUint(json, string.concat(key, ".amount0"));
         params.amount1Human = vm.parseJsonUint(json, string.concat(key, ".amount1"));
-        params.widthBps = uint16(vm.parseJsonUint(json, string.concat(key, ".widthBps")));
+
+        uint256 widthBps = vm.parseJsonUint(json, string.concat(key, ".widthBps"));
+        uint256 maxTickDeviation = _paramOrDefault(json, key, "maxTickDeviation");
+        uint256 slippageBps = _paramOrDefault(json, key, "slippageBps");
+
+        // Narrow only after checking, so a value that does not fit the field can never wrap into
+        // one that does: 65,536 as a uint16 is 0, which would silently mean "full range".
+        if (widthBps >= V4PoolMath.BPS) revert InvalidWidthBps(poolName, widthBps);
+        if (slippageBps >= V4PoolMath.BPS) revert InvalidSlippageBps(poolName, slippageBps);
+        if (maxTickDeviation > uint256(uint24(TickMath.MAX_TICK))) revert InvalidTickDeviation(poolName, maxTickDeviation);
+
+        params.widthBps = uint16(widthBps);
+        params.maxTickDeviation = int24(uint24(maxTickDeviation));
+        params.slippageBps = uint16(slippageBps);
+    }
+
+    /// @dev A per-pool value when the entry has one, otherwise the file-level default.
+    function _paramOrDefault(string memory json, string memory poolKey, string memory field)
+        internal
+        view
+        returns (uint256)
+    {
+        string memory perPool = string.concat(poolKey, ".", field);
+        if (vm.keyExistsJson(json, perPool)) return vm.parseJsonUint(json, perPool);
+        return vm.parseJsonUint(json, string.concat(".defaults.", field));
+    }
+
+    /// @dev The defaults block alone, for the explicit-parameter entrypoints that take amounts on
+    ///      the command line but still want the reviewed tolerances.
+    function _defaultTolerances() internal view returns (int24 maxTickDeviation, uint16 slippageBps) {
+        string memory json = vm.readFile(string.concat(vm.projectRoot(), "/", POOLS_CONFIG));
+        maxTickDeviation = int24(uint24(vm.parseJsonUint(json, ".defaults.maxTickDeviation")));
+        slippageBps = uint16(vm.parseJsonUint(json, ".defaults.slippageBps"));
     }
 
     /// @dev Zero amounts are the file's "not decided" marker. Refuse them on any path that would
     ///      set a price or move tokens.
     function _requireAmountsSet(string memory poolName, PoolParams memory params) internal pure {
         if (params.amount0Human == 0 || params.amount1Human == 0) revert PoolAmountsNotSet(poolName);
+    }
+
+    /// @dev Scales whole-token amounts by each side's decimals, refusing anything that cannot be
+    ///      a whole-token figure. The scripts take whole tokens precisely so that a miscounted
+    ///      zero is visible; this is the backstop for the case where the raw figure was pasted in
+    ///      anyway.
+    function _rawAmounts(
+        string memory poolName,
+        TELxPools.PoolSpec memory s,
+        uint256 amount0Human,
+        uint256 amount1Human
+    ) internal pure returns (uint256 amount0, uint256 amount1) {
+        if (amount0Human > MAX_HUMAN_AMOUNT) revert AmountImplausible(poolName, amount0Human);
+        if (amount1Human > MAX_HUMAN_AMOUNT) revert AmountImplausible(poolName, amount1Human);
+        amount0 = V4PoolMath.toRawAmount(amount0Human, s.decimals0);
+        amount1 = V4PoolMath.toRawAmount(amount1Human, s.decimals1);
     }
 
     /// @notice The catalog pools that belong to the connected chain.
@@ -141,12 +225,18 @@ abstract contract TELxPoolScriptBase is Script {
     ///         other deploy scripts in this repo: ETH_FROM for hardware wallets, PRIVATE_KEY for
     ///         key-based signing.
     function _resolveSigner() internal view returns (address signer) {
+        signer = _trySigner();
+        require(signer != address(0), "Set ETH_FROM (ledger) or PRIVATE_KEY");
+    }
+
+    /// @dev The signer if one is configured, otherwise zero. Previews use this so they can print
+    ///      the signer's balances when a signer is set and still run when none is.
+    function _trySigner() internal view returns (address) {
         address ethFrom = vm.envOr("ETH_FROM", address(0));
         if (ethFrom != address(0)) return ethFrom;
 
         uint256 pk = vm.envOr("PRIVATE_KEY", uint256(0));
-        require(pk != 0, "Set ETH_FROM (ledger) or PRIVATE_KEY");
-        return vm.addr(pk);
+        return pk == 0 ? address(0) : vm.addr(pk);
     }
 
     // -----------
@@ -158,9 +248,45 @@ abstract contract TELxPoolScriptBase is Script {
         (sqrtPriceX96,,,) = StateView(config.stateView).getSlot0(poolId);
     }
 
+    /// @notice The pool's active liquidity at the current tick. Zero for an empty or never-created pool.
+    function _poolLiquidity(ChainConfig memory config, PoolId poolId) internal view returns (uint128) {
+        return StateView(config.stateView).getLiquidity(poolId);
+    }
+
+    /// @notice Whether some position already spans exactly this tick pair.
+    /// @dev `liquidityGross` at a tick counts every position with a bound there, so both bounds
+    ///      being non-zero is the on-chain signature of a position over this range. It is exact
+    ///      for a freshly seeded pool, where the only positions are ours, which is the case the
+    ///      double-seed guard exists for.
+    function _rangeHasLiquidity(ChainConfig memory config, PoolId poolId, int24 tickLower, int24 tickUpper)
+        internal
+        view
+        returns (bool)
+    {
+        StateView stateView = StateView(config.stateView);
+        (uint128 grossLower,) = stateView.getTickLiquidity(poolId, tickLower);
+        (uint128 grossUpper,) = stateView.getTickLiquidity(poolId, tickUpper);
+        return grossLower > 0 && grossUpper > 0;
+    }
+
+    function _balance(address currency, address who) internal view returns (uint256) {
+        return currency == TELxPools.NATIVE ? who.balance : IERC20(currency).balanceOf(who);
+    }
+
     // -----------
     // Logging
     // -----------
+
+    /// @dev Prints every address the run will touch. There is no override for any of them, so
+    ///      this is confirmation rather than configuration, but it is the line to check against
+    ///      the explorer before broadcasting from a funded key.
+    function _logChain(ChainConfig memory config) internal pure {
+        console2.log("Chain:      ", config.name);
+        console2.log("  PositionManager:", config.positionManager);
+        console2.log("  PoolManager:    ", config.poolManager);
+        console2.log("  StateView:      ", config.stateView);
+        console2.log("  Permit2:        ", config.permit2);
+    }
 
     /// @dev Prints the pool's identity. Every script echoes this before acting so the operator can
     ///      confirm the right pool on the right chain before anything is broadcast.
@@ -177,11 +303,20 @@ abstract contract TELxPoolScriptBase is Script {
         console2.log("  hooks:    ", s.hooks);
     }
 
-    /// @dev Prints a price both as the raw Q64.96 value Uniswap uses and as the tick, which is the
-    ///      form that can be eyeballed against an existing pool.
-    function _logPrice(uint160 sqrtPriceX96) internal pure {
+    /// @dev Prints a price three ways: the raw Q64.96 value Uniswap uses, the tick, and the
+    ///      decimal-adjusted figure in both directions. The last is the one a person can check
+    ///      against a market quote; the first two are what the chain will actually hold.
+    function _logPrice(uint160 sqrtPriceX96, TELxPools.PoolSpec memory s) internal pure {
         console2.log("  sqrtPriceX96:", uint256(sqrtPriceX96));
         console2.log("  tick:        ", int256(TickMath.getTickAtSqrtPrice(sqrtPriceX96)));
+
+        uint256 price1Per0 = V4PoolMath.humanPriceE18(sqrtPriceX96, s.decimals0, s.decimals1);
+        console2.log(
+            string.concat("  ", _fmtE18(price1Per0), " ", s.symbol1, " per ", s.symbol0)
+        );
+        console2.log(
+            string.concat("  ", _fmtE18(V4PoolMath.humanInversePriceE18(price1Per0)), " ", s.symbol0, " per ", s.symbol1)
+        );
     }
 
     /// @dev Prints a tick range alongside the full-range bounds for the same spacing, so a
@@ -192,5 +327,50 @@ abstract contract TELxPoolScriptBase is Script {
         console2.log("  tickUpper:", int256(tickUpper));
         console2.log("  full range lower:", int256(fullLower));
         console2.log("  full range upper:", int256(fullUpper));
+    }
+
+    /// @dev Prints the signer's holdings of both currencies against the budget, so a short balance
+    ///      shows up in the preview and not as a revert inside the broadcast.
+    function _logBalances(TELxPools.PoolSpec memory s, address who, uint256 budget0, uint256 budget1) internal view {
+        if (who == address(0)) {
+            console2.log("Signer balances: (no ETH_FROM or PRIVATE_KEY set)");
+            return;
+        }
+        uint256 bal0 = _balance(s.currency0, who);
+        uint256 bal1 = _balance(s.currency1, who);
+        console2.log("Signer balances for", who);
+        console2.log(string.concat("  ", s.symbol0, ": ", _fmtUnits(bal0, s.decimals0), bal0 < budget0 ? "  SHORT" : ""));
+        console2.log(string.concat("  ", s.symbol1, ": ", _fmtUnits(bal1, s.decimals1), bal1 < budget1 ? "  SHORT" : ""));
+    }
+
+    /// @dev Prints a raw amount as whole tokens with its raw form beside it, so the reviewed
+    ///      figure and the figure the chain sees appear on one line.
+    function _logAmount(string memory label, uint256 raw, uint8 decimals, string memory symbol) internal pure {
+        console2.log(string.concat("  ", label, ": ", _fmtUnits(raw, decimals), " ", symbol, "  (raw ", Strings.toString(raw), ")"));
+    }
+
+    /// @dev Fixed-point rendering of an 18-decimal figure with six fractional digits.
+    function _fmtE18(uint256 xE18) internal pure returns (string memory) {
+        return _fmtUnits(xE18, 18);
+    }
+
+    /// @dev Renders `raw` in whole units of a `decimals`-decimal token, truncated to six places.
+    ///      For a token with fewer than six decimals the fraction is shown at its native width.
+    function _fmtUnits(uint256 raw, uint8 decimals) internal pure returns (string memory) {
+        uint256 scale = 10 ** decimals;
+        uint256 whole = raw / scale;
+        uint256 frac = raw % scale;
+
+        uint8 shown = decimals < 6 ? decimals : 6;
+        if (shown == 0) return Strings.toString(whole);
+
+        // drop the digits past the sixth place
+        frac = frac / (10 ** (decimals - shown));
+        string memory fracStr = Strings.toString(frac);
+        // left-pad so 0.05 does not print as 0.5
+        while (bytes(fracStr).length < shown) {
+            fracStr = string.concat("0", fracStr);
+        }
+        return string.concat(Strings.toString(whole), ".", fracStr);
     }
 }

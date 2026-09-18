@@ -2,6 +2,8 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {V4PoolMath} from "../../script/shared/V4PoolMath.sol";
@@ -270,7 +272,9 @@ contract V4PoolMathTest is Test {
     }
 
     /// @notice Bounds must be aligned OUTWARD so the realized range always contains the band that
-    ///         was requested, never a slightly narrower one.
+    ///         was requested, never a slightly narrower one. Checked in price space: the sqrt
+    ///         price at the lower tick sits at or below the requested lower price, and the sqrt
+    ///         price at the upper tick sits strictly above the requested upper one.
     function testFuzz_percentRangeTicks_containsRequestedBand(uint160 sqrtPriceX96, uint16 widthBps) public pure {
         sqrtPriceX96 = uint160(bound(sqrtPriceX96, TickMath.MIN_SQRT_PRICE * 2, TickMath.MAX_SQRT_PRICE / 2));
         widthBps = uint16(bound(widthBps, 1, 9999));
@@ -283,6 +287,48 @@ contract V4PoolMathTest is Test {
         assertEq(upper % SPACING_MEDIUM, 0, "upper unaligned");
         assertGe(lower, minTick, "lower below full range");
         assertLe(upper, maxTick, "upper above full range");
+
+        (uint256 requestedLower, uint256 requestedUpper) = _requestedBand(sqrtPriceX96, widthBps);
+        if (lower > minTick) {
+            assertLe(TickMath.getSqrtPriceAtTick(lower), requestedLower, "lower bound inside the requested band");
+        }
+        if (upper < maxTick) {
+            assertGt(TickMath.getSqrtPriceAtTick(upper), requestedUpper, "upper bound inside the requested band");
+        }
+    }
+
+    /// @notice The upper bound is the side that is easy to get short by a tick: `getTickAtSqrtPrice`
+    ///         returns the tick at or BELOW a price, and aligning that up only moves it when it was
+    ///         unaligned. A requested upper price that lands inside a spacing-aligned tick must
+    ///         still come out strictly contained.
+    function test_percentRangeTicks_upperBoundContainsPriceInsideAlignedTick() public pure {
+        // a price just above tick 120 (which is 60-aligned): getTickAtSqrtPrice gives 120, and
+        // aligning 120 up to spacing 60 leaves it at 120, one tick short of containing the price
+        uint160 justAboveAligned = TickMath.getSqrtPriceAtTick(120) + 1;
+
+        // pick the current price so that sqrtPrice * sqrt(1 + w) lands at `justAboveAligned`
+        // (approximately; the fuzz above covers exactness, this pins the shape)
+        uint16 widthBps = 100;
+        uint160 current = uint160(uint256(justAboveAligned) * 1e18 / 1004987562112089027); // / sqrt(1.01)
+
+        (uint256 requestedLower, uint256 requestedUpper) = _requestedBand(current, widthBps);
+        (int24 lower, int24 upper) = V4PoolMath.percentRangeTicks(current, widthBps, SPACING_MEDIUM);
+
+        assertLe(TickMath.getSqrtPriceAtTick(lower), requestedLower, "lower");
+        assertGt(TickMath.getSqrtPriceAtTick(upper), requestedUpper, "upper must be strictly above the request");
+    }
+
+    /// @dev The band the caller asked for, in sqrt-price space, computed the same way the library
+    ///      computes it so the containment assertions test the alignment and not the arithmetic.
+    function _requestedBand(uint160 sqrtPriceX96, uint16 widthBps)
+        internal
+        pure
+        returns (uint256 requestedLower, uint256 requestedUpper)
+    {
+        uint256 scaleDown = Math.sqrt(FullMath.mulDiv(10_000 - widthBps, 1e36, 10_000));
+        uint256 scaleUp = Math.sqrt(FullMath.mulDiv(10_000 + widthBps, 1e36, 10_000));
+        requestedLower = FullMath.mulDiv(sqrtPriceX96, scaleDown, 1e18);
+        requestedUpper = FullMath.mulDiv(sqrtPriceX96, scaleUp, 1e18);
     }
 
     /// @notice A wider band never produces a narrower range.
@@ -325,6 +371,54 @@ contract V4PoolMathTest is Test {
             abi.encodeWithSelector(V4PoolMath.PriceOutOfRange.selector, uint256(TickMath.MIN_SQRT_PRICE - 1))
         );
         harness.percentRangeTicks(TickMath.MIN_SQRT_PRICE - 1, 1000, SPACING_MEDIUM);
+    }
+
+    // -----------
+    // Human-readable prices
+    // -----------
+
+    /// @notice 100,000 eUSD (6 decimals) against 20,000,000 TEL (18 decimals) is 200 TEL per eUSD
+    ///         and 0.005 eUSD per TEL, whatever the raw ratio looks like.
+    function test_humanPrice_eusdTel() public pure {
+        uint160 sqrtPriceX96 = V4PoolMath.sqrtPriceX96FromAmounts(100_000 * 1e6, 20_000_000 * 1e18);
+
+        uint256 telPerEusd = V4PoolMath.humanPriceE18(sqrtPriceX96, 6, 18);
+        assertApproxEqRel(telPerEusd, 200e18, 1e12, "TEL per eUSD");
+
+        uint256 eusdPerTel = V4PoolMath.humanInversePriceE18(telPerEusd);
+        assertApproxEqRel(eusdPerTel, 0.005e18, 1e12, "eUSD per TEL");
+    }
+
+    /// @notice 10 ETH against 5,660,380 TEL, both 18 decimals: the decimal adjustment is a no-op
+    ///         and the price is the plain ratio.
+    function test_humanPrice_ethTel() public pure {
+        uint160 sqrtPriceX96 = V4PoolMath.sqrtPriceX96FromAmounts(10 ether, 5_660_380 ether);
+        uint256 telPerEth = V4PoolMath.humanPriceE18(sqrtPriceX96, 18, 18);
+        assertApproxEqRel(telPerEth, 566_038e18, 1e12, "TEL per ETH");
+    }
+
+    /// @notice Parity is 1.0 in both directions.
+    function test_humanPrice_parity() public pure {
+        uint256 p = V4PoolMath.humanPriceE18(SQRT_PRICE_1_1, 18, 18);
+        assertEq(p, 1e18, "1:1");
+        assertEq(V4PoolMath.humanInversePriceE18(p), 1e18, "inverse of 1:1");
+        assertEq(V4PoolMath.humanInversePriceE18(0), 0, "inverse of an unrepresentable price is zero");
+    }
+
+    /// @notice Round trip: amounts to sqrt price to human price recovers amount1/amount0 in whole
+    ///         tokens, across the decimal combinations the catalog uses.
+    function testFuzz_humanPrice_roundTripsAmounts(uint64 human0, uint64 human1, bool sixDecimals0) public pure {
+        human0 = uint64(bound(human0, 1, 1e12));
+        human1 = uint64(bound(human1, 1, 1e12));
+        uint8 d0 = sixDecimals0 ? 6 : 18;
+
+        uint160 sqrtPriceX96 =
+            V4PoolMath.sqrtPriceX96FromAmounts(V4PoolMath.toRawAmount(human0, d0), V4PoolMath.toRawAmount(human1, 18));
+        uint256 got = V4PoolMath.humanPriceE18(sqrtPriceX96, d0, 18);
+        uint256 want = FullMath.mulDiv(human1, 1e18, human0);
+        // the sqrt truncation in sqrtPriceX96FromAmounts is below 2^-48 relative, and the 1e18
+        // rendering truncates once more, so allow a billionth plus one unit in the last place
+        assertApproxEqAbs(got, want, want / 1e9 + 1, "human price should be amount1/amount0");
     }
 
     // -----------

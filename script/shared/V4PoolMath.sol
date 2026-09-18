@@ -79,9 +79,10 @@ library V4PoolMath {
     /**
      * @notice Rounds `tick` to a multiple of `tickSpacing`.
      * @dev Solidity truncates integer division toward zero, so a naive `tick / spacing * spacing`
-     *      rounds negative ticks UP, not down. Every TELx pool opens at a negative tick (TEL is
-     *      currency1 and worth far less than currency0 per unit), so that asymmetry would apply to
-     *      all of them. The sign is handled explicitly here instead.
+     *      rounds negative ticks UP, not down. Which sign a TELx pool opens at depends only on
+     *      which token sorts as currency0 (TEL is currency1 in every catalog pool and worth less
+     *      per unit, so those open positive; a differently ordered pair would open negative), so
+     *      the sign is handled explicitly rather than assumed either way.
      * @param roundUp True to round toward +infinity, false to round toward -infinity.
      */
     function alignTick(int24 tick, int24 tickSpacing, bool roundUp) internal pure returns (int24) {
@@ -130,7 +131,10 @@ library V4PoolMath {
      *
      *      Bounds are computed as `sqrtPrice * sqrt(1 +/- width)`, then aligned OUTWARD so the
      *      resulting range always contains the band that was asked for rather than a slightly
-     *      narrower one.
+     *      narrower one. `getTickAtSqrtPrice` returns the greatest tick whose price is at most
+     *      the input, which already sits at or below the lower bound but at or below the upper
+     *      one too; the upper side therefore steps one tick past it before aligning, so the
+     *      realized upper price is strictly above the requested one.
      * @param sqrtPriceX96 The pool's current price.
      * @param widthBps Half-width in basis points. 1000 is +/-10%. Must be in (0, 10000).
      */
@@ -158,7 +162,7 @@ library V4PoolMath {
             : alignTick(TickMath.getTickAtSqrtPrice(uint160(sqrtLower)), tickSpacing, false);
         tickUpper = sqrtUpper >= TickMath.MAX_SQRT_PRICE
             ? maxTick
-            : alignTick(TickMath.getTickAtSqrtPrice(uint160(sqrtUpper)), tickSpacing, true);
+            : alignTick(TickMath.getTickAtSqrtPrice(uint160(sqrtUpper)) + 1, tickSpacing, true);
 
         // clamp after alignment: rounding outward can push a near-limit bound past the legal tick
         if (tickLower < minTick) tickLower = minTick;
@@ -197,5 +201,42 @@ library V4PoolMath {
     {
         (int24 tickLower, int24 tickUpper) = fullRangeTicks(tickSpacing);
         return sqrtPricesAtTicks(tickLower, tickUpper);
+    }
+
+    // -----------
+    // Human-readable prices
+    // -----------
+
+    /**
+     * @notice The pool price as whole units of currency1 per whole unit of currency0, scaled by
+     *         1e18, for printing.
+     * @dev `sqrtPriceX96` is the square root of the RAW ratio `amount1 / amount0`, so to read it as
+     *      a price a person recognises it has to be squared, shifted out of Q64.96 and then
+     *      rescaled by the two tokens' decimals. Every one of those steps is a place a preview can
+     *      silently print nonsense while the raw figures look plausible, which is why the scripts
+     *      print this alongside the tick rather than instead of it.
+     *
+     *      The squaring is done as a `mulDiv` against 2^96 so the intermediate never overflows;
+     *      the decimal rescale reuses the same 512-bit path.
+     * @return price1Per0E18 currency1 per currency0, times 1e18. Zero only when the price is too
+     *         small to represent at that scale.
+     */
+    function humanPriceE18(uint160 sqrtPriceX96, uint8 decimals0, uint8 decimals1)
+        internal
+        pure
+        returns (uint256 price1Per0E18)
+    {
+        // raw price in Q64.96: (sqrtP * sqrtP) / 2^96
+        uint256 priceX96 = FullMath.mulDiv(sqrtPriceX96, sqrtPriceX96, 1 << 96);
+        // human = raw * 10^decimals0 / 10^decimals1, kept at 18 decimals of precision
+        price1Per0E18 = FullMath.mulDiv(priceX96, WAD * (10 ** decimals0), (1 << 96) * (10 ** decimals1));
+    }
+
+    /// @notice The reciprocal of `humanPriceE18`: whole units of currency0 per whole unit of
+    ///         currency1, times 1e18. This is the "price of TEL" reading for every catalog pool,
+    ///         where TEL is currency1.
+    function humanInversePriceE18(uint256 price1Per0E18) internal pure returns (uint256) {
+        if (price1Per0E18 == 0) return 0;
+        return FullMath.mulDiv(WAD, WAD, price1Per0E18);
     }
 }

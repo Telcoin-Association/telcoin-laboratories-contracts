@@ -359,6 +359,7 @@ MigrationBackup/
 # Foundry
 out
 cache_forge
+cache
 broadcast
 lcov.info
 

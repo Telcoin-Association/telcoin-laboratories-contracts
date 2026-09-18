@@ -25,10 +25,64 @@ contract TELxPoolsConfigTest is Test {
         string[] memory names = TELxPools.allNames();
         for (uint256 i; i < names.length; ++i) {
             TELxPoolScriptBase.PoolParams memory p = harness.poolParams(names[i]);
-            // widthBps is the one field that must always be meaningful, even before amounts are
-            // decided: 10,000 or more is not a valid band and would revert at seed time.
+            // The tolerances must be meaningful even before amounts are decided, since they are
+            // what the seed's two price guards run on.
             assertLt(p.widthBps, 10_000, string.concat(names[i], ": widthBps must be below 10000"));
+            assertGt(p.maxTickDeviation, 0, string.concat(names[i], ": maxTickDeviation must be set"));
+            assertLe(p.maxTickDeviation, 500, string.concat(names[i], ": maxTickDeviation over 5% defeats the guard"));
+            assertLe(p.slippageBps, 100, string.concat(names[i], ": slippageBps over 1% defeats the maximums"));
         }
+    }
+
+    /// @notice The file's `defaults` block supplies the tolerances for every pool that does not
+    ///         override them, and the explicit-parameter entrypoints read the same block.
+    function test_defaultsApplyToEveryPool() public view {
+        (int24 maxTickDeviation, uint16 slippageBps) = harness.defaultTolerances();
+        assertEq(maxTickDeviation, 50, "default maxTickDeviation");
+        assertEq(slippageBps, 50, "default slippageBps");
+
+        string[] memory names = TELxPools.allNames();
+        for (uint256 i; i < names.length; ++i) {
+            TELxPoolScriptBase.PoolParams memory p = harness.poolParams(names[i]);
+            assertEq(p.maxTickDeviation, maxTickDeviation, string.concat(names[i], ": maxTickDeviation"));
+            assertEq(p.slippageBps, slippageBps, string.concat(names[i], ": slippageBps"));
+        }
+    }
+
+    /// @notice Every entry in the file names a catalog pool. The reverse of
+    ///         `test_everyCatalogPoolIsConfigured`: an entry for a pool nothing will deploy is a
+    ///         typo waiting to be seeded.
+    function test_everyConfiguredPoolIsInTheCatalog() public view {
+        string[] memory configured = harness.configuredPoolNames();
+        string[] memory catalog = TELxPools.allNames();
+        assertEq(configured.length, catalog.length, "pools.json and the catalog differ in size");
+        for (uint256 i; i < configured.length; ++i) {
+            bool found;
+            for (uint256 j; j < catalog.length; ++j) {
+                if (keccak256(bytes(configured[i])) == keccak256(bytes(catalog[j]))) {
+                    found = true;
+                    break;
+                }
+            }
+            assertTrue(found, string.concat("pools.json names a pool the catalog lacks: ", configured[i]));
+        }
+    }
+
+    /// @notice A whole-token amount past the sanity bound is refused as a probable raw-unit
+    ///         paste, on either side.
+    function test_implausibleAmountsAreRefused() public {
+        TELxPools.PoolSpec memory s = TELxPools.spec("POLYGON_EUSD_TEL");
+        uint256 tooMany = 1e15 + 1;
+
+        vm.expectRevert(abi.encodeWithSelector(TELxPoolScriptBase.AmountImplausible.selector, "X", tooMany));
+        harness.rawAmounts("X", s, tooMany, 1);
+
+        vm.expectRevert(abi.encodeWithSelector(TELxPoolScriptBase.AmountImplausible.selector, "X", tooMany));
+        harness.rawAmounts("X", s, 1, tooMany);
+
+        (uint256 raw0, uint256 raw1) = harness.rawAmounts("X", s, 1e15, 1e15);
+        assertEq(raw0, 1e15 * 1e6, "eUSD scaled");
+        assertEq(raw1, 1e15 * 1e18, "TEL scaled");
     }
 
     /// @notice A name that is not in the catalog cannot have an entry either. Guards against a
@@ -44,16 +98,16 @@ contract TELxPoolsConfigTest is Test {
     function test_unsetAmountsAreRefused() public {
         TELxPoolScriptBase.PoolParams memory p;
 
-        p = TELxPoolScriptBase.PoolParams({amount0Human: 0, amount1Human: 1, widthBps: 1000});
+        p = _params(0, 1);
         vm.expectRevert(abi.encodeWithSelector(TELxPoolScriptBase.PoolAmountsNotSet.selector, "X"));
         harness.requireAmountsSet("X", p);
 
-        p = TELxPoolScriptBase.PoolParams({amount0Human: 1, amount1Human: 0, widthBps: 1000});
+        p = _params(1, 0);
         vm.expectRevert(abi.encodeWithSelector(TELxPoolScriptBase.PoolAmountsNotSet.selector, "X"));
         harness.requireAmountsSet("X", p);
 
         // and non-zero passes
-        p = TELxPoolScriptBase.PoolParams({amount0Human: 1, amount1Human: 1, widthBps: 1000});
+        p = _params(1, 1);
         harness.requireAmountsSet("X", p);
     }
 
@@ -71,5 +125,19 @@ contract TELxPoolsConfigTest is Test {
 
         vm.chainId(99_999);
         assertEq(harness.poolsOnThisChain().length, 0, "an unknown chain has no pools");
+    }
+
+    function _params(uint256 amount0Human, uint256 amount1Human)
+        internal
+        pure
+        returns (TELxPoolScriptBase.PoolParams memory)
+    {
+        return TELxPoolScriptBase.PoolParams({
+            amount0Human: amount0Human,
+            amount1Human: amount1Human,
+            widthBps: 1000,
+            maxTickDeviation: 50,
+            slippageBps: 50
+        });
     }
 }
