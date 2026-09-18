@@ -12,6 +12,15 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    env:
+      # Fork suites read these through `test/util/ForkOrSkip.sol` and skip themselves when one
+      # is unset, so the same commands are correct with or without secrets. Fork tests need an
+      # archive RPC (free public endpoints do not serve the pinned historical blocks). GitHub
+      # does not pass repo secrets to workflows triggered by PRs from forks, so adding keys here
+      # is safe on a public repo.
+      ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+      POLYGON_RPC_URL: ${{ secrets.POLYGON_RPC_URL }}
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,21 +37,13 @@ jobs:
         run: forge build
 
       - name: Test
-        # Fork suites read their RPC URL through `test/util/ForkOrSkip.sol` and skip themselves
-        # when it is unset, so the same command is correct with or without secrets: with them the
-        # full suite runs, without them the fork suites report as skipped and everything else
-        # still has to pass. Fork tests need an archive RPC (free public endpoints do not serve
-        # the pinned historical blocks). GitHub does not pass repo secrets to workflows triggered
-        # by PRs from forks, so adding keys here is safe on a public repo.
+        # With secrets the full suite runs; without them the fork suites report as skipped and
+        # everything else still has to pass.
         run: |
           if [ -z "${POLYGON_RPC_URL}" ]; then
             echo "::notice::RPC secrets not configured; fork suites will skip themselves. Add ETHEREUM_RPC_URL, POLYGON_RPC_URL and BASE_RPC_URL repo secrets to run the full suite."
           fi
           forge test -vvv
-        env:
-          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
-          POLYGON_RPC_URL: ${{ secrets.POLYGON_RPC_URL }}
-          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
 
       - name: Coverage
         # The production contracts the TELx migration deploys must stay at 100% on every axis
@@ -50,7 +51,7 @@ jobs:
         # step needs no secrets.
         run: |
           forge coverage --no-match-coverage "(test|script|lib)" --report summary | tee coverage.txt
-          for f in contracts/telx/core/PositionRegistry.sol contracts/telx/core/TELxSubscriber.sol; do
+          for f in contracts/telx/core/PositionRegistry.sol contracts/telx/core/TELxSubscriber.sol contracts/telx/abstract/PositionManagerAuth.sol; do
             if ! grep -F "$f" coverage.txt | grep -Eq '100\.00% \([0-9]+/[0-9]+\) *\| 100\.00% \([0-9]+/[0-9]+\) *\| 100\.00% \([0-9]+/[0-9]+\) *\| 100\.00%'; then
               echo "::error::$f is below 100% coverage on at least one axis"
               exit 1
@@ -58,9 +59,5 @@ jobs:
           done
 
       - name: Gas Report
-        if: ${{ secrets.POLYGON_RPC_URL != '' }}
+        if: ${{ env.POLYGON_RPC_URL != '' }}
         run: forge test --gas-report
-        env:
-          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
-          POLYGON_RPC_URL: ${{ secrets.POLYGON_RPC_URL }}
-          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
