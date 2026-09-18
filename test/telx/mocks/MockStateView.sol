@@ -8,8 +8,19 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 ///         PositionRegistry depends on: `getSlot0` (pool initialization check, current tick for
 ///         the in-range check, and price math) and `getLiquidity` (the subscription threshold).
 ///         Values are set per-pool by tests.
-/// @dev Cast to `StateView` by the registry; only `getSlot0` and `getLiquidity` are dispatched.
+/// @dev Cast to `StateView` by the registry; `getSlot0`, `getLiquidity` and `poolManager` are
+///      dispatched. `poolManager` is read once by the registry constructor for the unlock guard.
 contract MockStateView {
+    address private immutable _poolManager;
+
+    constructor(address poolManager_) {
+        _poolManager = poolManager_;
+    }
+
+    function poolManager() external view returns (address) {
+        return _poolManager;
+    }
+
     mapping(PoolId => uint160) private _sqrtPriceX96;
     mapping(PoolId => int24) private _tick;
     mapping(PoolId => uint128) private _liquidity;

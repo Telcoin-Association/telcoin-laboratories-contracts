@@ -13,7 +13,9 @@ import {CreateV4Pool} from "../../script/telx/CreateV4Pool.s.sol";
 import {SeedV4Liquidity} from "../../script/telx/SeedV4Liquidity.s.sol";
 import {TELxPools} from "../../script/shared/TELxPools.sol";
 import {V4PoolMath} from "../../script/shared/V4PoolMath.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PositionRegistry} from "../../contracts/telx/core/PositionRegistry.sol";
+import {FlashPruneAttacker} from "./mocks/FlashPruneAttacker.sol";
 import {TELxSubscriber} from "../../contracts/telx/core/TELxSubscriber.sol";
 import {IPositionRegistry} from "../../contracts/telx/interfaces/IPositionRegistry.sol";
 
@@ -72,6 +74,8 @@ abstract contract TELxPoolLifecycleForkTest is Test {
         vm.startPrank(admin);
         registry.grantRole(registry.SUBSCRIBER_ROLE(), address(subscriber));
         registry.grantRole(registry.SUPPORT_ROLE(), support);
+        // the allowlist is what makes a pool a TELx pool; the Safe batch does this on mainnet
+        registry.registerPool(TELxPools.poolKey(s));
         vm.stopPrank();
 
         _fund(s);
@@ -199,6 +203,63 @@ abstract contract TELxPoolLifecycleForkTest is Test {
         uint256[] memory votable = registry.getSubscriptions(signer);
         assertEq(votable.length, 1, "expected one votable position");
         assertEq(votable[0], tokenId, "wrong tokenId");
+    }
+
+    // -----------
+    // Adversarial
+    // -----------
+
+    /// @notice The flash-liquidity mass-prune attack, against the real PoolManager. An attacker
+    ///         inside their own `unlock` callback, where they could add and remove any amount of
+    ///         liquidity and move price freely before settling, calls `pruneSubscription` on a
+    ///         subscribed position. The registry must refuse before reading anything.
+    function test_pruneSubscription_refusedInsideUnlock() public {
+        createScript.runWithSigner(poolName, amount0Human, amount1Human, signer);
+        uint256 tokenId = seedScript.runWithSigner(poolName, amount0Human, amount1Human, 1000, signer);
+        vm.prank(signer);
+        IPositionManager(_positionManager()).subscribe(tokenId, address(subscriber), "");
+        assertTrue(registry.isTokenSubscribed(tokenId), "precondition: subscribed");
+
+        FlashPruneAttacker attacker =
+            new FlashPruneAttacker(IPoolManager(StateView(_stateView()).poolManager()), IPositionRegistry(address(registry)));
+        attacker.attack(tokenId);
+
+        assertFalse(attacker.pruneSucceeded(), "prune must not succeed inside unlock");
+        assertEq(
+            bytes4(attacker.lastRevert()),
+            IPositionRegistry.PoolManagerUnlocked.selector,
+            "refused with PoolManagerUnlocked"
+        );
+        assertTrue(registry.isTokenSubscribed(tokenId), "subscription intact");
+    }
+
+    /// @notice Outside an unlock, a healthy position in an allowlisted pool cannot be pruned by
+    ///         anyone, whatever the pool's aggregate liquidity or price is doing.
+    function test_pruneSubscription_healthyPositionNotPrunableByThirdParty() public {
+        createScript.runWithSigner(poolName, amount0Human, amount1Human, signer);
+        uint256 tokenId = seedScript.runWithSigner(poolName, amount0Human, amount1Human, 1000, signer);
+        vm.prank(signer);
+        IPositionManager(_positionManager()).subscribe(tokenId, address(subscriber), "");
+
+        vm.expectRevert(abi.encodeWithSelector(IPositionRegistry.NotPrunable.selector, tokenId));
+        vm.prank(makeAddr("thirdParty"));
+        registry.pruneSubscription(tokenId);
+    }
+
+    /// @notice A position in a pool TELx has not allowlisted cannot subscribe, however real and
+    ///         well-funded that pool is. This is what stops a private pool of attacker-issued tokens
+    ///         from filling the global subscriber cap for the cost of gas.
+    function test_subscribe_refusedForUnlistedPool() public {
+        createScript.runWithSigner(poolName, amount0Human, amount1Human, signer);
+        uint256 tokenId = seedScript.runWithSigner(poolName, amount0Human, amount1Human, 1000, signer);
+
+        TELxPools.PoolSpec memory s = TELxPools.spec(poolName);
+        vm.prank(admin);
+        registry.deregisterPool(TELxPools.poolKey(s).toId());
+
+        vm.expectRevert();
+        vm.prank(signer);
+        IPositionManager(_positionManager()).subscribe(tokenId, address(subscriber), "");
     }
 
     // -----------

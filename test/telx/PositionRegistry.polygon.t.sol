@@ -8,6 +8,9 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {TestConstants} from "../util/TestConstants.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
 
@@ -50,9 +53,32 @@ contract PositionRegistryPolygonTest is Test {
         assertEq(address(registry.stateView()), address(stateView), "stateView");
     }
 
-    function test_validPool_reflectsLivePoolState() public view {
-        assertTrue(registry.validPool(PoolId.wrap(POOL_ID_WETH_TEL)), "WETH/TEL pool is initialized");
-        assertTrue(registry.validPool(PoolId.wrap(POOL_ID_USDC_EMXN)), "USDC/eMXN pool is initialized");
+    /// @notice `validPool` needs both halves: the pool must be initialized on chain AND on the
+    ///         admin allowlist. A live, deep, initialized pool that TELx has not registered is
+    ///         not valid, which is what stops a private pool from filling the subscriber cap.
+    function test_validPool_requiresAllowlistAndInitialization() public {
+        PoolId wethTel = PoolId.wrap(POOL_ID_WETH_TEL);
+        PoolKey memory wethTelKey = PoolKey({
+            currency0: Currency.wrap(PolygonConstants.WETH),
+            currency1: Currency.wrap(PolygonConstants.TEL_V2),
+            fee: 3000,
+            tickSpacing: 60,
+            hooks: IHooks(PolygonConstants.TELX_LEGACY_HOOK_WETH_TEL)
+        });
+        assertEq(PoolId.unwrap(wethTelKey.toId()), POOL_ID_WETH_TEL, "sanity: key reconstructs the live poolId");
+
+        // initialized on chain, not yet allowlisted
+        assertFalse(registry.validPool(wethTel), "initialized but unlisted is not valid");
+
+        registry.registerPool(wethTelKey);
+        assertTrue(registry.validPool(wethTel), "allowlisted + initialized is valid");
+
+        // allowlisting cannot make an uninitialized pool valid
+        PoolKey memory ghost = wethTelKey;
+        ghost.fee = 100; // a fee tier nobody has opened this pair at
+        registry.registerPool(ghost);
+        assertFalse(registry.validPool(ghost.toId()), "allowlisted but uninitialized is not valid");
+
         assertFalse(registry.validPool(PoolId.wrap(keccak256("not-a-pool"))), "unknown pool is invalid");
     }
 

@@ -50,12 +50,16 @@ library PolygonConstants {
     address internal constant V4_POSITION_MANAGER = 0x1Ec2eBf4F37E7363FDfe3551602425af0B3ceef9;
 
     // ----------
-    // TELx pool IDs
+    // Legacy TELx v4 pools (TEL v2, hooked). Still live; not part of the TEL v3 pool set.
     // ----------
     bytes32 internal constant TELX_POOL_ID_USDC_EMXN =
         0x37dafec81119c7987538ac000b8a8a16a7f4daeecf91626efc9956ccd5146246;
     bytes32 internal constant TELX_POOL_ID_WETH_TEL =
         0x25412ca33f9a2069f0520708da3f70a7843374dd46dc1c7e62f6d5002f5f9fa7;
+    /// @dev Each legacy pool has its own mined TELxIncentiveHook; both addresses end in 0x2500,
+    ///      the permission bits for beforeInitialize + afterAddLiquidity + afterRemoveLiquidity.
+    address internal constant TELX_LEGACY_HOOK_WETH_TEL = 0xD77cC9230Ded5b6591730032975453744532a500;
+    address internal constant TELX_LEGACY_HOOK_USDC_EMXN = 0x13B979ecB3280bFf58A94B50ac6250f7Ca52a500;
 
     // ----------
     // Snapshot adaptors (deployed instances)

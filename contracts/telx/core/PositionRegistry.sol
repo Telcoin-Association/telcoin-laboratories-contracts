@@ -5,7 +5,9 @@ import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IPositionRegistry, PoolId} from "../interfaces/IPositionRegistry.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {IPositionManager, PoolKey, PositionInfo} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
@@ -14,15 +16,28 @@ import {IPositionManager, PoolKey, PositionInfo} from "@uniswap/v4-periphery/src
  * @title PositionRegistry
  * @author Robriks 📯️📯️📯️.eth
  * @notice Thin registry tracking which Uniswap v4 LP positions have opted into TELx governance.
- * @dev Following the removal of the TELxIncentiveHook, this contract is a subscription index
- *      plus a view layer over Uniswap's own PositionManager and StateView. It no longer stores
- *      liquidity, fee growth, reward balances, JIT/active/passive weights, or a pool registry:
- *      reward distribution is owned by Merkl, and the Snapshot strategy `uni-v4-telx-lp` reads
- *      the view functions below. The only state owned here is the per-LP / global subscription
- *      index that Uniswap v4 has no native enumerable equivalent for.
+ * @dev A subscription index plus a view layer over Uniswap's own PositionManager and StateView.
+ *      It stores no liquidity, fee growth or reward state; reward distribution is owned by Merkl,
+ *      and the Snapshot strategy `uni-v4-telx-lp` reads `getSubscriptions`. The only state owned
+ *      here is the per-LP / global subscription index that Uniswap v4 has no native enumerable
+ *      equivalent for, plus the admin allowlist of pools that count.
+ *
+ *      Two rules keep that state safe against anyone but the position's owner:
+ *
+ *      1. State-changing paths decide only on facts a third party cannot move: pool allowlisting,
+ *         position ownership, and whether the position has any liquidity at all. The pool's
+ *         aggregate liquidity and its current tick are never inputs to a write, because both can
+ *         be set to anything inside a single `PoolManager.unlock` for the cost of gas.
+ *      2. Every entry point that touches the index refuses to run while the PoolManager is
+ *         unlocked, mirroring `PositionManager.onlyIfPoolManagerLocked`. That closes the class of
+ *         flash-state attacks rather than any one instance of it.
+ *
+ *      Voting correctness never depended on the index being pruned: `getSubscriptions` filters
+ *      eligibility live at the read block. Removal from storage exists only to free cap slots.
  */
 contract PositionRegistry is IPositionRegistry, AccessControl {
     using SafeERC20 for IERC20;
+    using TransientStateLibrary for IPoolManager;
 
     // -----------
     // Roles
@@ -38,11 +53,12 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
     // -----------
 
     /// @notice Maximum subscriptions a single LP may hold.
-    /// @dev Raised from 100 to 1,000 after the V4-hook removal: the cap was a gas-safety bound on
-    ///      on-chain iteration over `subscriptions[owner]`, and no such iteration remains. The
-    ///      registry only ever performs O(1) swap-and-pop on this array. See INVARIANTS.md.
+    /// @dev A plain index bound. The registry only ever performs O(1) swap-and-pop on this array;
+    ///      the one linear path is the `getSubscriptions` view, which has a paginated overload.
     uint256 public constant MAX_SUBSCRIPTIONS = 1_000;
-    /// @notice Maximum distinct LPs in the global subscribed set.
+    /// @notice Maximum distinct LPs in the global subscribed set, across all pools.
+    /// @dev Global, not per pool. Filling it requires that many distinct owners each holding a
+    ///      live position in an allowlisted pool, which costs real capital rather than gas.
     uint256 public constant MAX_SUBSCRIBED = 50_000;
 
     // -----------
@@ -67,6 +83,12 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
     // Configuration
     // -----------
 
+    /// @inheritdoc IPositionRegistry
+    mapping(PoolId => bool) public poolAllowed;
+
+    /// @inheritdoc IPositionRegistry
+    mapping(PoolId => uint128) public minLiquidity;
+
     /// @notice Whether a position must be in range to be subscription-eligible. Defaults to true;
     ///         the admin can toggle it so the in-range gate can be relaxed without a redeploy.
     bool public inRangeRequired;
@@ -77,6 +99,8 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
 
     IPositionManager public immutable positionManager;
     StateView public immutable stateView;
+    /// @dev Read from `stateView` at construction; only used for the unlock check.
+    IPoolManager public immutable poolManager;
 
     /**
      * @param positionManager_ Uniswap v4 PositionManager, the source of truth for live position data.
@@ -87,7 +111,20 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         positionManager = positionManager_;
         stateView = stateView_;
+        poolManager = stateView_.poolManager();
         inRangeRequired = true;
+    }
+
+    // -----------
+    // Guards
+    // -----------
+
+    /// @dev Refuses to run inside a `PoolManager.unlock` callback. Inside one, a caller can add
+    ///      and remove arbitrary liquidity and move the price freely before settling, so any
+    ///      decision that reads pool state there is a decision the caller controls.
+    modifier whenPoolManagerLocked() {
+        if (poolManager.isUnlocked()) revert PoolManagerUnlocked();
+        _;
     }
 
     // -----------
@@ -95,15 +132,19 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
     // -----------
 
     /// @inheritdoc IPositionRegistry
-    function handleSubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) {
+    function handleSubscribe(uint256 tokenId) external onlyRole(SUBSCRIBER_ROLE) whenPoolManagerLocked {
+        // A repeated notification for an indexed token must not push a duplicate entry. Reachable
+        // only if a prior unsubscribe notification was swallowed by v4 while the registry was
+        // misconfigured; guarded regardless, since the corruption it would cause is permanent.
+        if (isTokenSubscribed[tokenId]) return;
+
         (PoolKey memory key, PositionInfo info) = positionManager.getPoolAndPositionInfo(tokenId);
         PoolId poolId = key.toId();
-        if (!validPool(poolId)) revert InvalidPool(poolId);
+        if (!poolAllowed[poolId]) revert PoolNotAllowed(poolId);
+        if (!_initialized(poolId)) revert PoolNotInitialized(poolId);
 
         uint128 currentLiquidity = positionManager.getPositionLiquidity(tokenId);
-        if (!_meetsSubscriptionThreshold(poolId, currentLiquidity)) {
-            revert LiquidityBelowThreshold(currentLiquidity);
-        }
+        if (!_meetsMinimum(poolId, currentLiquidity)) revert LiquidityBelowThreshold(currentLiquidity);
         // an out-of-range position provides no live liquidity; gated unless the admin disabled it
         if (inRangeRequired && !_isInRange(poolId, info)) revert OutOfRange(tokenId);
 
@@ -144,13 +185,17 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
     }
 
     /// @inheritdoc IPositionRegistry
-    function pruneSubscription(uint256 tokenId) external {
+    function pruneSubscription(uint256 tokenId) external whenPoolManagerLocked {
         if (!isTokenSubscribed[tokenId]) revert NotSubscribed(tokenId);
         address ownerOfRecord = subscriptionOwner[tokenId];
 
-        // prunable when the position was transferred or burned, or is no longer subscription-eligible
+        // Only position-local facts qualify. Ownership changes only on a transfer or burn the
+        // owner initiates; liquidity reaches zero only when the owner removes it. Neither the
+        // pool's aggregate liquidity nor its tick appears here, because a third party can set
+        // both to anything inside one unlock.
         bool transferredOrBurned = _ownerOf(tokenId) != ownerOfRecord;
-        if (!transferredOrBurned && _subscriptionEligible(tokenId)) revert NotPrunable(tokenId);
+        bool drained = positionManager.getPositionLiquidity(tokenId) == 0;
+        if (!transferredOrBurned && !drained) revert NotPrunable(tokenId);
 
         _removeSubscription(tokenId, ownerOfRecord);
     }
@@ -197,24 +242,37 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
     // -----------
 
     /// @inheritdoc IPositionRegistry
+    function subscriptionEligible(uint256 tokenId) public view returns (bool) {
+        return _subscriptionEligible(tokenId);
+    }
+
+    /// @dev Eligibility in a single pass: one PositionManager lookup feeds the allowlist, minimum
+    ///      liquidity and in-range checks. The in-range leg is skipped while `inRangeRequired` is
+    ///      disabled. This is a read-only judgement and the only place the live tick is consulted.
+    function _subscriptionEligible(uint256 tokenId) internal view returns (bool) {
+        (PoolKey memory key, PositionInfo info) = positionManager.getPoolAndPositionInfo(tokenId);
+        PoolId poolId = key.toId();
+        if (!poolAllowed[poolId]) return false;
+        if (!_meetsMinimum(poolId, positionManager.getPositionLiquidity(tokenId))) return false;
+        if (inRangeRequired && !_isInRange(poolId, info)) return false;
+        return true;
+    }
+
+    /// @inheritdoc IPositionRegistry
     function belowSubscriptionThreshold(uint256 tokenId) public view returns (bool) {
         (PoolKey memory key,) = positionManager.getPoolAndPositionInfo(tokenId);
-        uint128 liquidity = positionManager.getPositionLiquidity(tokenId);
-        return !_meetsSubscriptionThreshold(key.toId(), liquidity);
+        return !_meetsMinimum(key.toId(), positionManager.getPositionLiquidity(tokenId));
     }
 
     /**
-     * @dev A position meets the threshold when it holds at least 1bps (0.01%) of the pool's total
-     *      liquidity. Pools at or below 10,000 total liquidity accept any non-zero position.
+     * @dev A position qualifies when it holds any liquidity and at least the pool's admin-set
+     *      minimum. The minimum is absolute, so no third party can move a position across it. It
+     *      defaults to zero; the Snapshot strategy values positions in USD, so dust already votes
+     *      as dust and a floor is only needed if index bloat ever becomes a problem.
      */
-    function _meetsSubscriptionThreshold(PoolId poolId, uint128 positionLiquidity) internal view returns (bool) {
+    function _meetsMinimum(PoolId poolId, uint128 positionLiquidity) internal view returns (bool) {
         if (positionLiquidity == 0) return false;
-
-        uint128 totalLiquidity = stateView.getLiquidity(poolId);
-        if (totalLiquidity <= 10_000) return true;
-
-        uint128 subscriptionThreshold = totalLiquidity / 10_000;
-        return positionLiquidity >= subscriptionThreshold;
+        return positionLiquidity >= minLiquidity[poolId];
     }
 
     /// @inheritdoc IPositionRegistry
@@ -233,28 +291,17 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
         return info.tickLower() <= currentTick && currentTick < info.tickUpper();
     }
 
-    /// @inheritdoc IPositionRegistry
-    function subscriptionEligible(uint256 tokenId) public view returns (bool) {
-        return _subscriptionEligible(tokenId);
-    }
-
-    /// @dev Eligibility in a single pass: one PositionManager lookup feeds both the liquidity
-    ///      threshold and the in-range check. The in-range leg is skipped while `inRangeRequired`
-    ///      is disabled.
-    function _subscriptionEligible(uint256 tokenId) internal view returns (bool) {
-        (PoolKey memory key, PositionInfo info) = positionManager.getPoolAndPositionInfo(tokenId);
-        PoolId poolId = key.toId();
-        if (!_meetsSubscriptionThreshold(poolId, positionManager.getPositionLiquidity(tokenId))) return false;
-        if (inRangeRequired && !_isInRange(poolId, info)) return false;
-        return true;
-    }
-
     // -----------
     // Views
     // -----------
 
     /// @inheritdoc IPositionRegistry
     function validPool(PoolId id) public view returns (bool) {
+        return poolAllowed[id] && _initialized(id);
+    }
+
+    /// @dev A pool is initialized once it has a non-zero sqrtPriceX96.
+    function _initialized(PoolId id) internal view returns (bool) {
         (uint160 sqrtPriceX96,,,) = stateView.getSlot0(id);
         return sqrtPriceX96 != 0;
     }
@@ -289,23 +336,47 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
 
     /// @inheritdoc IPositionRegistry
     function getSubscriptions(address owner) external view returns (uint256[] memory) {
+        (uint256[] memory votable,) = _votable(owner, 0, subscriptions[owner].length);
+        return votable;
+    }
+
+    /// @inheritdoc IPositionRegistry
+    function getSubscriptions(address owner, uint256 offset, uint256 limit)
+        external
+        view
+        returns (uint256[] memory votable, uint256 total)
+    {
+        return _votable(owner, offset, limit);
+    }
+
+    /// @dev Filters `subscriptions[owner][offset, offset + limit)` to the currently votable set: a
+    ///      position still owned by `owner` and eligible. Clamps the window to the array.
+    function _votable(address owner, uint256 offset, uint256 limit)
+        internal
+        view
+        returns (uint256[] memory votable, uint256 total)
+    {
         uint256[] storage stored = subscriptions[owner];
-        uint256 len = stored.length;
-        uint256[] memory buffer = new uint256[](len);
+        total = stored.length;
+        if (offset >= total) return (new uint256[](0), total);
+
+        // compare before adding so a huge `limit` clamps instead of overflowing
+        uint256 remaining = total - offset;
+        uint256 end = limit >= remaining ? total : offset + limit;
+
+        uint256[] memory buffer = new uint256[](end - offset);
         uint256 count;
-        for (uint256 i; i < len; ++i) {
+        for (uint256 i = offset; i < end; ++i) {
             uint256 tokenId = stored[i];
-            // a votable position is still owned by `owner` and currently eligible
             if (_ownerOf(tokenId) == owner && _subscriptionEligible(tokenId)) {
                 buffer[count] = tokenId;
                 ++count;
             }
         }
-        uint256[] memory votable = new uint256[](count);
+        votable = new uint256[](count);
         for (uint256 i; i < count; ++i) {
             votable[i] = buffer[i];
         }
-        return votable;
     }
 
     /// @inheritdoc IPositionRegistry
@@ -345,9 +416,36 @@ contract PositionRegistry is IPositionRegistry, AccessControl {
     // -----------
 
     /// @inheritdoc IPositionRegistry
+    function registerPool(PoolKey calldata key) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        PoolId poolId = key.toId();
+        if (poolAllowed[poolId]) revert AlreadyRegistered(poolId);
+        poolAllowed[poolId] = true;
+        emit PoolRegistered(poolId, key);
+    }
+
+    /// @inheritdoc IPositionRegistry
+    function deregisterPool(PoolId poolId) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (!poolAllowed[poolId]) revert PoolNotAllowed(poolId);
+        poolAllowed[poolId] = false;
+        emit PoolDeregistered(poolId);
+    }
+
+    /// @inheritdoc IPositionRegistry
+    function setMinLiquidity(PoolId poolId, uint128 minLiquidity_) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        minLiquidity[poolId] = minLiquidity_;
+        emit MinLiquiditySet(poolId, minLiquidity_);
+    }
+
+    /// @inheritdoc IPositionRegistry
     function setInRangeRequired(bool required) external onlyRole(DEFAULT_ADMIN_ROLE) {
         inRangeRequired = required;
         emit InRangeRequiredSet(required);
+    }
+
+    /// @inheritdoc IPositionRegistry
+    function forceUnsubscribe(uint256 tokenId) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (!isTokenSubscribed[tokenId]) return;
+        _removeSubscription(tokenId, subscriptionOwner[tokenId]);
     }
 
     /// @inheritdoc IPositionRegistry

@@ -12,7 +12,9 @@ import {StateView} from "@uniswap/v4-periphery/src/lens/StateView.sol";
 import {PositionRegistry} from "../../../contracts/telx/core/PositionRegistry.sol";
 import {TELxSubscriber} from "../../../contracts/telx/core/TELxSubscriber.sol";
 import {IPositionRegistry} from "../../../contracts/telx/interfaces/IPositionRegistry.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Salts} from "../../shared/Salts.sol";
+import {TELxPools} from "../../shared/TELxPools.sol";
 import {TELxRegistryScriptBase} from "./TELxRegistryScriptBase.sol";
 
 /**
@@ -30,9 +32,15 @@ import {TELxRegistryScriptBase} from "./TELxRegistryScriptBase.sol";
  *         deployer and the salt. That is worth preserving deliberately: the Snapshot strategy and
  *         every downstream integration then carry one address instead of three.
  *
- *         Everything for a chain goes out as a single MultiSend so the registry can never be live
- *         with the subscriber unwired. A half-applied batch is not possible; a rejected one leaves
- *         nothing behind.
+ *         Everything for a chain goes out as a single MultiSend: both deploys, both role grants,
+ *         and one `registerPool` per catalog pool on that chain. The registry can never be live
+ *         with the subscriber unwired or with an empty allowlist. A half-applied batch is not
+ *         possible; a rejected one leaves nothing behind.
+ *
+ *         The governance Safe is both the registry admin and the subscriber owner. `setRegistry`
+ *         repoints every LP subscription, which is a governance decision, and governance holding
+ *         both ends means it can always recover a misconfiguration. Ops holds SUPPORT_ROLE on the
+ *         registry for token rescue and nothing else.
  *
  *         Because the Safe executes the batch out of band, this script cannot check the resulting
  *         on-chain state the way an EOA script would after `vm.stopBroadcast`. That is what
@@ -51,6 +59,7 @@ abstract contract BaseDeployTELxRegistry is TELxRegistryScriptBase {
     bytes[] internal _batchDatas;
 
     error MissingSupportSafe(string chain);
+    error DeployerIsNotAdmin(address deployerSafe, address admin);
 
     // -----------
     // Entry point
@@ -60,7 +69,11 @@ abstract contract BaseDeployTELxRegistry is TELxRegistryScriptBase {
         // The address record is written after the batch is proposed, and `vm.writeJson` cannot
         // create a missing directory. Guarantee it up front so the one failure mode this could have
         // - a proposal that went out but whose addresses were never recorded - cannot happen.
-        vm.createDir(string.concat(vm.projectRoot(), "/deployments"), true);
+        // Only on a real broadcast: simulation writes nothing, and `createDir` needs filesystem
+        // write permission that only the deploy profile grants.
+        if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) {
+            vm.createDir(string.concat(vm.projectRoot(), "/deployments"), true);
+        }
 
         for (uint256 i; i < allChains.length; ++i) {
             ChainTarget memory target = allChains[i];
@@ -80,9 +93,14 @@ abstract contract BaseDeployTELxRegistry is TELxRegistryScriptBase {
     // -----------
 
     function _deployOnChain(ChainTarget memory target) internal {
-        // Without a support multisig the batch would grant SUPPORT_ROLE to nobody and hand the
-        // subscriber to address(0), permanently freezing its registry pointer. Fail instead.
+        // Without a support multisig the batch would grant SUPPORT_ROLE to nobody. Fail instead.
         if (target.supportSafe == address(0)) revert MissingSupportSafe(target.name);
+
+        // The CREATE3 salt is guarded with the env-supplied DEPLOYER_SAFE_ADDRESS while the role
+        // grants and ownership go to the constant governance Safe. A stray .env would put the
+        // contracts at a different address from the one every doc and test predicts, with the
+        // grants still pointed at governance; refuse rather than propose that.
+        if (deployerSafeAddress != target.admin) revert DeployerIsNotAdmin(deployerSafeAddress, target.admin);
 
         address registry = _addCreate3ToBatch(
             Salts.TELX_POSITION_REGISTRY,
@@ -97,22 +115,41 @@ abstract contract BaseDeployTELxRegistry is TELxRegistryScriptBase {
             Salts.TELX_SUBSCRIBER,
             bytes.concat(
                 type(TELxSubscriber).creationCode,
-                abi.encode(IPositionRegistry(registry), target.positionManager, target.supportSafe)
+                abi.encode(IPositionRegistry(registry), target.positionManager, target.admin)
             ),
             "Deploy TELxSubscriber"
         );
 
-        // Role grants ride in the same batch. The admin is the Safe itself, so it can grant inside
-        // the very transaction that creates the registry.
+        // Role grants and pool registrations ride in the same batch. The admin is the Safe itself,
+        // so it can grant and register inside the very transaction that creates the registry.
         _batchTargets.push(registry);
         _batchDatas.push(abi.encodeCall(IAccessControl.grantRole, (keccak256("SUBSCRIBER_ROLE"), subscriber)));
         _batchTargets.push(registry);
         _batchDatas.push(abi.encodeCall(IAccessControl.grantRole, (keccak256("SUPPORT_ROLE"), target.supportSafe)));
 
+        // Allowlist the chain's catalog pools. Registration is by PoolKey and needs no on-chain
+        // state, so pools can be registered before they are created; a subscription still needs
+        // the pool initialized, which the registry checks separately.
+        string[] memory names = TELxPools.allNames();
+        uint256 registered;
+        for (uint256 i; i < names.length; ++i) {
+            TELxPools.PoolSpec memory spec = TELxPools.spec(names[i]);
+            if (spec.chainId != target.chainId) continue;
+            if (registry.code.length > 0 && IPositionRegistry(registry).poolAllowed(TELxPools.poolKey(spec).toId())) {
+                console.log("  [batch] %s already allowlisted, skipping", names[i]);
+                continue;
+            }
+            _batchTargets.push(registry);
+            _batchDatas.push(abi.encodeCall(IPositionRegistry.registerPool, (TELxPools.poolKey(spec))));
+            console.log("  [batch] registerPool %s", names[i]);
+            ++registered;
+        }
+
         _flushBatch(string.concat("Deploy + wire TELx registry on ", target.name));
 
         console.log("  PositionRegistry: %s", registry);
         console.log("  TELxSubscriber:   %s", subscriber);
+        console.log("  Pools registered: %s", vm.toString(registered));
 
         if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) {
             _saveDeploymentAddress(target.name, "PositionRegistry", registry);
