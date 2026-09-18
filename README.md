@@ -37,25 +37,25 @@ git config core.longpaths true
 Fork tests require RPC endpoints. Three naming patterns are in use:
 
 - `test/**/*.polygon.t.sol` - Polygon-mainnet fork tests for production contracts
-- `test/**/*.fork.t.sol` - deploy-script fork tests under `test/script/` (all currently use a Polygon fork)
+- `test/**/*.fork.t.sol` - deploy-script fork tests under `test/script/` (Polygon, and Base for the TELx pool and registry suites)
 - Any contract whose name matches `*Fork*` (e.g. `CouncilMemberForkTest`, `DeployBalancerAdaptorForkTest`)
 
-Copy `.env.example` → `.env` (or create one) with:
+Copy `.env.example` to `.env` (or create one) with:
 
 ```
 ETHEREUM_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/<key>
 POLYGON_RPC_URL=https://polygon-mainnet.g.alchemy.com/v2/<key>
 BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/<key>
-SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/<key>
 ```
 
-Suites that need a chain nobody else uses skip themselves when the URL is unset rather than
-failing, so a missing `ETHEREUM_RPC_URL` costs coverage but not a red build.
-
-Foundry auto-loads `.env`. To skip **every** fork test - all our fork test contract names end in either `Fork` or `Polygon`, so a single regex covers them all:
+Every fork suite reads its URL through `test/util/ForkOrSkip.sol`, which forks when the variable
+is set and skips the suite when it is not. A missing URL therefore costs coverage, never a red
+build, and `forge test` is the right command with or without RPC access. To run without any fork
+test, set the variables to the empty string on the command line; Foundry auto-loads `.env`, so
+unsetting them in the shell is not enough:
 
 ```shell
-forge test --no-match-contract "(Fork|Polygon)"
+POLYGON_RPC_URL= BASE_RPC_URL= ETHEREUM_RPC_URL= forge test
 ```
 
 ### Running subsets of the test suite
@@ -235,7 +235,7 @@ This section exists to give LLM tooling enough context to work productively in t
 **Key conventions**
 - Solidity `^0.8.24`, EVM `cancun`, optimizer 200 runs (`foundry.toml`).
 - `forge fmt` line length 120, tab width 4.
-- Tests end in `.t.sol`. Fork tests: file suffix `.polygon.t.sol` (production-contract Polygon forks), file suffix `.fork.t.sol` (deploy-script forks under `test/script/`), or contract name containing `Fork`. All require `POLYGON_RPC_URL`; `BASE_RPC_URL` and `SEPOLIA_RPC_URL` are used selectively.
+- Tests end in `.t.sol`. Fork tests: file suffix `.polygon.t.sol` (production-contract Polygon forks), file suffix `.fork.t.sol` (deploy-script forks under `test/script/`), or contract name containing `Fork`. Every fork suite forks through `test/util/ForkOrSkip.sol` and skips itself when its RPC variable is unset; most need `POLYGON_RPC_URL`, the TELx pool and registry suites also run on `BASE_RPC_URL`, and the Ethereum address checks need `ETHEREUM_RPC_URL`.
 - Scripts live in `script/` (Foundry convention - not `scripts/`). Any import referring to `scripts/...` is a porting mistake.
 - Imports use the npm-style aliases (`@openzeppelin/...`, `@uniswap/...`, `@sablier/...`, `@prb/...`) resolved by `remappings.txt` to `lib/` submodules.
 - Upgradeable contracts follow the OpenZeppelin proxy pattern; see `script/sablier/UpgradeCouncilMember.s.sol` for the upgrade flow.

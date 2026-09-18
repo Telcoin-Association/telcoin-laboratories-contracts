@@ -36,14 +36,13 @@ jobs:
         # by PRs from forks, so adding keys here is safe on a public repo.
         run: |
           if [ -z "${POLYGON_RPC_URL}" ]; then
-            echo "::notice::RPC secrets not configured; fork suites will skip themselves. Add ETHEREUM_RPC_URL, POLYGON_RPC_URL, BASE_RPC_URL and SEPOLIA_RPC_URL repo secrets to run the full suite."
+            echo "::notice::RPC secrets not configured; fork suites will skip themselves. Add ETHEREUM_RPC_URL, POLYGON_RPC_URL and BASE_RPC_URL repo secrets to run the full suite."
           fi
           forge test -vvv
         env:
           ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
           POLYGON_RPC_URL: ${{ secrets.POLYGON_RPC_URL }}
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
-          SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
 
       - name: Coverage
         # The production contracts the TELx migration deploys must stay at 100% on every axis
@@ -65,4 +64,3 @@ jobs:
           ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
           POLYGON_RPC_URL: ${{ secrets.POLYGON_RPC_URL }}
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
-          SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
