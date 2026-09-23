@@ -171,7 +171,7 @@ contract CreateCouncilNftsAndStreams is Script {
         // 1. Approve TEL to the lockup contract (funder must be msg.sender)
         tel.approve(address(lockupLinear), totalAmount);
 
-        // 2. Durations – 1 year, no cliff
+        // 2. Durations - 1 year, no cliff
         LockupLinear.Durations memory durations = LockupLinear.Durations({
             cliff: 0,
             total: 52 weeks
@@ -196,7 +196,7 @@ contract CreateCouncilNftsAndStreams is Script {
                 broker: broker
             });
 
-        // 5. Create the stream – this pulls `totalAmount` TEL from msg.sender
+        // 5. Create the stream - this pulls `totalAmount` TEL from msg.sender
         streamId = lockupLinear.createWithDurations(params);
     }
 
@@ -312,7 +312,7 @@ contract CreateCouncilNftsAndStreams is Script {
         councilConfigs[5].members = members5;
     }
 
-    /// @notice Production entry point – resolves the signer from env and
+    /// @notice Production entry point - resolves the signer from env and
     ///         delegates to `runWithSigner`.
     function run() external {
         address sablierSender; // the deployer address for this script context

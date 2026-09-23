@@ -3,37 +3,27 @@ pragma solidity ^0.8.24;
 
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {Checkpoints} from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+/**
+ * @title IPositionRegistry
+ * @notice External surface of the thin TELx PositionRegistry.
+ * @dev The registry is a subscription index plus a small view layer over Uniswap's own
+ *      PositionManager and StateView. It stores no liquidity, fee growth or reward state; reward
+ *      distribution is owned by Merkl, and the Snapshot strategy reads `getSubscriptions`.
+ *
+ *      Everything the registry decides is decided from facts a third party cannot move: whether a
+ *      pool is on the admin allowlist, who owns a position, and whether that position has any
+ *      liquidity at all. The pool's aggregate liquidity and the current tick are deliberately not
+ *      inputs to any state-changing path, because both can be set to anything inside a single
+ *      `PoolManager.unlock` for the cost of gas.
+ */
 interface IPositionRegistry {
-    /// @notice Checkpoint structure for fee growth data
-    struct FeeGrowthCheckpoint {
-        int128 feeGrowth0;
-        int128 feeGrowth1;
-    }
+    // -----------
+    // Structs
+    // -----------
 
-    /// @notice Checkpoint metadata for better searchability offchain
-    struct CheckpointMetadata {
-        uint48 firstCheckpoint;
-        uint48 lastCheckpoint;
-        uint48 totalCheckpoints;
-    }
-
-    /// @notice Struct to represent a tracked LP position
-    struct Position {
-        address owner;
-        PoolId poolId;
-        int24 tickLower;
-        int24 tickUpper;
-        /// @notice History of positions' liquidity + feeGrowth checkpoints
-        /// @dev Since Trace208 array is unbounded it can grow beyond EVM memory limits
-        /// do not load into EVM memory; consume events offchain instead and fall back to loading slots if needed
-        Checkpoints.Trace208 liquidityModifications;
-        mapping(uint48 => FeeGrowthCheckpoint) feeGrowthCheckpoints;
-    }
-
-    /// @notice Struct to represent positions with more granular multipool data for external consumption
+    /// @notice Position data with multipool detail, assembled live for off-chain consumption.
     struct PositionDetails {
         address owner;
         PoolId poolId;
@@ -43,176 +33,241 @@ interface IPositionRegistry {
         PoolKey poolKey;
     }
 
-    /// @notice Emitted when a position is added or its liquidity is modified
-    event PositionUpdated(
-        uint256 indexed tokenId,
-        address indexed owner,
-        PoolId indexed poolId,
-        int24 tickLower,
-        int24 tickUpper,
-        uint128 liquidity
-    );
+    // -----------
+    // Events
+    // -----------
 
-    /// @notice Emitted when a user successfully claims their reward
-    event RewardsClaimed(address indexed owner, uint256 amount);
-
-    /// @notice Emitted when a router's trust status is updated.
-    event RouterRegistryUpdated(address indexed router, bool listed);
-
-    /// @notice Emitted when the TEL token position is updated for a pool.
-    event PoolInitialized(PoolKey indexed poolKey);
-
-    /// @notice Emitted when the weight configuration is updated
-    event WeightsConfigured(uint256 minPassiveLifetime, uint256 jitWeight, uint256 activeWeight, uint256 passiveWeight);
-
-    /// @notice Emitted at each liquidity modification for offchain consumption
-    event Checkpoint(
-        uint256 indexed tokenId,
-        PoolId indexed poolId,
-        uint256 indexed checkpointIndex,
-        int128 feeGrowthInside0X128,
-        int128 feeGrowthInside1X128
-    );
-
-    /// @notice Emitted when a token is subscribed
+    /// @notice Emitted when a position opts into the TELx subscription index.
     event Subscribed(uint256 indexed tokenId, address indexed owner);
 
-    /// @notice Emitted when a subscription is removed
+    /// @notice Emitted when a subscription is removed from the index, by any path.
     event Unsubscribed(uint256 indexed tokenId, address indexed owner);
 
-    error Untracked(uint256 tokenId);
-    error InvalidPool(PoolId poolId);
+    /// @notice Emitted when the admin adds a pool to the allowlist.
+    event PoolRegistered(PoolId indexed poolId, PoolKey key);
+
+    /// @notice Emitted when the admin removes a pool from the allowlist.
+    event PoolDeregistered(PoolId indexed poolId);
+
+    /// @notice Emitted when the admin sets a pool's absolute minimum position liquidity.
+    event MinLiquiditySet(PoolId indexed poolId, uint128 minLiquidity);
+
+    /// @notice Emitted when the admin toggles the in-range subscription requirement.
+    event InRangeRequiredSet(bool required);
+
+    // -----------
+    // Errors
+    // -----------
+
+    error ZeroAddress();
+    error NotAContract(address target);
+    error PoolManagerUnlocked();
+    error PoolNotAllowed(PoolId poolId);
+    error PoolNotInitialized(PoolId poolId);
+    error AlreadyRegistered(PoolId poolId);
     error LiquidityBelowThreshold(uint128 currentLiquidity);
+    error OutOfRange(uint256 tokenId);
     error MaxSubscriptions();
     error MaxSubscribed();
-    error ArityMismatch();
-    error AmountMismatch();
-    error NoClaimableRewards();
-    error OnlyAdmin();
-    error AlreadyInitialized();
+    error NotSubscribed(uint256 tokenId);
+    error NotPrunable(uint256 tokenId);
+    error NotSubscribedOnUniswap(uint256 tokenId);
+
+    // -----------
+    // Subscription lifecycle (subscriber-gated)
+    // -----------
 
     /**
-     * @notice Updates the stored index of TEL in a specific Uniswap V4 pool.
-     * @dev Only callable by the TELxIncentiveHook which possesses `UNI_HOOK_ROLE`
-     * @dev Must be initiated by an admin as `tx.origin`
-     */
-    function initialize(address sender, PoolKey calldata key) external;
-
-    /**
-     * @notice Adds or removes a router from the trusted routers registry.
-     * @dev Only callable by an address with SUPPORT_ROLE.
-     * @param router The router address to update.
-     * @param listed Whether the router should be marked as trusted.
-     */
-    function updateRouter(address router, bool listed) external;
-
-    /**
-     * @notice Called by Uniswap hook to add or remove tracked liquidity
-     * @param tokenId The identifier of the position to remove.
-     * @param poolId Target pool
-     * @param liquidityDelta Change in liquidity (positive = add, negative = remove)
-     * @param feeGrowth0 Currency0 fees accrued since the last time fees were collected from this position
-     * @param feeGrowth1 Currency1 fees accrued since the last time fees were collected from this position
-     */
-    function addOrUpdatePosition(
-        uint256 tokenId,
-        PoolId poolId,
-        int128 liquidityDelta,
-        int128 feeGrowth0,
-        int128 feeGrowth1
-    ) external;
-
-    /**
-     * @notice Registers a position's ownership using the NFT tokenId.
-     * @dev Must be invoked during hooks by an address with SUBSCRIBER_ROLE, such as TELxSubscriber
-     * @dev LP position ownership has been guaranteed but may need to be updated if appropriate
-     * @dev LPs must subscribe to become eligible for TELx incentives
+     * @notice Records a position's opt-in to the TELx subscription index.
+     * @dev Callable only by an address holding SUBSCRIBER_ROLE, i.e. TELxSubscriber, and only
+     *      while the PoolManager is locked. Reverts if the position's pool is not on the allowlist
+     *      or not initialized, the position has no liquidity or less than the pool's minimum, it is
+     *      out of range while `inRangeRequired` is set, or either cap is reached. A tokenId that is
+     *      already indexed under its current owner is a no-op, so a repeated notification can never
+     *      corrupt the index; one indexed under a previous owner is re-indexed under the current
+     *      one, so a stale record can never block a new owner's opt-in.
      */
     function handleSubscribe(uint256 tokenId) external;
 
     /**
-     * @notice Deregisters a subscription, requiring re-subscription to re-join the program
-     * @dev Invoked during v4 unsubscription hooks by TELxSubscriber
-     * @dev Removes `tokenId` from `subscription` ledger and from the `subscribed` array
+     * @notice Removes a position from the subscription index.
+     * @dev Callable only by SUBSCRIBER_ROLE. No-op if `tokenId` is not currently subscribed,
+     *      so it can never revert a Uniswap v4 transfer/unsubscribe notification.
      */
     function handleUnsubscribe(uint256 tokenId) external;
 
     /**
-     * @notice Permanently deregisters a subscription and untracks its position
-     * @dev Invoked during v4 burn hooks by TELxSubscriber
-     * @dev Removes `tokenId` from `subscription` ledger and from the `subscribed` array
-     * and marks the position as untracked to be permanently ignored
+     * @notice Removes a burned position from the subscription index.
+     * @dev Callable only by SUBSCRIBER_ROLE. Behaves identically to `handleUnsubscribe`; the
+     *      separate entry point is retained for v4 burn-notification clarity and ABI stability.
      */
     function handleBurn(uint256 tokenId, address owner) external;
 
+    // -----------
+    // Permissionless cleanup
+    // -----------
+
     /**
-     * @notice Computes currency0 & currency1 amounts for given liquidity at current tick price
-     * @dev Exposes Uniswap V3/V4 concentrated liquidity math publicly for TELx frontend use
+     * @notice Removes a stale subscription entry. Callable by anyone, only while the PoolManager
+     *         is locked.
+     * @dev Prunes `tokenId` only on facts nobody but the position's owner can change: the position
+     *      has been transferred or burned (live owner no longer matches the subscriber of record),
+     *      or its liquidity is zero. The pool's aggregate liquidity and current tick are not
+     *      consulted, so no third party can make a healthy position prunable.
+     *      Reverts `NotSubscribed` if the token is not subscribed and `NotPrunable` otherwise.
+     */
+    function pruneSubscription(uint256 tokenId) external;
+
+    /**
+     * @notice Re-indexes a position that Uniswap v4 still has subscribed to a SUBSCRIBER_ROLE
+     *         holder but that this index no longer records. Callable by anyone, only while the
+     *         PoolManager is locked.
+     * @dev The index can fall behind v4 in two ways: a drained position is pruned and later
+     *      refilled, or a stale entry survives a swallowed unsubscribe notification. v4 refuses a
+     *      second `subscribe` for a position it already considers subscribed, so without this
+     *      entry point the owner's only recovery would be to unsubscribe and subscribe again.
+     *      Applies exactly the checks `handleSubscribe` applies; the v4-side subscription is read
+     *      from the PositionManager and must belong to a holder of SUBSCRIBER_ROLE on this
+     *      registry, so nothing can be indexed here that v4 has not opted in.
+     */
+    function resubscribe(uint256 tokenId) external;
+
+    // -----------
+    // Views
+    // -----------
+
+    /**
+     * @notice Returns whether `tokenId` currently satisfies subscription eligibility: its pool is
+     *         allowlisted and initialized, it holds at least the pool's minimum liquidity (and more
+     *         than zero), and, when `inRangeRequired` is enabled, it is in range.
+     * @dev This is what `getSubscriptions` filters on. The in-range leg reads the live tick and is
+     *      therefore movable at the read block by anyone willing to hold price there; that is the
+     *      accepted property of concentrated liquidity (an out-of-range position genuinely provides
+     *      none), and it affects reads only, never storage.
+     */
+    function subscriptionEligible(uint256 tokenId) external view returns (bool);
+
+    /// @notice Returns whether `tokenId`'s liquidity is zero or below its pool's minimum.
+    function belowSubscriptionThreshold(uint256 tokenId) external view returns (bool);
+
+    /**
+     * @notice Returns whether `tokenId` is currently in range: the pool's current tick sits within
+     *         the position's [tickLower, tickUpper).
+     * @dev Reports the position's geometric state regardless of whether `inRangeRequired` is
+     *      enabled, so off-chain consumers can always apply their own in-range filter.
+     */
+    function isInRange(uint256 tokenId) external view returns (bool);
+
+    /// @notice Returns whether a position must be in range to be subscription-eligible.
+    function inRangeRequired() external view returns (bool);
+
+    /// @notice Returns whether `poolId` is on the admin allowlist.
+    function poolAllowed(PoolId poolId) external view returns (bool);
+
+    /// @notice Returns the admin-set minimum position liquidity for `poolId`. Zero means "any".
+    function minLiquidity(PoolId poolId) external view returns (uint128);
+
+    /**
+     * @notice Returns whether a pool is both allowlisted and initialized on chain.
+     * @dev Allowlisting is the TELx decision; initialization is the Uniswap fact. Both are needed
+     *      for a subscription to mean anything.
+     */
+    function validPool(PoolId id) external view returns (bool);
+
+    /**
+     * @notice Computes currency0 & currency1 amounts for given liquidity at the current tick price.
+     * @dev Exposes Uniswap V3/V4 concentrated-liquidity math publicly for TELx frontend use.
      */
     function getAmountsForLiquidity(PoolId poolId, uint128 liquidity, int24 tickLower, int24 tickUpper)
         external
         view
         returns (uint256 amount0, uint256 amount1, uint160 sqrtPriceX96);
 
-    /// @notice Returns position metadata for a given tokenId
+    /// @notice Returns position ownership and range, read live from the V4 PositionManager.
     function getPosition(uint256 tokenId)
         external
         view
         returns (address owner, PoolId poolId, int24 tickLower, int24 tickUpper);
 
-    /// @notice Returns position with more granular multipool data for external consumption
+    /// @notice Returns position detail with multipool data, read live from the V4 PositionManager.
     function getPositionDetails(uint256 tokenId) external view returns (PositionDetails memory);
 
-    /// @notice Returns position's last recorded liquidity
+    /// @notice Returns a position's current liquidity, read live from the V4 PositionManager.
     function getLiquidityLast(uint256 tokenId) external view returns (uint128);
 
-    /**
-     * @notice Returns whether a router is in the trusted routers list.
-     * @dev Used to determine if a router can be queried for the actual msg.sender.
-     */
-    function isActiveRouter(address router) external view returns (bool);
-
-    /**
-     * @notice Returns whether a given PoolId is known by this contract
-     * @dev A PoolId is considered valid if it has been initialized with a currency pair.
-     * @param id The unique identifier for the Uniswap V4 pool.
-     * @return True if the pool has a non-zero currency0 or currency1 address.
-     */
-    function validPool(PoolId id) external view returns (bool);
-
-    /// @notice Returns the list of all addresses that have active subscriptions
+    /// @notice Returns the list of all addresses that have active subscriptions.
+    /// @dev Up to MAX_SUBSCRIBED entries. For off-chain `eth_call` only; use the paginated form for
+    ///      anything that batches.
     function getSubscribed() external view returns (address[] memory);
 
-    /// @notice Returns tokenIds for an owner that have been subscribed
+    /// @notice Returns `subscribed[offset, offset + limit)` clamped to the set, and the set's size.
+    function getSubscribed(uint256 offset, uint256 limit) external view returns (address[] memory page, uint256 total);
+
+    /**
+     * @notice Returns an owner's currently votable subscribed tokenIds: those still owned by
+     *         `owner` and satisfying `subscriptionEligible`. Evaluated live against the call's
+     *         block, so a pinned-block read returns exactly the set eligible for voting power at
+     *         that block. The Snapshot strategy consumes this directly.
+     * @dev Linear in the owner's stored subscriptions, with several external reads per entry. For
+     *      an owner near `MAX_SUBSCRIPTIONS` use the paginated overload.
+     */
     function getSubscriptions(address owner) external view returns (uint256[] memory);
-    /**
-     * @notice Adds batch rewards for many users in a specific block round
-     * @param lps LP addresses
-     * @param amounts Reward values per address
-     * @param totalAmount Sum of all `amounts`
-     */
-    function addRewards(address[] calldata lps, uint256[] calldata amounts, uint256 totalAmount) external;
 
     /**
-     * @notice Allows users to claim their earned rewards
+     * @notice Paginated form of `getSubscriptions`: filters the stored entries in
+     *         `[offset, offset + limit)` and reports the total stored count so callers can iterate.
+     * @dev Filtering happens after slicing, so a page can return fewer than `limit` entries while
+     *      more pages remain; iterate until `offset + limit >= total`.
      */
-    function claim() external;
+    function getSubscriptions(address owner, uint256 offset, uint256 limit)
+        external
+        view
+        returns (uint256[] memory votable, uint256 total);
+
+    /// @notice Returns an owner's full stored subscription set, unfiltered. For ops and prune bots.
+    function getSubscriptionsRaw(address owner) external view returns (uint256[] memory);
+
+    /// @notice Returns whether `tokenId` is currently in the subscription index.
+    function isTokenSubscribed(uint256 tokenId) external view returns (bool);
+
+    // -----------
+    // Administration
+    // -----------
+
+    /// @notice Adds a pool to the allowlist. Gated to DEFAULT_ADMIN_ROLE.
+    function registerPool(PoolKey calldata key) external;
+
+    /// @notice Removes a pool from the allowlist and clears its liquidity floor. Gated to
+    ///         DEFAULT_ADMIN_ROLE. Existing subscriptions in that pool stop being eligible but are
+    ///         not evicted.
+    function deregisterPool(PoolId poolId) external;
 
     /**
-     * @notice Gets unclaimed reward balance for a user
+     * @notice Sets a pool's absolute minimum position liquidity. Gated to DEFAULT_ADMIN_ROLE.
+     * @dev This is what makes a cap slot cost capital. With a zero floor, a position of liquidity
+     *      1 in an allowlisted pool costs a wei of each token and holds a slot in the global set;
+     *      with a floor sized so that the narrowest in-range position is worth a chosen amount,
+     *      every slot held at once locks at least that much. The deploy batch sets one for every
+     *      catalog pool and refuses to go out without.
      */
-    function getUnclaimedRewards(address user) external view returns (uint256);
+    function setMinLiquidity(PoolId poolId, uint128 minLiquidity_) external;
 
-    /// @notice Configures JIT | Active | Passive lifetimes and weights for offchain consumption
-    function configureWeights(
-        uint256 minPassiveLifetime,
-        uint256 jitWeight,
-        uint256 activeWeight,
-        uint256 passiveWeight
-    ) external;
+    /// @notice Toggles whether a position must be in range to be subscription-eligible.
+    /// @dev Gated to DEFAULT_ADMIN_ROLE.
+    function setInRangeRequired(bool required) external;
 
     /**
-     * @notice Admin function to recover ERC20 tokens sent to contract in error
+     * @notice Removes any subscription from the index regardless of its state. Gated to
+     *         DEFAULT_ADMIN_ROLE.
+     * @dev The backstop for an index entry that should never have existed. No-op if the token is
+     *      not subscribed.
      */
+    function forceUnsubscribe(uint256 tokenId) external;
+
+    /// @notice `forceUnsubscribe` over many tokenIds in one call, so a filled cap can be cleared in
+    ///         one Safe transaction rather than one per entry. Gated to DEFAULT_ADMIN_ROLE.
+    function forceUnsubscribeBatch(uint256[] calldata tokenIds) external;
+
+    /// @notice Recovers ERC20 tokens sent to the contract in error. Gated to SUPPORT_ROLE.
     function erc20Rescue(IERC20 token, address destination, uint256 amount) external;
 }

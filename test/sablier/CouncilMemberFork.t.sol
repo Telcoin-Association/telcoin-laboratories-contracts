@@ -11,6 +11,7 @@ import {TestSablierV2Lockup} from "../../contracts/sablier/test/TestSablierV2Loc
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
 import {RevertingLockup} from "./mocks/RevertingLockup.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /**
  * @title CouncilMemberForkTest
@@ -28,7 +29,7 @@ contract CouncilMemberForkTest is Test {
     // ---------
 
     // Local alias for shared mainnet address (see test/util/PolygonConstants.sol).
-    address internal constant TEL_ADDRESS = PolygonConstants.TEL;
+    address internal constant TEL_ADDRESS = PolygonConstants.TEL_V2;
 
     bytes32 internal constant GOVERNANCE_COUNCIL_ROLE =
         keccak256("GOVERNANCE_COUNCIL_ROLE");
@@ -63,7 +64,7 @@ contract CouncilMemberForkTest is Test {
     // -----
 
     function setUp() public {
-        forkId = vm.createSelectFork(vm.envString("POLYGON_RPC_URL"));
+        forkId = ForkOrSkip.select("POLYGON_RPC_URL");
 
         telcoin = IERC20(TEL_ADDRESS);
 
@@ -840,7 +841,7 @@ contract CouncilMemberForkTest is Test {
 
         assertEq(councilMemberContract.balances(0), 100);
 
-        // Second retrieve in same block — withdrawableAmountOf returns 0, should be a no-op
+        // Second retrieve in same block - withdrawableAmountOf returns 0, should be a no-op
         vm.prank(admin);
         councilMemberContract.retrieve();
 
@@ -883,7 +884,7 @@ contract CouncilMemberForkTest is Test {
             ISablierV2Lockup(address(badLockup))
         );
 
-        // claim() calls _retrieve() internally — should also revert
+        // claim() calls _retrieve() internally - should also revert
         vm.prank(member1);
         vm.expectRevert();
         councilMemberContract.claim(0, 0);
@@ -902,7 +903,7 @@ contract CouncilMemberForkTest is Test {
             ISablierV2Lockup(address(badLockup))
         );
 
-        // mint() calls _retrieve() internally — should also revert
+        // mint() calls _retrieve() internally - should also revert
         vm.prank(admin);
         vm.expectRevert();
         councilMemberContract.mint(member2);
@@ -923,7 +924,7 @@ contract CouncilMemberForkTest is Test {
             ISablierV2Lockup(address(badLockup))
         );
 
-        // burn() calls _retrieve() via _update() — should also revert
+        // burn() calls _retrieve() via _update() - should also revert
         vm.prank(admin);
         vm.expectRevert();
         councilMemberContract.burn(0, admin);

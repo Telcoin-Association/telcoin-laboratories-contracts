@@ -27,10 +27,7 @@ abstract contract RewardsDistributionRecipient is Ownable {
      * @dev If the function is called by any address other than the rewards distribution contract, the transaction is reverted.
      */
     modifier onlyRewardsDistribution() {
-        require(
-            _msgSender() == rewardsDistribution,
-            "Caller is not RewardsDistribution contract"
-        );
+        require(_msgSender() == rewardsDistribution, "Caller is not RewardsDistribution contract");
         _;
     }
 
@@ -39,14 +36,9 @@ abstract contract RewardsDistributionRecipient is Ownable {
      * @dev Can only be called by the owner of the contract. Updates the rewardsDistribution address.
      * @param rewardsDistribution_ The address of the new rewards distribution contract
      */
-    function setRewardsDistribution(
-        address rewardsDistribution_
-    ) external onlyOwner {
+    function setRewardsDistribution(address rewardsDistribution_) external onlyOwner {
         //cannot be zero address
-        require(
-            rewardsDistribution_ != address(0),
-            "TelcoinDistributor: cannot set to zero address"
-        );
+        require(rewardsDistribution_ != address(0), "TelcoinDistributor: cannot set to zero address");
         rewardsDistribution = rewardsDistribution_;
         emit RewardsDistributionUpdated(rewardsDistribution);
     }

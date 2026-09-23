@@ -44,7 +44,7 @@ contract DeployBalancerAdaptor is Script {
             stakingContract: 0x7fEb8FEbddB66189417f732B4221a52E23B926C4 // required by StakingRewardsAdaptor
         });
 
-        // POOL 1 — TEL80/USDC20 (existing source: 0x590779B3B868b3F3d69985165006b007c78a42ba)
+        // POOL 1 - TEL80/USDC20 (existing source: 0x590779B3B868b3F3d69985165006b007c78a42ba)
         cfgs[1] = PoolConfig({
             telcoin: 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32,
             vault: 0xBA12222222228d8Ba445958a75a0704d566BF2C8,
@@ -55,7 +55,7 @@ contract DeployBalancerAdaptor is Script {
             stakingContract: 0x8f702676830ddCA2801A4a7cDB971CDE4DF697AE // required by StakingRewardsAdaptor
         });
 
-        // POOL 2 — TEL80/WBTC20 (existing source: 0x548EE52F64a6c262bc744b90F9448Ac80359F4E9)
+        // POOL 2 - TEL80/WBTC20 (existing source: 0x548EE52F64a6c262bc744b90F9448Ac80359F4E9)
         cfgs[2] = PoolConfig({
             telcoin: 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32,
             vault: 0xBA12222222228d8Ba445958a75a0704d566BF2C8,
@@ -71,7 +71,7 @@ contract DeployBalancerAdaptor is Script {
     address internal constant OWNERSHIP_TRANSFER_RECIPIENT = 0xc1612C97537c2CC62a11FC4516367AB6F62d4B23;
 
     /// @notice Resolves the broadcast signer from environment in the same
-    ///         pattern used by UpgradeCouncilMember.s.sol — ETH_FROM for
+    ///         pattern used by UpgradeCouncilMember.s.sol - ETH_FROM for
     ///         hardware wallets, PRIVATE_KEY for key-based signing.
     function _resolveSigner() internal view returns (address signer) {
         address ethFrom = vm.envOr("ETH_FROM", address(0));
@@ -86,7 +86,7 @@ contract DeployBalancerAdaptor is Script {
     }
 
     // -------------------------------------------------------------------
-    // Main run() — resolves signer from env and delegates to runWithSigner.
+    // Main run() - resolves signer from env and delegates to runWithSigner.
     // -------------------------------------------------------------------
     function run() external returns (VotingWeightCalculator vwc) {
         address signer = _resolveSigner();

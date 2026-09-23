@@ -10,6 +10,7 @@ import {TelcoinDistributor} from "contracts/protocol/core/TelcoinDistributor.sol
 import {CouncilMember} from "contracts/sablier/core/CouncilMember.sol";
 import {ISablierV2Lockup} from "contracts/sablier/interfaces/ISablierV2Lockup.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /**
  * @title TelcoinDistributor Polygon Fork Tests
@@ -24,7 +25,7 @@ contract TelcoinDistributorForkTest is Test {
     uint256 constant FORK_BLOCK = 85_621_947;
 
     // Local aliases for shared mainnet addresses (see test/util/PolygonConstants.sol).
-    IERC20 constant TELCOIN = IERC20(PolygonConstants.TEL);
+    IERC20 constant TELCOIN = IERC20(PolygonConstants.TEL_V2);
     ISablierV2Lockup constant SABLIER_LOCKUP = ISablierV2Lockup(PolygonConstants.SABLIER_LOCKUP);
     IERC721 constant TAO_COUNCIL_NFT = IERC721(PolygonConstants.TAO_COUNCIL_NFT);
 
@@ -47,7 +48,7 @@ contract TelcoinDistributorForkTest is Test {
     // setup
     // -----
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), FORK_BLOCK);
+        ForkOrSkip.select("POLYGON_RPC_URL", FORK_BLOCK);
 
         owner = makeAddr("owner");
         nonMember = makeAddr("nonMember");
@@ -66,8 +67,7 @@ contract TelcoinDistributorForkTest is Test {
         vm.prank(owner);
         distributor = new TelcoinDistributor(TELCOIN, CHALLENGE_PERIOD, TAO_COUNCIL_NFT);
 
-        // Fund the owner with TEL and approve the distributor for the exact funded amount —
-        // mirrors the production pattern where a Safe is funded with N and approves the
+        // Fund the owner with TEL and approve the distributor for the exact funded amount - // mirrors the production pattern where a Safe is funded with N and approves the
         // distributor for that same N (not type(uint256).max). Bounds per-test pulls to the
         // owner's balance and surfaces a regression where the distributor would over-pull.
         uint256 ownerFunding = 100_000_000e2;

@@ -48,28 +48,17 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     /// @dev Emitted when a StakingRewards contract is removed from the stakingContracts array
     event StakingRemoved(StakingRewards indexed staking);
     /// @dev Emitted when configuration for a StakingRewards contract is changed
-    event StakingConfigChanged(
-        StakingRewards indexed staking,
-        StakingConfig config
-    );
+    event StakingConfigChanged(StakingRewards indexed staking, StakingConfig config);
     /// @dev Emitted when the StakingRewards Factory contract is changed
-    event StakingRewardsFactoryChanged(
-        StakingRewardsFactory indexed stakingFactory
-    );
+    event StakingRewardsFactoryChanged(StakingRewardsFactory indexed stakingFactory);
     /// @dev Emitted when updatePeriodFinish is called on a StakingRewards contract
-    event PeriodFinishUpdated(
-        StakingRewards indexed staking,
-        uint256 newPeriodFinish
-    );
+    event PeriodFinishUpdated(StakingRewards indexed staking, uint256 newPeriodFinish);
     /// @dev Emitted when a StakingRewards contract is topped up
     event ToppedUp(StakingRewards indexed staking, StakingConfig config);
 
     /// @notice initialize the contract
     /// @param reward The reward token of all the managed staking contracts
-    function initialize(
-        IERC20 reward,
-        StakingRewardsFactory factory
-    ) external initializer {
+    function initialize(IERC20 reward, StakingRewardsFactory factory) external initializer {
         //check for zero values
         require(
             address(factory) != address(0) && address(reward) != address(0),
@@ -90,27 +79,23 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     }
 
     /// @return length uint256 of stakingContracts array
-    function getStakingContract(
-        uint256 i
-    ) external view returns (StakingRewards) {
+    function getStakingContract(uint256 i) external view returns (StakingRewards) {
         return stakingContracts[i];
     }
 
     /// @notice Create a new StakingRewards contract via the factory and add it to the stakingContracts array of managed contracts
     /// @param stakingToken Staking token for the new StakingRewards contract
     /// @param config Staking configuration
-    function createNewStakingRewardsContract(
-        IERC20 stakingToken,
-        StakingConfig calldata config
-    ) external onlyRole(BUILDER_ROLE) {
+    function createNewStakingRewardsContract(IERC20 stakingToken, StakingConfig calldata config)
+        external
+        onlyRole(BUILDER_ROLE)
+    {
         // create the new staking contract
         // new staking will have owner and rewardsDistribution set to address(this)
         StakingRewards staking = StakingRewards(
             address(
                 stakingRewardsFactory.createStakingRewards(
-                    address(this),
-                    IERC20(address(rewardToken)),
-                    IERC20(stakingToken)
+                    address(this), IERC20(address(rewardToken)), IERC20(stakingToken)
                 )
             )
         );
@@ -125,15 +110,12 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     /// Do not add staking contracts with rewardToken other than the one passed to initialize this contract.
     /// @param staking Address of the StakingRewards contract to add
     /// @param config Configuration of the staking contracts
-    function addStakingRewardsContract(
-        StakingRewards staking,
-        StakingConfig calldata config
-    ) external onlyRole(BUILDER_ROLE) {
+    function addStakingRewardsContract(StakingRewards staking, StakingConfig calldata config)
+        external
+        onlyRole(BUILDER_ROLE)
+    {
         //checking if already exists
-        require(
-            !stakingExists[staking],
-            "StakingRewardsManager: Staking contract already exists"
-        );
+        require(!stakingExists[staking], "StakingRewardsManager: Staking contract already exists");
         //internal call to add new contract
         _addStakingRewardsContract(staking, config);
     }
@@ -141,10 +123,7 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     /// @notice Add a StakingRewards contract
     /// @param staking Address of the StakingRewards contract to add
     /// @param config Configuration of the staking contracts
-    function _addStakingRewardsContract(
-        StakingRewards staking,
-        StakingConfig calldata config
-    ) internal {
+    function _addStakingRewardsContract(StakingRewards staking, StakingConfig calldata config) internal {
         // in order to manage this contract we have to own it
         // staking.acceptOwnership();
         // in order to top up rewards, we have to be rewardsDistribution. this is an onlyOwner function
@@ -163,13 +142,8 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     /// @notice Remove a StakingRewards contract from the stakingContracts array. This will remove this contract's ability to manage it
     /// @dev This function WILL NOT transfer ownership of the staking contract. To do this, call `nominateOwnerForStaking`
     /// @param i Index of staking contract to remove
-    function removeStakingRewardsContract(
-        uint256 i
-    ) external onlyRole(BUILDER_ROLE) {
-        require(
-            i < stakingContracts.length,
-            "StakingRewardsManager: invalid index"
-        );
+    function removeStakingRewardsContract(uint256 i) external onlyRole(BUILDER_ROLE) {
+        require(i < stakingContracts.length, "StakingRewardsManager: invalid index");
         StakingRewards staking = stakingContracts[i];
 
         // un-mark this staking contract as included in stakingContracts
@@ -186,10 +160,10 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     /// @dev `staking` does not need to be included in `stakingContracts` for this function to succeed
     /// @param staking Address of StakingRewards contract
     /// @param config Staking config
-    function setStakingConfig(
-        StakingRewards staking,
-        StakingConfig calldata config
-    ) external onlyRole(MAINTAINER_ROLE) {
+    function setStakingConfig(StakingRewards staking, StakingConfig calldata config)
+        external
+        onlyRole(MAINTAINER_ROLE)
+    {
         // replacing old value
         stakingConfigs[staking] = config;
         emit StakingConfigChanged(staking, config);
@@ -198,14 +172,9 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     /// @notice Set the StakingRewards Factory contract
     /// @dev Factory AND StakingRewards contracts must maintain their ABI
     /// @param factory Address of StakingRewards Factory contract
-    function setStakingRewardsFactory(
-        StakingRewardsFactory factory
-    ) external onlyRole(MAINTAINER_ROLE) {
+    function setStakingRewardsFactory(StakingRewardsFactory factory) external onlyRole(MAINTAINER_ROLE) {
         //check for zero values
-        require(
-            address(factory) != address(0),
-            "StakingRewardsManager: Factory cannot be set to zero"
-        );
+        require(address(factory) != address(0), "StakingRewardsManager: Factory cannot be set to zero");
         //set new value
         stakingRewardsFactory = factory;
         emit StakingRewardsFactoryChanged(factory);
@@ -217,12 +186,10 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     /// @param tokenAddress Address of the ERC20 token contract
     /// @param tokenAmount Amount of tokens to recover
     /// @param to The account to send the recovered tokens to
-    function recoverERC20FromStaking(
-        StakingRewards staking,
-        IERC20 tokenAddress,
-        uint256 tokenAmount,
-        address to
-    ) external onlyRole(SUPPORT_ROLE) {
+    function recoverERC20FromStaking(StakingRewards staking, IERC20 tokenAddress, uint256 tokenAmount, address to)
+        external
+        onlyRole(SUPPORT_ROLE)
+    {
         // grab the tokens from the staking contract
         staking.recoverERC20(to, tokenAddress, tokenAmount);
     }
@@ -231,11 +198,7 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     /// @param tokenAddress Address of the ERC20 token contract
     /// @param tokenAmount Amount of tokens to recover
     /// @param to The account to send the recovered tokens to
-    function recoverTokens(
-        IERC20 tokenAddress,
-        uint256 tokenAmount,
-        address to
-    ) external onlyRole(SUPPORT_ROLE) {
+    function recoverTokens(IERC20 tokenAddress, uint256 tokenAmount, address to) external onlyRole(SUPPORT_ROLE) {
         //move funds
         tokenAddress.safeTransfer(to, tokenAmount);
     }
@@ -244,10 +207,7 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     /// @dev This contract must currently own the staking contract
     /// @param staking The staking contract to transfer ownership of
     /// @param newOwner Account of new owner
-    function transferStakingOwnership(
-        StakingRewards staking,
-        address newOwner
-    ) external onlyRole(ADMIN_ROLE) {
+    function transferStakingOwnership(StakingRewards staking, address newOwner) external onlyRole(ADMIN_ROLE) {
         //internal emit is called
         staking.transferOwnership(newOwner);
     }
@@ -255,11 +215,8 @@ contract StakingRewardsManager is AccessControlUpgradeable {
     /// @notice Top up multiple staking contracts
     /// @param source address from which tokens are taken
     /// @param indices array of staking contract indices
-    function topUp(
-        address source,
-        uint256[] memory indices
-    ) external onlyRole(EXECUTOR_ROLE) {
-        for (uint i = 0; i < indices.length; i++) {
+    function topUp(address source, uint256[] memory indices) external onlyRole(EXECUTOR_ROLE) {
+        for (uint256 i = 0; i < indices.length; i++) {
             // get staking contract and config
             StakingRewards staking = stakingContracts[indices[i]];
             StakingConfig memory config = stakingConfigs[staking];
@@ -268,11 +225,7 @@ contract StakingRewardsManager is AccessControlUpgradeable {
             staking.setRewardsDuration(config.rewardsDuration);
 
             // pull tokens from owner of this contract to fund the staking contract
-            rewardToken.safeTransferFrom(
-                source,
-                address(staking),
-                config.rewardAmount
-            );
+            rewardToken.safeTransferFrom(source, address(staking), config.rewardAmount);
 
             // start periods
             staking.notifyRewardAmount(config.rewardAmount);

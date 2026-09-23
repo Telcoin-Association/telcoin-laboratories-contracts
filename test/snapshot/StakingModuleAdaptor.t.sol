@@ -6,6 +6,7 @@ import {StakingModuleAdaptor} from "contracts/snapshot/adaptors/StakingModuleAda
 import {IStakingModule} from "contracts/snapshot/interfaces/IStakingModule.sol";
 import {ISource} from "contracts/snapshot/interfaces/ISource.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @title StakingModuleAdaptorTest
 /// @notice Polygon-fork tests for the StakingModule voting-weight adaptor. The adaptor reads
@@ -20,7 +21,7 @@ contract StakingModuleAdaptorTest is Test {
     StakingModuleAdaptor adaptor;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), FORK_BLOCK);
+        ForkOrSkip.select("POLYGON_RPC_URL", FORK_BLOCK);
 
         adaptor = new StakingModuleAdaptor(IStakingModule(STAKING_MODULE));
     }
