@@ -60,7 +60,7 @@ contract CreateV4Pool is TELxPoolScriptBase {
         string[] memory names = _poolsOnThisChain();
         for (uint256 i; i < names.length; ++i) {
             PoolsJson.PoolParams memory params = _poolParams(names[i]);
-            if (params.amount0Human == 0 || params.amount1Human == 0) {
+            if (!PoolsJson.amountsSet(params)) {
                 console2.log("=== %s: amounts not set in pools.json ===", names[i]);
                 continue;
             }
@@ -96,7 +96,7 @@ contract CreateV4Pool is TELxPoolScriptBase {
         _logChain(config);
         _logPool(poolName, s, key);
 
-        (uint256 amount0, uint256 amount1) = _rawAmounts(poolName, s, params.amount0Human, params.amount1Human);
+        (uint256 amount0, uint256 amount1) = _budget(poolName, s, params);
         uint160 sqrtPriceX96 = V4PoolMath.sqrtPriceX96FromAmounts(amount0, amount1);
 
         console2.log("Seed amounts:");
@@ -164,7 +164,7 @@ contract CreateV4Pool is TELxPoolScriptBase {
         PoolKey memory key = TELxPools.poolKey(s);
         poolId = key.toId();
 
-        (uint256 amount0, uint256 amount1) = _rawAmounts(poolName, s, params.amount0Human, params.amount1Human);
+        (uint256 amount0, uint256 amount1) = _budget(poolName, s, params);
         sqrtPriceX96 = V4PoolMath.sqrtPriceX96FromAmounts(amount0, amount1);
 
         _logChain(config);

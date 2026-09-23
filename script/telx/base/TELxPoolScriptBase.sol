@@ -126,6 +126,15 @@ abstract contract TELxPoolScriptBase is Script {
         return PoolsJson.rawAmounts(poolName, s, amount0Human, amount1Human);
     }
 
+    /// @dev A pool's seed budget in raw units, from the whole-token or raw field of each side.
+    function _budget(string memory poolName, TELxPools.PoolSpec memory s, PoolsJson.PoolParams memory params)
+        internal
+        pure
+        returns (uint256 amount0, uint256 amount1)
+    {
+        return PoolsJson.budget(poolName, s, params);
+    }
+
     /// @notice The catalog pools that belong to the connected chain.
     function _poolsOnThisChain() internal view returns (string[] memory names) {
         string[] memory all = TELxPools.allNames();

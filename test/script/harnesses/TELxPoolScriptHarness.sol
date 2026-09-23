@@ -34,6 +34,14 @@ contract TELxPoolScriptHarness is TELxPoolScriptBase {
         return _rawAmounts(poolName, s, amount0Human, amount1Human);
     }
 
+    function budget(string memory poolName, TELxPools.PoolSpec memory s, PoolsJson.PoolParams memory params)
+        external
+        pure
+        returns (uint256, uint256)
+    {
+        return _budget(poolName, s, params);
+    }
+
     /// @dev The pool names present in the file, read the JSON-to-catalog direction.
     function configuredPoolNames() external view returns (string[] memory) {
         return PoolsJson.configuredPoolNames();

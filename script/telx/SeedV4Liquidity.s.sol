@@ -131,7 +131,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
         string[] memory names = _poolsOnThisChain();
         for (uint256 i; i < names.length; ++i) {
             PoolsJson.PoolParams memory params = _poolParams(names[i]);
-            if (params.amount0Human == 0 || params.amount1Human == 0) {
+            if (!PoolsJson.amountsSet(params)) {
                 console2.log("=== %s: amounts not set in pools.json ===", names[i]);
                 continue;
             }
@@ -401,7 +401,7 @@ contract SeedV4Liquidity is TELxPoolScriptBase {
         p.key = TELxPools.poolKey(s);
         p.poolId = p.key.toId();
 
-        (p.amount0Budget, p.amount1Budget) = _rawAmounts(poolName, s, params.amount0Human, params.amount1Human);
+        (p.amount0Budget, p.amount1Budget) = _budget(poolName, s, params);
 
         // The price the reviewed amounts describe. For a new pool it is the opening price; for an
         // existing one it is what the live price is held against.

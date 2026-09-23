@@ -6,6 +6,7 @@ import {TELxPools} from "../../script/shared/TELxPools.sol";
 import {TELxPoolScriptBase} from "../../script/telx/base/TELxPoolScriptBase.sol";
 import {TELxPoolScriptHarness} from "./harnesses/TELxPoolScriptHarness.sol";
 import {PoolsJson} from "../../script/telx/base/PoolsJson.sol";
+import {V4PoolMath} from "../../script/shared/V4PoolMath.sol";
 
 /// @title TELxPoolsConfigTest
 /// @notice Keeps `script/telx/pools.json` and the pool catalog in `TELxPools.sol` in step with each
@@ -75,7 +76,7 @@ contract TELxPoolsConfigTest is Test {
         string[] memory names = TELxPools.allNames();
         for (uint256 i; i < names.length; ++i) {
             PoolsJson.PoolParams memory p = harness.poolParams(names[i]);
-            if (p.amount0Human == 0 || p.amount1Human == 0) {
+            if (!PoolsJson.amountsSet(p)) {
                 vm.expectRevert(abi.encodeWithSelector(PoolsJson.PoolAmountsNotSet.selector, names[i]));
                 harness.minLiquidityFloor(names[i], p);
                 continue;
@@ -115,6 +116,84 @@ contract TELxPoolsConfigTest is Test {
         (uint256 raw0, uint256 raw1) = harness.rawAmounts("X", s, 1e15, 1e15);
         assertEq(raw0, 1e15 * 1e6, "eUSD scaled");
         assertEq(raw1, 1e15 * 1e18, "TEL scaled");
+    }
+
+    /// @notice The raw field and the whole-token field describe the same budget, and so the same
+    ///         price, when they name the same amount. The raw path must not shift the price by a
+    ///         decimal factor the whole-token path gets right.
+    function test_rawAndWholeTokenFormsAgree() public view {
+        TELxPools.PoolSpec memory s = TELxPools.spec("ETHEREUM_ETH_TEL");
+
+        PoolsJson.PoolParams memory whole = _params(2, 3093);
+        PoolsJson.PoolParams memory raw = _params(0, 0);
+        raw.amount0Raw = 2e18;
+        raw.amount1Raw = 3093e18;
+
+        (uint256 w0, uint256 w1) = harness.budget("X", s, whole);
+        (uint256 r0, uint256 r1) = harness.budget("X", s, raw);
+        assertEq(r0, w0, "amount0");
+        assertEq(r1, w1, "amount1");
+        assertEq(
+            V4PoolMath.sqrtPriceX96FromAmounts(r0, r1), V4PoolMath.sqrtPriceX96FromAmounts(w0, w1), "opening price"
+        );
+    }
+
+    /// @notice A fractional seed, the case the raw field exists for: 0.002 ETH against whole TEL.
+    ///         Each side resolves through its own field, and the price matches the ratio.
+    function test_fractionalSeedResolves() public view {
+        TELxPools.PoolSpec memory s = TELxPools.spec("ETHEREUM_ETH_TEL");
+        PoolsJson.PoolParams memory p = _params(0, 3093);
+        p.amount0Raw = 2e15;
+
+        assertTrue(PoolsJson.amountsSet(p), "a raw side counts as set");
+        (uint256 raw0, uint256 raw1) = harness.budget("X", s, p);
+        assertEq(raw0, 2e15, "0.002 ETH");
+        assertEq(raw1, 3093e18, "3093 TEL");
+
+        // 3093 / 0.002 = 1,546,500 TEL per ETH
+        uint256 priceE18 = V4PoolMath.humanPriceE18(V4PoolMath.sqrtPriceX96FromAmounts(raw0, raw1), 18, 18);
+        assertApproxEqRel(priceE18, 1_546_500e18, 1e12, "TEL per ETH");
+    }
+
+    /// @notice A side set through both fields is ambiguous and refused rather than resolved in
+    ///         favour of either.
+    function test_amountSetTwiceIsRefused() public {
+        TELxPools.PoolSpec memory s = TELxPools.spec("ETHEREUM_ETH_TEL");
+        PoolsJson.PoolParams memory p = _params(1, 3093);
+        p.amount0Raw = 2e15;
+
+        vm.expectRevert(abi.encodeWithSelector(PoolsJson.AmountSetTwice.selector, "X"));
+        harness.budget("X", s, p);
+    }
+
+    /// @notice A raw amount past the whole-token ceiling, or below a millionth of a token, is
+    ///         refused. The floor is what catches a whole-token figure typed into the raw field.
+    function test_implausibleRawAmountsAreRefused() public {
+        TELxPools.PoolSpec memory s = TELxPools.spec("ETHEREUM_ETH_TEL");
+        PoolsJson.PoolParams memory p = _params(0, 3093);
+
+        // "amount0Raw": "2" meaning 2 ETH
+        p.amount0Raw = 2;
+        vm.expectRevert(abi.encodeWithSelector(PoolsJson.RawAmountImplausible.selector, "X", 2));
+        harness.budget("X", s, p);
+
+        p.amount0Raw = 1e15 * 1e18 + 1;
+        vm.expectRevert(abi.encodeWithSelector(PoolsJson.RawAmountImplausible.selector, "X", 1e15 * 1e18 + 1));
+        harness.budget("X", s, p);
+
+        // both bounds are inclusive
+        p.amount0Raw = 1e12;
+        harness.budget("X", s, p);
+        p.amount0Raw = 1e15 * 1e18;
+        harness.budget("X", s, p);
+    }
+
+    /// @notice Raw amounts can be written as decimal strings, which keep figures past 2^53 exact
+    ///         through JSON tooling that would round a bare number.
+    function test_rawAmountParsesFromString() public pure {
+        string memory json = '{"a":"2000000000000000","b":"3093000000000000000000"}';
+        assertEq(vm.parseJsonUint(json, ".a"), 2e15, "string");
+        assertEq(vm.parseJsonUint(json, ".b"), 3093e18, "string past 2^64");
     }
 
     /// @notice A name that is not in the catalog cannot have an entry either. Guards against a
@@ -166,7 +245,9 @@ contract TELxPoolsConfigTest is Test {
             widthBps: 1000,
             maxTickDeviation: 50,
             slippageBps: 50,
-            minPositionValue1Human: 0
+            minPositionValue1Human: 0,
+            amount0Raw: 0,
+            amount1Raw: 0
         });
     }
 }

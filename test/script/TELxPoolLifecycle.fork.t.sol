@@ -150,6 +150,35 @@ abstract contract TELxPoolLifecycleForkTest is Test {
         assertEq(IERC721(_positionManager()).ownerOf(tokenId), treasury, "position should belong to the recipient");
     }
 
+    /// @notice A budget set through the raw fields, a thousandth of the whole-token one, opens the
+    ///         pool at the same price and mints within the smaller budget. On Base this is a
+    ///         0.01 ETH seed, the sub-one-token case the raw fields exist for.
+    function test_createAndSeed_rawBudgetOpensAtTheSamePrice() public {
+        TELxPools.PoolSpec memory s = TELxPools.spec(poolName);
+        PoolId poolId = TELxPools.poolKey(s).toId();
+
+        PoolsJson.PoolParams memory params = _params(BAND);
+        params.amount0Raw = V4PoolMath.toRawAmount(amount0Human, s.decimals0) / 1000;
+        params.amount1Raw = V4PoolMath.toRawAmount(amount1Human, s.decimals1) / 1000;
+        params.amount0Human = 0;
+        params.amount1Human = 0;
+
+        uint256 bal0 = TELxPools.isNativeCurrency0(s) ? signer.balance : IERC20(s.currency0).balanceOf(signer);
+        uint256 bal1 = IERC20(s.currency1).balanceOf(signer);
+
+        uint256 tokenId = seedScript.createAndSeedWithOptions(poolName, params, _opts(signer));
+
+        (uint160 live,,,) = StateView(_stateView()).getSlot0(poolId);
+        assertEq(live, _intendedSqrtPrice(s), "raw budget opened at the whole-token price");
+        assertGt(IPositionManager(_positionManager()).getPositionLiquidity(tokenId), 0, "no liquidity minted");
+
+        uint256 spent0 =
+            bal0 - (TELxPools.isNativeCurrency0(s) ? signer.balance : IERC20(s.currency0).balanceOf(signer));
+        uint256 spent1 = bal1 - IERC20(s.currency1).balanceOf(signer);
+        assertLe(spent0, params.amount0Raw, "spent more currency0 than the raw budget");
+        assertLe(spent1, params.amount1Raw, "spent more currency1 than the raw budget");
+    }
+
     /// @notice A pool that already exists has a price of its own that this path does not read,
     ///         so it must refuse rather than fall through to a mint at an unchecked price.
     function test_createAndSeed_revertsWhenPoolExists() public {

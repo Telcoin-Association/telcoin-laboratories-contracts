@@ -83,6 +83,21 @@ by each token's decimals, and refuse any whole-token figure above `1e15` as a pr
 paste. This matters more than usual right now, because TEL v3 is 18 decimals where TEL v2 was 2,
 and getting that wrong moves the price by a factor of 1e16 (about 368,000 ticks).
 
+For a seed smaller than one whole token, such as 0.002 ETH, set that side through `amount0Raw` or
+`amount1Raw` instead, in the token's raw units and as a decimal string. Each side takes one field or
+the other, never both (`AmountSetTwice`), and the sides can mix:
+
+```json
+"ETHEREUM_ETH_TEL": { "amount0Raw": "2000000000000000", "amount1": 3093, "widthBps": 1000, "minPositionValue1": 0 }
+```
+
+A raw amount must lie between a millionth of a token and the same `1e15`-token ceiling
+(`RawAmountImplausible`). The floor is there to catch a whole-token figure typed into the raw field
+(`"amount0Raw": "2"` is 2 wei, not 2 ETH). A raw figure missing a few zeros is not caught: check the
+whole-token amounts and the price in the `plan` output, which prints every budget in both forms.
+The explicit-amount command-line entrypoints (`run(string,uint256,uint256,uint16)` and the `plan`
+variants) still take whole tokens only.
+
 A pool's opening price is `amount1 / amount0` in raw units, so **the amounts define the price**.
 The plan prints it three ways: the raw `sqrtPriceX96`, the tick, and the decimal-adjusted figure in
 both directions (`200.000000 TEL per eUSD`, `0.005000 eUSD per TEL`). Check the last one against

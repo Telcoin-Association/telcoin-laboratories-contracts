@@ -24,6 +24,10 @@ library PoolsJson {
     /// @param minPositionValue1Human Whole units of currency1 that the narrowest in-range position
     ///        must be worth to subscribe; the registry's per-pool liquidity floor is derived from
     ///        it at the opening price. Zero means not decided.
+    /// @param amount0Raw currency0 budget in raw units, for a seed smaller than one whole token
+    ///        (0.002 ETH). Zero means unused; a side is set through its whole-token field or its
+    ///        raw field, never both.
+    /// @param amount1Raw As `amount0Raw`, for currency1.
     struct PoolParams {
         uint256 amount0Human;
         uint256 amount1Human;
@@ -31,6 +35,8 @@ library PoolsJson {
         int24 maxTickDeviation;
         uint16 slippageBps;
         uint256 minPositionValue1Human;
+        uint256 amount0Raw;
+        uint256 amount1Raw;
     }
 
     Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
@@ -42,10 +48,19 @@ library PoolsJson {
     ///      (an amount pasted with its decimals already applied) sails past it.
     uint256 internal constant MAX_HUMAN_AMOUNT = 1e15;
 
+    /// @dev A raw amount must be at least this fraction of one whole token. The raw field exists
+    ///      for fractions of an 18-decimal token, and the likely mistake in it is the whole-token
+    ///      figure typed into the wrong field: `"amount0Raw": "2"` meaning 2 ETH is 2 wei. A
+    ///      millionth of a token is far below any real seed and far above that typo. It cannot
+    ///      bind on a 6-decimal token, where one raw unit already is a millionth.
+    uint256 internal constant MIN_RAW_FRACTION = 1e6;
+
     error PoolNotConfigured(string poolName);
     error PoolAmountsNotSet(string poolName);
     error MinPositionValueNotSet(string poolName);
     error AmountImplausible(string poolName, uint256 humanAmount);
+    error RawAmountImplausible(string poolName, uint256 rawAmount);
+    error AmountSetTwice(string poolName);
     error InvalidWidthBps(string poolName, uint256 widthBps);
     error InvalidSlippageBps(string poolName, uint256 slippageBps);
     error InvalidTickDeviation(string poolName, uint256 maxTickDeviation);
@@ -61,8 +76,10 @@ library PoolsJson {
         string memory key = string.concat(".pools.", poolName);
         if (!vm.keyExistsJson(json, key)) revert PoolNotConfigured(poolName);
 
-        params.amount0Human = vm.parseJsonUint(json, string.concat(key, ".amount0"));
-        params.amount1Human = vm.parseJsonUint(json, string.concat(key, ".amount1"));
+        params.amount0Human = _uintOrZero(json, key, "amount0");
+        params.amount1Human = _uintOrZero(json, key, "amount1");
+        params.amount0Raw = _uintOrZero(json, key, "amount0Raw");
+        params.amount1Raw = _uintOrZero(json, key, "amount1Raw");
         params.minPositionValue1Human = vm.parseJsonUint(json, string.concat(key, ".minPositionValue1"));
 
         uint256 widthBps = vm.parseJsonUint(json, string.concat(key, ".widthBps"));
@@ -102,7 +119,13 @@ library PoolsJson {
     /// @notice Zero amounts are the file's "not decided" marker. Refuse them on any path that would
     ///         set a price, move tokens, or derive a floor from the price.
     function requireAmountsSet(string memory poolName, PoolParams memory params) internal pure {
-        if (params.amount0Human == 0 || params.amount1Human == 0) revert PoolAmountsNotSet(poolName);
+        if (!amountsSet(params)) revert PoolAmountsNotSet(poolName);
+    }
+
+    /// @notice Whether both sides have a budget, through either the whole-token or the raw field.
+    function amountsSet(PoolParams memory params) internal pure returns (bool) {
+        return
+            (params.amount0Human != 0 || params.amount0Raw != 0) && (params.amount1Human != 0 || params.amount1Raw != 0);
     }
 
     /// @notice A zero floor value is likewise "not decided", and a registry must not go live with
@@ -118,10 +141,38 @@ library PoolsJson {
         pure
         returns (uint256 amount0, uint256 amount1)
     {
-        if (amount0Human > MAX_HUMAN_AMOUNT) revert AmountImplausible(poolName, amount0Human);
-        if (amount1Human > MAX_HUMAN_AMOUNT) revert AmountImplausible(poolName, amount1Human);
-        amount0 = V4PoolMath.toRawAmount(amount0Human, s.decimals0);
-        amount1 = V4PoolMath.toRawAmount(amount1Human, s.decimals1);
+        amount0 = _side(poolName, amount0Human, 0, s.decimals0);
+        amount1 = _side(poolName, amount1Human, 0, s.decimals1);
+    }
+
+    /// @notice A pool's seed budget in raw units, from whichever field each side is set through.
+    ///         This is what every price and mint is computed from.
+    function budget(string memory poolName, TELxPools.PoolSpec memory s, PoolParams memory params)
+        internal
+        pure
+        returns (uint256 amount0, uint256 amount1)
+    {
+        amount0 = _side(poolName, params.amount0Human, params.amount0Raw, s.decimals0);
+        amount1 = _side(poolName, params.amount1Human, params.amount1Raw, s.decimals1);
+    }
+
+    /// @dev One side of the budget. A raw amount is held to the same ceiling as a whole-token one,
+    ///      expressed in raw units, plus the `MIN_RAW_FRACTION` floor.
+    function _side(string memory poolName, uint256 human, uint256 raw, uint8 decimals)
+        private
+        pure
+        returns (uint256)
+    {
+        if (raw == 0) {
+            if (human > MAX_HUMAN_AMOUNT) revert AmountImplausible(poolName, human);
+            return V4PoolMath.toRawAmount(human, decimals);
+        }
+        if (human != 0) revert AmountSetTwice(poolName);
+        uint256 oneToken = 10 ** decimals;
+        if (raw > MAX_HUMAN_AMOUNT * oneToken || raw < oneToken / MIN_RAW_FRACTION) {
+            revert RawAmountImplausible(poolName, raw);
+        }
+        return raw;
     }
 
     // -----------
@@ -134,7 +185,7 @@ library PoolsJson {
         pure
         returns (uint160)
     {
-        (uint256 amount0, uint256 amount1) = rawAmounts(poolName, s, params.amount0Human, params.amount1Human);
+        (uint256 amount0, uint256 amount1) = budget(poolName, s, params);
         return V4PoolMath.sqrtPriceX96FromAmounts(amount0, amount1);
     }
 
@@ -168,6 +219,18 @@ library PoolsJson {
 
     function _json() private view returns (string memory) {
         return vm.readFile(string.concat(vm.projectRoot(), "/", PATH));
+    }
+
+    /// @dev A per-pool value when the entry has one, otherwise zero. Accepts a JSON number or a
+    ///      decimal string; raw amounts past 2^53 should be strings, since not every JSON tool
+    ///      keeps integers that large exact.
+    function _uintOrZero(string memory json, string memory poolKey, string memory field)
+        private
+        view
+        returns (uint256)
+    {
+        string memory path = string.concat(poolKey, ".", field);
+        return vm.keyExistsJson(json, path) ? vm.parseJsonUint(json, path) : 0;
     }
 
     /// @dev A per-pool value when the entry has one, otherwise the file-level default.
