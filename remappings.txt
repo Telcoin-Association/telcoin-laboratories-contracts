@@ -7,3 +7,10 @@
 forge-std/=lib/forge-std/src/
 permit2/=lib/permit2/
 solmate/=lib/v4-core/lib/solmate/
+forge-deploy-utils/=lib/forge-deploy-utils/src/
+@safe-utils/=lib/forge-deploy-utils/lib/safe-utils/src/
+safe-smart-account/=lib/forge-deploy-utils/lib/safe-utils/lib/safe-smart-account/contracts/
+solidity-http/=lib/forge-deploy-utils/lib/safe-utils/lib/solidity-http/src/
+solidity-stringutils/=lib/forge-deploy-utils/lib/safe-utils/lib/solidity-stringutils/src/
+lib/forge-deploy-utils/:forge-std/=lib/forge-std/src/
+lib/forge-deploy-utils/lib/safe-utils/:forge-std/=lib/forge-std/src/

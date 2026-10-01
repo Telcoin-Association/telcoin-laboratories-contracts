@@ -13,11 +13,7 @@ import {RewardsDistributionRecipient, Ownable} from "../abstract/RewardsDistribu
  * @notice This contract handles staking and rewards for a particular token.
  * It inherits functionality from RewardsDistributionRecipient, ReentrancyGuard, and Pausable contracts.
  */
-contract StakingRewards is
-    RewardsDistributionRecipient,
-    ReentrancyGuard,
-    Pausable
-{
+contract StakingRewards is RewardsDistributionRecipient, ReentrancyGuard, Pausable {
     using Address for address;
     using SafeERC20 for IERC20;
 
@@ -56,11 +52,9 @@ contract StakingRewards is
      * @param rewardsToken_ The address of the rewards token contract.
      * @param stakingToken_ The address of the staking token contract.
      */
-    constructor(
-        address rewardsDistribution_,
-        IERC20 rewardsToken_,
-        IERC20 stakingToken_
-    ) Ownable(rewardsDistribution_) {
+    constructor(address rewardsDistribution_, IERC20 rewardsToken_, IERC20 stakingToken_)
+        Ownable(rewardsDistribution_)
+    {
         rewardsToken = rewardsToken_;
         stakingToken = stakingToken_;
         rewardsDistribution = rewardsDistribution_;
@@ -102,12 +96,7 @@ contract StakingRewards is
             return rewardPerTokenStored;
         }
 
-        return
-            rewardPerTokenStored +
-            ((lastTimeRewardApplicable() - lastUpdateTime) *
-                rewardRate *
-                1e18) /
-            _totalSupply;
+        return rewardPerTokenStored + ((lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18) / _totalSupply;
     }
 
     /**
@@ -118,11 +107,8 @@ contract StakingRewards is
     function earned(address account) public view returns (uint256) {
         // Calculate the earned reward by first multiplying the balance of the account with the difference between the current reward per token and the already paid reward per token for the account
         // Then divide by 1e18 to adjust for decimals and finally add the rewards already allocated to the account
-        return
-            ((_balances[account] *
-                (rewardPerToken() - userRewardPerTokenPaid[account])) / 1e18) /
-            EQUALIZING_FACTOR +
-            rewards[account];
+        return ((_balances[account] * (rewardPerToken() - userRewardPerTokenPaid[account])) / 1e18) / EQUALIZING_FACTOR
+            + rewards[account];
     }
 
     /**
@@ -140,9 +126,7 @@ contract StakingRewards is
      * @dev This function is protected by the nonReentrant modifier to prevent double spending.
      * @param amount The amount of tokens to stake.
      */
-    function stake(
-        uint256 amount
-    ) external nonReentrant whenNotPaused updateReward(_msgSender()) {
+    function stake(uint256 amount) external nonReentrant whenNotPaused updateReward(_msgSender()) {
         // Check if the staking amount is greater than 0
         require(amount > 0, "Cannot stake 0");
         // Increase the total supply of the staking token by the staked amount
@@ -160,9 +144,7 @@ contract StakingRewards is
      * @dev This function is protected by the nonReentrant modifier to prevent double spending.
      * @param amount The amount of tokens to withdraw.
      */
-    function withdraw(
-        uint256 amount
-    ) public nonReentrant updateReward(_msgSender()) {
+    function withdraw(uint256 amount) public nonReentrant updateReward(_msgSender()) {
         // Check if the withdrawal amount is greater than 0
         require(amount > 0, "Cannot withdraw 0");
         // Decrease the total supply of the staking token by the withdrawn amount
@@ -208,9 +190,7 @@ contract StakingRewards is
      * @dev It's an overridden function, which can only be called by the reward distribution address
      * @param reward The amount of reward for the next period
      */
-    function notifyRewardAmount(
-        uint256 reward
-    ) external override onlyRewardsDistribution updateReward(address(0)) {
+    function notifyRewardAmount(uint256 reward) external override onlyRewardsDistribution updateReward(address(0)) {
         // If the current block timestamp is after the finish of the rewards period, set the new reward rate
         if (block.timestamp >= periodFinish) {
             rewardRate = (reward * EQUALIZING_FACTOR) / rewardsDuration;
@@ -218,17 +198,12 @@ contract StakingRewards is
             // If we're still within the rewards period, add the leftover rewards to the new reward
             uint256 remaining = periodFinish - block.timestamp;
             uint256 leftover = remaining * rewardRate;
-            rewardRate =
-                ((reward * EQUALIZING_FACTOR) + leftover) /
-                rewardsDuration;
+            rewardRate = ((reward * EQUALIZING_FACTOR) + leftover) / rewardsDuration;
         }
         // Check the balance of the rewards token in this contract
-        uint balance = rewardsToken.balanceOf(address(this));
+        uint256 balance = rewardsToken.balanceOf(address(this));
         // Make sure that the new reward rate isn't higher than what the contract can currently pay out
-        require(
-            rewardRate <= (balance * EQUALIZING_FACTOR) / rewardsDuration,
-            "Provided reward too high"
-        );
+        require(rewardRate <= (balance * EQUALIZING_FACTOR) / rewardsDuration, "Provided reward too high");
         // Update the last update time and the end of the rewards period
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + rewardsDuration;
@@ -242,16 +217,9 @@ contract StakingRewards is
      * @param tokenAddress The address of the token to recover
      * @param tokenAmount The amount of tokens to recover
      */
-    function recoverERC20(
-        address destination,
-        IERC20 tokenAddress,
-        uint256 tokenAmount
-    ) external onlyOwner {
+    function recoverERC20(address destination, IERC20 tokenAddress, uint256 tokenAmount) external onlyOwner {
         // Check if the token to recover is not the staking token, as you don't want to allow withdrawal of the staked tokens
-        require(
-            tokenAddress != stakingToken,
-            "Cannot withdraw the staking token"
-        );
+        require(tokenAddress != stakingToken, "Cannot withdraw the staking token");
         // Transfer the specified token amount from this contract to the specified destination address
         tokenAddress.safeTransfer(destination, tokenAmount);
         // Emit a Recovered event with the token's address and recovered amount

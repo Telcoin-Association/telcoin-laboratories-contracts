@@ -22,10 +22,7 @@ contract StakingRewardsFactory is Ownable {
 
     // declares a new staking contract
     event NewStakingRewardsContract(
-        uint256 indexed index,
-        IERC20 indexed rewardToken,
-        IERC20 indexed stakingToken,
-        StakingRewards implementation
+        uint256 indexed index, IERC20 indexed rewardToken, IERC20 indexed stakingToken, StakingRewards implementation
     );
 
     constructor(address implementation) Ownable(_msgSender()) {
@@ -39,26 +36,19 @@ contract StakingRewardsFactory is Ownable {
      * @param stakingToken The address of the staking token contract.
      * @return The address of the newly created StakingRewards contract
      */
-    function createStakingRewards(
-        address rewardsDistribution,
-        IERC20 rewardsToken,
-        IERC20 stakingToken
-    ) external onlyOwner returns (StakingRewards) {
+    function createStakingRewards(address rewardsDistribution, IERC20 rewardsToken, IERC20 stakingToken)
+        external
+        onlyOwner
+        returns (StakingRewards)
+    {
         // create contract
-        StakingRewards stakingRewards = new StakingRewards(
-            rewardsDistribution,
-            rewardsToken,
-            stakingToken
-        );
+        StakingRewards stakingRewards = new StakingRewards(rewardsDistribution, rewardsToken, stakingToken);
 
         // add contract to list
         stakingRewardsContracts.push(stakingRewards);
         //emit values associated
         emit NewStakingRewardsContract(
-            getStakingRewardsContractCount() - 1,
-            rewardsToken,
-            stakingToken,
-            StakingRewards(stakingRewards)
+            getStakingRewardsContractCount() - 1, rewardsToken, stakingToken, StakingRewards(stakingRewards)
         );
 
         return StakingRewards(stakingRewards);
@@ -69,9 +59,7 @@ contract StakingRewardsFactory is Ownable {
      * @param index The index of the StakingRewards contract
      * @return The address of the StakingRewards contract
      */
-    function getStakingRewardsContract(
-        uint index
-    ) external view returns (StakingRewards) {
+    function getStakingRewardsContract(uint256 index) external view returns (StakingRewards) {
         return stakingRewardsContracts[index];
     }
 
@@ -79,7 +67,7 @@ contract StakingRewardsFactory is Ownable {
      * @notice Get the total number of StakingRewards contracts created by this factory
      * @return The total number of StakingRewards contracts
      */
-    function getStakingRewardsContractCount() public view returns (uint) {
+    function getStakingRewardsContractCount() public view returns (uint256) {
         return stakingRewardsContracts.length;
     }
 }

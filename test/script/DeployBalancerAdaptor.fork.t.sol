@@ -9,6 +9,7 @@ import {VotingWeightCalculator} from "../../contracts/snapshot/core/VotingWeight
 import {ISource} from "../../contracts/snapshot/interfaces/ISource.sol";
 import {TestConstants} from "../util/TestConstants.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /// @notice Polygon-fork test of DeployBalancerAdaptor. Exercises the full
 ///         `runWithSigner(signer)` flow: deploys VotingWeightCalculator,
@@ -28,7 +29,7 @@ contract DeployBalancerAdaptorForkTest is Test {
     // ever change, update BOTH. Consider this the single-source-of-truth
     // reference; the table below is the mirror.
     // ---------------------------------------------------------------------
-    address internal constant TELCOIN = PolygonConstants.TEL;
+    address internal constant TELCOIN = PolygonConstants.TEL_V2;
     address internal constant BALANCER_VAULT = PolygonConstants.BALANCER_VAULT;
     address internal constant PENDING_OWNER = 0xc1612C97537c2CC62a11FC4516367AB6F62d4B23;
 
@@ -46,7 +47,7 @@ contract DeployBalancerAdaptorForkTest is Test {
     function setUp() public {
         uint256 forkBlock =
             vm.envOr("FORK_BLOCK_NUMBER", TestConstants.DEFAULT_POLYGON_FORK_BLOCK);
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), forkBlock);
+        ForkOrSkip.select("POLYGON_RPC_URL", forkBlock);
         deployer = makeAddr("deployer");
         deployScript = new DeployBalancerAdaptor();
     }
@@ -57,7 +58,7 @@ contract DeployBalancerAdaptorForkTest is Test {
     //
     // vm.envOr appears to cache within a single forge test invocation,
     // which makes split-test coverage of the three env-var paths
-    // unreliable — one test sets ETH_FROM, a later test can't flip it
+    // unreliable - one test sets ETH_FROM, a later test can't flip it
     // back because the cached first-read value sticks. The robust
     // workaround is to exercise all three paths sequentially in a
     // single test with a fresh DeployBalancerAdaptor instance per path.

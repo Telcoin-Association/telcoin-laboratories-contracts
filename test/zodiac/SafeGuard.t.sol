@@ -8,6 +8,7 @@ import {IReality} from "contracts/zodiac/interfaces/IReality.sol";
 import {IGuard} from "contracts/zodiac/interfaces/IGuard.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {MockReality} from "./mocks/MockReality.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 contract SafeGuardTest is Test {
     // ---------------------------------------------------------------
@@ -27,7 +28,7 @@ contract SafeGuardTest is Test {
     Enum.Operation constant OP = Enum.Operation.Call;
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("POLYGON_RPC_URL"), FORK_BLOCK);
+        ForkOrSkip.select("POLYGON_RPC_URL", FORK_BLOCK);
 
         owner = address(this);
         nonOwner = makeAddr("nonOwner");

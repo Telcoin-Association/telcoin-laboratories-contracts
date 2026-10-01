@@ -9,6 +9,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISablierV2Lockup} from "../../contracts/sablier/interfaces/ISablierV2Lockup.sol";
 import {IProxyAdminLike} from "./interfaces/IProxyAdminLike.sol";
 import {UpgradeCouncilMemberHarness} from "./harnesses/UpgradeCouncilMemberHarness.sol";
+import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 contract CouncilMemberUpgradeForkTest is Test {
     // ---------
@@ -112,15 +113,8 @@ contract CouncilMemberUpgradeForkTest is Test {
     // -----
 
     function setUp() external {
-        string memory rpcUrl = vm.envString("POLYGON_RPC_URL");
-        uint256 forkBlock = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
-
-        if (forkBlock == 0) {
-            forkId = vm.createFork(rpcUrl, uint256(84352545));
-        } else {
-            forkId = vm.createFork(rpcUrl, forkBlock);
-        }
-        vm.selectFork(forkId);
+        uint256 forkBlock = vm.envOr("FORK_BLOCK_NUMBER", uint256(84352545));
+        forkId = ForkOrSkip.select("POLYGON_RPC_URL", forkBlock);
 
         script = new UpgradeCouncilMemberHarness();
 
