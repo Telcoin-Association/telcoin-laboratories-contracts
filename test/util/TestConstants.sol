@@ -30,4 +30,12 @@ library TestConstants {
     ///         and a recently minted v4 position. Both pools were initialized on-chain after
     ///         block 84.3M, so an earlier fork would make `validPool(...)` return false.
     uint256 internal constant PRODUCTION_STATE_POLYGON_FORK_BLOCK = 85_800_000;
+
+    /// @notice Polygon fork block for tests that need TEL v3 (`0x7E13...0731`) on Polygon:
+    ///         the council-stream deploy script and the CouncilMember fork suite.
+    /// @dev    TEL v3 was first deployed on Polygon at block 91_565_963 (2026-08-06), so every
+    ///         earlier constant in this file forks to a chain where TEL v3 has no code. This block
+    ///         (2026-11) also includes the live year-2 council streams (IDs 666-671), which end
+    ///         2026-11-25 18:11:19 UTC.
+    uint256 internal constant TEL_V3_POLYGON_FORK_BLOCK = 96_800_000;
 }

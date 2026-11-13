@@ -10,12 +10,13 @@ import {ISablierV2Lockup} from "../../contracts/sablier/interfaces/ISablierV2Loc
 import {TestSablierV2Lockup} from "../../contracts/sablier/test/TestSablierV2Lockup.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {PolygonConstants} from "../util/PolygonConstants.sol";
+import {TestConstants} from "../util/TestConstants.sol";
 import {RevertingLockup} from "./mocks/RevertingLockup.sol";
 import {ForkOrSkip} from "../util/ForkOrSkip.sol";
 
 /**
  * @title CouncilMemberForkTest
- * @notice Fork-backed test suite using the live Polygon TEL token address.
+ * @notice Fork-backed test suite using the live Polygon TEL v3 token address.
  *
  * @dev This is intentionally not a "full mainnet integration" test, because the
  *      lockup is still a deterministic test harness.
@@ -29,7 +30,9 @@ contract CouncilMemberForkTest is Test {
     // ---------
 
     // Local alias for shared mainnet address (see test/util/PolygonConstants.sol).
-    address internal constant TEL_ADDRESS = PolygonConstants.TEL_V2;
+    /// @dev Council streams move to TEL v3 (18 decimals) from year 3 onwards, so the suite
+    ///      exercises CouncilMember against the live TEL v3 token.
+    address internal constant TEL_ADDRESS = PolygonConstants.TEL_V3;
 
     bytes32 internal constant GOVERNANCE_COUNCIL_ROLE =
         keccak256("GOVERNANCE_COUNCIL_ROLE");
@@ -64,7 +67,14 @@ contract CouncilMemberForkTest is Test {
     // -----
 
     function setUp() public {
-        forkId = ForkOrSkip.select("POLYGON_RPC_URL");
+        // Pinned to a block where TEL v3 exists on Polygon (it has no code before 91_565_963).
+        forkId = ForkOrSkip.select(
+            "POLYGON_RPC_URL",
+            vm.envOr(
+                "FORK_BLOCK_NUMBER",
+                TestConstants.TEL_V3_POLYGON_FORK_BLOCK
+            )
+        );
 
         telcoin = IERC20(TEL_ADDRESS);
 
@@ -134,7 +144,7 @@ contract CouncilMemberForkTest is Test {
         assertEq(address(councilMemberContract.TELCOIN()), TEL_ADDRESS);
         assertEq(
             IERC20Metadata(address(councilMemberContract.TELCOIN())).decimals(),
-            2
+            18
         );
     }
 
