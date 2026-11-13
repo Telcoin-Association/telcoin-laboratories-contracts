@@ -16,8 +16,30 @@ import {Broker, Lockup, LockupLinear} from "@sablier/v2-core/src/types/DataTypes
 import {UD60x18} from "@prb/math/src/UD60x18.sol";
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {PolygonAddresses} from "../shared/PolygonAddresses.sol";
 
 contract CreateCouncilNftsAndStreams is Script {
+    /// @notice When every year-3 stream starts: 2026-11-25 18:12:37 UTC, the moment the last
+    ///         year-2 council stream ends. The year-2 streams (IDs 666-671) were created in
+    ///         separate blocks and end between 18:11:19 and 18:12:37 UTC, so starting at the
+    ///         latest end means no year-3 stream overlaps any year-2 stream.
+    /// @dev    A fixed start lets the script be broadcast ahead of time: the streams are funded
+    ///         at creation but nothing vests until this moment.
+    uint40 public constant STREAM_START_TIME = 1_795_630_357;
+
+    /// @notice How long before `STREAM_START_TIME` the script must finish broadcasting.
+    /// @dev    Every mint after a council's first triggers `_retrieve()`, which splits whatever
+    ///         has vested among the members minted so far. If a stream has already started when
+    ///         the NFTs are minted, everything vested up to then goes to the first member alone.
+    ///         Minting before the stream is wired is not possible: until `updateID` the proxy
+    ///         points at stream 0, which does not exist, so the second mint would revert. The
+    ///         script therefore refuses to run this close to the start. The margin covers a
+    ///         Ledger broadcast, where each transaction is confirmed by hand.
+    uint40 public constant BROADCAST_MARGIN = 1 hours;
+
+    /// @notice How long each stream runs, with no cliff. Matches year 2.
+    uint40 public constant STREAM_DURATION = 52 weeks;
+
     struct CouncilConfig {
         string name;
         string symbol;
@@ -171,10 +193,11 @@ contract CreateCouncilNftsAndStreams is Script {
         // 1. Approve TEL to the lockup contract (funder must be msg.sender)
         tel.approve(address(lockupLinear), totalAmount);
 
-        // 2. Durations - 1 year, no cliff
-        LockupLinear.Durations memory durations = LockupLinear.Durations({
+        // 2. Timestamps - fixed start, 52 weeks, no cliff
+        LockupLinear.Timestamps memory timestamps = LockupLinear.Timestamps({
+            start: STREAM_START_TIME,
             cliff: 0,
-            total: 52 weeks
+            end: STREAM_START_TIME + STREAM_DURATION
         });
 
         // 3. Broker - N/A - set to zero
@@ -184,20 +207,20 @@ contract CreateCouncilNftsAndStreams is Script {
         });
 
         // 4. Build params
-        LockupLinear.CreateWithDurations memory params = LockupLinear
-            .CreateWithDurations({
+        LockupLinear.CreateWithTimestamps memory params = LockupLinear
+            .CreateWithTimestamps({
                 sender: sender,
                 recipient: recipient,
                 totalAmount: totalAmount,
                 asset: tel,
                 cancelable: true,
                 transferable: false,
-                durations: durations,
+                timestamps: timestamps,
                 broker: broker
             });
 
         // 5. Create the stream - this pulls `totalAmount` TEL from msg.sender
-        streamId = lockupLinear.createWithDurations(params);
+        streamId = lockupLinear.createWithTimestamps(params);
     }
 
     /// @notice Pure function returning the council-NFT parameter table for
@@ -215,7 +238,7 @@ contract CreateCouncilNftsAndStreams is Script {
         // TAO Config
         councilConfigs[0].name = "Telcoin Autonomous Ops";
         councilConfigs[0].symbol = "TAONFT";
-        councilConfigs[0].deposit = 454545450; // based on previous year streams
+        councilConfigs[0].deposit = 4_545_454.5e18; // TEL v3 (18 decimals); same TEL as year-2 stream 666
         councilConfigs[0]
             .safeAddress = 0xF4bC288d616C4f57071a57f5A4050B5e516fe7e5; //TAO: new safe
 
@@ -231,13 +254,13 @@ contract CreateCouncilNftsAndStreams is Script {
         // Platform Council Config
         councilConfigs[1].name = "Telcoin Association - Platform Council";
         councilConfigs[1].symbol = "PcNFT";
-        councilConfigs[1].deposit = 727272720; // based on previous year streams
+        councilConfigs[1].deposit = 7_272_727.2e18; // TEL v3 (18 decimals); same TEL as year-2 stream 667
         councilConfigs[1]
             .safeAddress = 0x6e130C92E6F4d71B081C4d5B664Cb210E55dBAcf; //Platform Council safe
 
         address[] memory members1 = new address[](8);
         members1[0] = 0x5C49F2fBf52C81d48cE95BB82efA7e760AA2F7de;
-        members1[1] = 0x50360eE480809A5361439DA5d009a907e2ABf4B9;
+        members1[1] = 0x9246B2C653015e28087b63dB3B9A7afE4c6eb408; // also holds members1[6]: two Platform seats
         members1[2] = 0x36AC0C07f05E52A749e1E6Cc58ab52d1c5437556;
         members1[3] = 0xd9C06550cf95435e97e932C0F916ef4a7d24494C;
         members1[4] = 0xd4e68397406c2B95066d55Caa28752E20b92e211;
@@ -250,7 +273,7 @@ contract CreateCouncilNftsAndStreams is Script {
         // Treasury Council Config
         councilConfigs[2].name = "Telcoin Association - Treasury Council";
         councilConfigs[2].symbol = "TcNFT";
-        councilConfigs[2].deposit = 363636360; // based on previous year streams
+        councilConfigs[2].deposit = 3_636_363.6e18; // TEL v3 (18 decimals); same TEL as year-2 stream 668
         councilConfigs[2]
             .safeAddress = 0x2580CCB2BE946AD98eFfA7f4B76148Bed319011c; //Treasury safe
 
@@ -265,7 +288,7 @@ contract CreateCouncilNftsAndStreams is Script {
         // Compliance Council Config
         councilConfigs[3].name = "Telcoin Association - Compliance Council";
         councilConfigs[3].symbol = "CcNFT";
-        councilConfigs[3].deposit = 363636360; // based on previous year streams
+        councilConfigs[3].deposit = 3_636_363.6e18; // TEL v3 (18 decimals); same TEL as year-2 stream 669
         councilConfigs[3]
             .safeAddress = 0x0454D03C2010862277262Cb306749e829ee97591; //Compliance safe
 
@@ -273,14 +296,14 @@ contract CreateCouncilNftsAndStreams is Script {
         members3[0] = 0x5e671bB9F225F3090DA69BB374a648d0F15fF3fB;
         members3[1] = 0x19BeC353c5eFdEBEEdfA88698BcF89225F9325EE;
         members3[2] = 0x51b2695e7f21fcB56f34a3eC7d44B482C2eFE4d9;
-        members3[3] = 0x51b2695e7f21fcB56f34a3eC7d44B482C2eFE4d9;
+        members3[3] = 0x4EF34f7B73FE070e007813DBcf62A426eaa45E73;
 
         councilConfigs[3].members = members3;
 
         // TAN Council Config
         councilConfigs[4].name = "Telcoin Association - TAN Council";
         councilConfigs[4].symbol = "TANNFT";
-        councilConfigs[4].deposit = 545454540; // based on previous year streams
+        councilConfigs[4].deposit = 5_454_545.4e18; // TEL v3 (18 decimals); same TEL as year-2 stream 670
         councilConfigs[4]
             .safeAddress = 0x8Dcf8d134F22aC625A7aFb39514695801CD705b5; //TAN safe
 
@@ -297,7 +320,7 @@ contract CreateCouncilNftsAndStreams is Script {
         // TELx Council Config
         councilConfigs[5].name = "Telcoin Association - TELx Council";
         councilConfigs[5].symbol = "TELxNFT";
-        councilConfigs[5].deposit = 545454540; // based on previous year streams
+        councilConfigs[5].deposit = 5_454_545.4e18; // TEL v3 (18 decimals); same TEL as year-2 stream 671
         councilConfigs[5]
             .safeAddress = 0x583D596b0a79C0e83C87851eA9FB1A91e80290B2; //TELx safe
 
@@ -325,8 +348,10 @@ contract CreateCouncilNftsAndStreams is Script {
             // Fallback to private key env check
             uint256 pk = vm.envOr("PRIVATE_KEY", uint256(0));
             if (pk == 0) {
-                /// @dev runs outside private key/ledger use MEXC address since it reliably holds enough TEL
-                sablierSender = 0x576b81F0c21EDBc920ad63FeEEB2b0736b018A58;
+                /// @dev No signer configured: simulate as an address that holds enough TEL v3 on
+                ///      Polygon, so a dry run gets past the stream deposits. It can never broadcast,
+                ///      since its key is not available here.
+                sablierSender = 0x20dAAcb0864fF9a5e07d05Ea16Fa56cD00fdC16D;
             } else {
                 sablierSender = vm.addr(pk);
             }
@@ -339,8 +364,13 @@ contract CreateCouncilNftsAndStreams is Script {
     ///         Mirrors the `runWithSigner` pattern in UpgradeCouncilMember.s.sol.
     function runWithSigner(address sablierSender) public {
         console2.log("Running with msg.sender: ", sablierSender);
+        require(
+            block.timestamp + BROADCAST_MARGIN <= STREAM_START_TIME,
+            "Too close to STREAM_START_TIME: NFTs must be minted before the streams start vesting"
+        );
 
-        IERC20 tel = IERC20(0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32);
+        // Council streams pay out in TEL v3 (18 decimals) from year 3 onwards.
+        IERC20 tel = IERC20(PolygonAddresses.TEL_V3);
         address sablierLockupAddr = 0x8D87c5eddb5644D1a714F85930Ca940166e465f0;
 
         // Same on-chain contract, two interfaces:
@@ -449,7 +479,10 @@ contract CreateCouncilNftsAndStreams is Script {
             require(sablierStreamInfo.isCancelable == true);
             require(sablierStreamInfo.wasCanceled == false);
             require(sablierStreamInfo.asset == tel);
-            require(sablierStreamInfo.endTime > sablierStreamInfo.startTime);
+            require(sablierStreamInfo.startTime == STREAM_START_TIME);
+            require(
+                sablierStreamInfo.endTime == STREAM_START_TIME + STREAM_DURATION
+            );
             require(sablierStreamInfo.isDepleted == false);
             require(sablierStreamInfo.isStream == true);
             require(sablierStreamInfo.isTransferable == false);

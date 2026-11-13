@@ -6,11 +6,11 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @title MockTelcoin
 /// @notice Simple ERC20 stand-in for CouncilMember tests. Self-mintable so tests can fund
 ///         arbitrary accounts without going through a deploy + transfer dance. Decimals are
-///         set to 2 to match the Polygon TEL token.
+///         set to 18 to match TEL v3, the token council streams use from year 3 onwards.
 contract MockTelcoin is IERC20 {
     string public name = "Telcoin";
     string public symbol = "TEL";
-    uint8 public decimals = 2;
+    uint8 public decimals = 18;
 
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
