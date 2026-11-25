@@ -16,12 +16,13 @@ library PolygonAddresses {
     // Telcoin tokens
     // -----------
 
-    /// @notice TEL v3, 18 decimals. The token all new TELx pools pair against.
+    /// @notice TEL v3, 18 decimals. The token all new TELx pools pair against, and the token the
+    ///         council streams pay out in from year 3 onwards.
     address internal constant TEL_V3 = CrossChainAddresses.TEL_V3;
 
     /// @notice Legacy PoS-bridged TEL, 2 decimals. Still the token behind the Balancer pools, the
-    ///         Sablier council streams and the legacy TELx v4 pools, so it stays. Never use it in
-    ///         TEL v3 pool math: the decimal difference is a factor of 1e16.
+    ///         year-2 Sablier council streams (IDs 666-671) and the legacy TELx v4 pools, so it
+    ///         stays. Never use it in TEL v3 pool math: the decimal difference is a factor of 1e16.
     address internal constant TEL_V2 = 0xdF7837DE1F2Fa4631D716CF2502f8b230F1dcc32;
 
     /// @notice Telcoin eUSD, 6 decimals.
